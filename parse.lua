@@ -1,26 +1,42 @@
+local stack = require "stack"
+
 function tokenize(code)
+	local equalCommentCurrentCount = -1
+
     local tokens = {}
     local sep = " "
 
     for str in code:gmatch("%S+") do
-        table.insert(tokens, str)
+		::back_to_start::
+		if str:find("--[", 1, true) then
+			local _, indexAt = str:find("--[", 1, true)
+			local _, endAt = str:find("[", indexAt + 1, true)
+			if endAt then
+				equalCommentCurrentCount = endAt - indexAt - 1
+			end
+		end
+
+		if equalCommentCurrentCount >= 0 and str:find("]", 1, true) then
+			local indexAt = str:find("]", 1, true)
+			local endAt = str:find("]", indexAt + 1, true)
+
+			if (endAt - indexAt - 1) == equalCommentCurrentCount then
+				equalCommentCurrentCount = -1
+				str = str:sub(endAt + 1)
+				goto back_to_start
+			end
+		end
+
+		if str:find("--", 1, true) then goto continue end
+		
+		if equalCommentCurrentCount < 0 then
+        	table.insert(tokens, str)
+		end
+
+		::continue::
     end
 
     return tokens
-end
-
--- Had to use gemini lol regex is difficult
-function removeComments(code)
-    -- 1. Remove Long Bracket Comments (e.g., --[[ ... ]], --[=[ ... ]=])
-    -- The pattern captures the optional balancing equals signs (Group 1) and uses %1 to ensure the closing brackets match the opening.
-    -- We replace the entire matched comment block with an empty string "".
-    code = code:gsub("---%[(=*)%[.-%]%1%]", "")
-
-    -- 2. Remove Single Line Comments (e.g., -- comment until end of line)
-    -- This matches "--" followed by any characters that are not a newline, replacing it with "".
-    code = code:gsub("---[^\n]*", "")
-
-    return code
 end
 
 local scriptName = arg[1]
@@ -41,9 +57,7 @@ else
     return
 end
 
-local commentRemoved = removeComments(rawContent)
-
-local tokens = tokenize(commentRemoved)
+local tokens = tokenize(rawContent)
 
 for i, v in ipairs(tokens) do
     print(i, v)
