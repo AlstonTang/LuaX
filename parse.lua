@@ -10,7 +10,7 @@ function tokenize(code)
 		::back_to_start::
 		if str:find("--[", 1, true) then
 			local _, indexAt = str:find("--[", 1, true)
-			local _, endAt = str:find("[", indexAt + 1, true)
+			local endAt = str:find("[", indexAt + 1, true)
 			if endAt then
 				equalCommentCurrentCount = endAt - indexAt - 1
 			end
@@ -27,13 +27,15 @@ function tokenize(code)
 			end
 		end
 
-		if str:find("--", 1, true) then goto continue end
+		if str:find("--", 1, true) then
+			local _, indexAt = str:find("--", 1, true)
+			str = str:sub(indexAt + 1)
+			goto back_to_start
+		end
 		
 		if equalCommentCurrentCount < 0 then
         	table.insert(tokens, str)
 		end
-
-		::continue::
     end
 
     return tokens
