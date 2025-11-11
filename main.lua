@@ -1,45 +1,31 @@
 local translator = require("translator")
+local cpp_translator = require("cpp_translator")
 
-local code = "local x = myFunc(\"hello\")"
+-- More complex Lua code example to test translation
+local code = [[
+local myTable = {10, "hello", key = 100, anotherKey = "world"}
+local result = myLib.calculate(myTable.key, "test")
+local message = "Processing complete: " .. result .. ".\n"
+print(message)
+
+x = (10 + 20) * 30
+local y = x / 2
+]]
+
+print("--- Original Lua Code ---")
+print(code)
+
+-- Parse the Lua code into an AST
 local root_node = translator.translate(code)
 
-local function print_node(node, indent_level)
-    indent_level = indent_level or 0
-    local indent = string.rep("  ", indent_level)
-    local output = indent .. "Node type: " .. node.type
-    if node.value then
-        output = output .. ", Value: " .. tostring(node.value)
-    end
-    if node.identifier then
-        output = output .. ", Identifier: " .. node.identifier
-    end
-    print(output)
+-- Translate the AST to C++ code
+local cpp_code = cpp_translator.translate(root_node)
 
-    for _, child in ipairs(node.ordered_children) do
-        print_node(child, indent_level + 1)
-    end
-end
+print("\n--- Generated C++ Code ---")
+print(cpp_code)
 
-print("\n--- AST Structure ---")
-print_node(root_node)
-
-print("\n--- Iterating through all nodes ---")
-local iterator = root_node:GenerateIterator(true)
-
-while true do
-    local node = iterator()
-    if not node then
-        break
-    end
-    local output = "Node type: " .. node.type
-    if node.value then
-        output = output .. ", Value: " .. tostring(node.value)
-    end
-    if node.identifier then
-        output = output .. ", Identifier: " .. node.identifier
-    end
-    if node.parent then
-        output = output .. ", Parent type: " .. node.parent.type
-    end
-    print(output)
-end
+-- Optional: Save the generated C++ code to a file
+-- local file = io.open("output.cpp", "w")
+-- file:write(cpp_code)
+-- file:close()
+-- print("\nC++ code saved to output.cpp")
