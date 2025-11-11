@@ -46,4 +46,10 @@ std::string to_cpp_string(const LuaValue& value);
 
 bool operator<=(const LuaValue& lhs, const LuaValue& rhs);
 
+// Helper for Lua-style equality comparison
+bool lua_equals(const LuaValue& a, const LuaValue& b);
+
+// Helper for Lua-style inequality comparison
+bool lua_not_equals(const LuaValue& a, const LuaValue& b);
+
 #endif // LUA_OBJECT_HPP

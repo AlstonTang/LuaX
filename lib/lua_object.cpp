@@ -83,3 +83,46 @@ bool operator<=(const LuaValue& lhs, const LuaValue& rhs) {
     }
     return false;
 }
+
+// Helper for Lua-style equality comparison
+bool lua_equals(const LuaValue& a, const LuaValue& b) {
+    // Lua's equality rules:
+    // - If types are different, always false (except for numbers and strings that can be converted)
+    // - nil == nil is true
+    // - numbers: compare values
+    // - strings: compare values
+    // - booleans: compare values
+    // - tables/functions: compare by reference (pointers)
+
+    if (a.index() != b.index()) {
+        // Special case for numbers and strings that can be converted
+        if (std::holds_alternative<double>(a) && std::holds_alternative<std::string>(b)) {
+            try { return std::get<double>(a) == std::stod(std::get<std::string>(b)); } catch (...) { return false; }
+        }
+        if (std::holds_alternative<std::string>(a) && std::holds_alternative<double>(b)) {
+            try { return std::stod(std::get<std::string>(a)) == std::get<double>(b); } catch (...) { return false; }
+        }
+        return false; // Different types, not equal
+    }
+
+    // Same types
+    if (std::holds_alternative<std::monostate>(a)) {
+        return true; // nil == nil
+    } else if (std::holds_alternative<bool>(a)) {
+        return std::get<bool>(a) == std::get<bool>(b);
+    } else if (std::holds_alternative<double>(a)) {
+        return std::get<double>(a) == std::get<double>(b);
+    } else if (std::holds_alternative<std::string>(a)) {
+        return std::get<std::string>(a) == std::get<std::string>(b);
+    } else if (std::holds_alternative<std::shared_ptr<LuaObject>>(a)) {
+        return std::get<std::shared_ptr<LuaObject>>(a) == std::get<std::shared_ptr<LuaObject>>(b);
+    } else if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(a)) {
+        return std::get<std::shared_ptr<LuaFunctionWrapper>>(a) == std::get<std::shared_ptr<LuaFunctionWrapper>>(b);
+    }
+    return false; // Should not reach here
+}
+
+// Helper for Lua-style inequality comparison
+bool lua_not_equals(const LuaValue& a, const LuaValue& b) {
+    return !lua_equals(a, b);
+}

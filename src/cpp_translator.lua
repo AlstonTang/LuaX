@@ -93,16 +93,21 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header)
             local left_node = node.ordered_children[1]
             local right_node = node.ordered_children[2]
             local operator = node.value
+            local translated_left = translate_node_to_cpp(left_node, for_header, false)
+            local translated_right = translate_node_to_cpp(right_node, for_header, false)
+
             if operator == ".." then
-                return "to_cpp_string(" .. translate_node_to_cpp(left_node, for_header, false) .. ") + to_cpp_string(" .. translate_node_to_cpp(right_node, for_header, false) .. ")"
+                return "to_cpp_string(" .. translated_left .. ") + to_cpp_string(" .. translated_right .. ")"
             elseif operator == "and" then
                 operator = "&&"
             elseif operator == "or" then
                 operator = "||"
+            elseif operator == "==" then
+                return "lua_equals(" .. translated_left .. ", " .. translated_right .. ")"
             elseif operator == "~=" then
-                operator = "!="
+                return "lua_not_equals(" .. translated_left .. ", " .. translated_right .. ")"
             end
-            return "(get_double(" .. translate_node_to_cpp(left_node, for_header, false) .. ") " .. operator .. " get_double(" .. translate_node_to_cpp(right_node, for_header, false) .. "))"
+            return "(get_double(" .. translated_left .. ") " .. operator .. " get_double(" .. translated_right .. "))"
         elseif node.type == "if_statement" then
             local cpp_code = ""
             local first_clause = true
@@ -313,12 +318,11 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header)
             return translated_expr .. ";"
         end
         return ""
-    elseif node.type == "function_declaration" or node.type == "method_declaration" then
-        local func_name = node.identifier
-        if node.method_name then
-            func_name = func_name .. "_" .. node.method_name
-        end
-        local params_node = node.ordered_children[1]
+                    elseif node.type == "function_declaration" or node.type == "method_declaration" then
+                        local func_name = node.identifier
+                        if node.method_name then
+                            func_name = func_name .. "_" .. node.method_name
+                        end        local params_node = node.ordered_children[1]
         local body_node = node.ordered_children[2]
         local return_type = "LuaValue"
         local lambda_params_lua = {}
