@@ -162,9 +162,10 @@ local precedence = {
 
 function Parser:parse_function_call_or_member_access(base_node)
     local current_node = base_node
-    while self:peek() and (self:peek().value == '(' or self:peek().type == "dot" or self:peek().type == "colon") do
-        local token = self:peek()
-        if token.value == '(' then
+    local current_token = self:peek()
+
+    while current_token do
+        if current_token.value == '(' then
             -- Function call
             self.token_position = self.token_position + 1 -- consume '('
             local call_node = Node:new("call_expression")
@@ -189,29 +190,36 @@ function Parser:parse_function_call_or_member_access(base_node)
                 error("Expected ')' in function call")
             end
             current_node = call_node
-        elseif token.type == "dot" then
+            current_token = self:peek() -- Update current_token after processing call
+
+        elseif current_token.type == "dot" then
             -- Member access: base.member
             self.token_position = self.token_position + 1 -- consume '.'
             local member_token = self:peek()
             if member_token and member_token.type == "identifier" then
-                self.token_position = self.token_position + 1
+                self.token_position = self.token_position + 1 -- consume identifier
                 local member_node = Node:new("member_expression")
                 member_node:AddChildren(current_node, Node:new("identifier", member_token.value))
                 current_node = member_node
+                current_token = self:peek() -- Update current_token after processing member access
             else
-                error("Expected identifier after '.'")
+                local found_token_type = member_token and member_token.type or "nil"
+                local found_token_value = member_token and member_token.value or "nil"
+                error("Expected identifier after '.' but found token type: " .. found_token_type .. " with value: " .. found_token_value)
             end
-        elseif token.type == "colon" then
+
+        elseif current_token.type == "colon" then
             -- Method call: base:method()
             self.token_position = self.token_position + 1 -- consume ':'
             local method_token = self:peek()
             if method_token and method_token.type == "identifier" then
-                self.token_position = self.token_position + 1
+                self.token_position = self.token_position + 1 -- consume method identifier
                 local method_call_node = Node:new("method_call_expression")
                 method_call_node:AddChildren(current_node, Node:new("identifier", method_token.value))
 
                 -- Expect '(' for arguments
-                if self:peek() and self:peek().value == '(' then
+                local open_paren_token = self:peek()
+                if open_paren_token and open_paren_token.value == '(' then
                     self.token_position = self.token_position + 1 -- consume '('
                     while self:peek() and self:peek().value ~= ')' do
                         local arg = self:parse_expression()
@@ -224,7 +232,8 @@ function Parser:parse_function_call_or_member_access(base_node)
                             self.token_position = self.token_position + 1 -- consume ','
                         end
                     end
-                    if self:peek() and self:peek().value == ')' then
+                    local close_paren_token = self:peek()
+                    if close_paren_token and close_paren_token.value == ')' then
                         self.token_position = self.token_position + 1 -- consume ')'
                     else
                         error("Expected ')' in method call")
@@ -233,9 +242,13 @@ function Parser:parse_function_call_or_member_access(base_node)
                     error("Expected '(' after method identifier")
                 end
                 current_node = method_call_node
+                current_token = self:peek() -- Update current_token after processing method call
             else
                 error("Expected identifier after ':'")
             end
+        else
+            -- If the current token is not '(', '.', or ':', break the loop
+            break
         end
     end
     return current_node
