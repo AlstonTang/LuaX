@@ -24,6 +24,25 @@ function Node:AddChildren(...)
     end
 end
 
+function Node:get_all_children_of_type(type_name)
+    local matching_children = {}
+    for _, child in ipairs(self.ordered_children) do
+        if child.type == type_name then
+            table.insert(matching_children, child)
+        end
+    end
+    return matching_children
+end
+
+function Node:find_child_by_type(type_name)
+    for _, child in ipairs(self.ordered_children) do
+        if child.type == type_name then
+            return child
+        end
+    end
+    return nil
+end
+
 function Node:GenerateIterator(complete_stack)
     local stack = {}
     local function traverse(node)
