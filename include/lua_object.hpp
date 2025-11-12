@@ -24,7 +24,8 @@ using LuaValue = std::variant<
 
 // Now define LuaFunctionWrapper, which can now use LuaValue
 struct LuaFunctionWrapper {
-    std::function<LuaValue(LuaValue, LuaValue, LuaValue)> func;
+    std::function<LuaValue(std::shared_ptr<LuaObject>)> func;
+    LuaFunctionWrapper(std::function<LuaValue(std::shared_ptr<LuaObject>)> f) : func(f) {}
 };
 
 // Now define LuaObject, which can now use LuaValue
@@ -38,11 +39,14 @@ public:
     void set_metatable(std::shared_ptr<LuaObject> mt);
 };
 
+extern std::shared_ptr<LuaObject> _G;
+
 // Global helper functions
 std::shared_ptr<LuaObject> get_object(const LuaValue& value);
 void print_value(const LuaValue& value);
 double get_double(const LuaValue& value);
 std::string to_cpp_string(const LuaValue& value);
+LuaValue rawget(std::shared_ptr<LuaObject> table, const LuaValue& key);
 
 bool operator<=(const LuaValue& lhs, const LuaValue& rhs);
 

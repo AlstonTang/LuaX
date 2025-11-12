@@ -97,3 +97,73 @@ for i=1, 100000 do
 end
 
 print(thing)
+
+-- String library tests
+local test_string = "hello"
+print("Length of 'hello':", string.len(test_string))
+print("Reverse of 'hello':", string.reverse(test_string))
+
+-- Table library tests
+local my_table = { "a", "b", "c" }
+print("Original table:")
+for i = 1, 3 do
+    print(i, rawget(my_table, i))
+end
+
+-- OS library tests
+print("os.clock:", os.clock())
+print("os.time:", os.time())
+
+table.insert(my_table, "d")
+print("After insert:")
+for i = 1, 4 do
+    print(i, rawget(my_table, i))
+end
+
+table.remove(my_table, 2)
+print("After remove:")
+for i = 1, 3 do
+    print(i, rawget(my_table, i))
+end
+
+-- IO library tests
+-- io.write("Enter your name: ")
+-- local user_name = io.read("*l")
+-- io.write("Hello, ", user_name, "!\n")
+
+-- io.write("Enter a number: ")
+-- local num = io.read("*n")
+-- io.write("You entered: ", num, "\n")
+
+-- Package library tests
+print("package.path:", package.path)
+print("package.cpath:", package.cpath)
+
+-- Global constants tests
+print("_VERSION:", _VERSION)
+
+-- Global functions tests
+print("tonumber('123'):", tonumber("123"))
+print("tonumber('hello'):", tonumber("hello"))
+print("tonumber(123):", tonumber(123))
+
+print("tostring(123):", tostring(123))
+print("tostring('hello'):", tostring("hello"))
+print("tostring(true):", tostring(true))
+
+local n = nil
+print("type(n):", type(n))
+print("type(true):", type(true))
+print("type(123):", type(123))
+print("type('hello'):", type('hello'))
+print("type({}):", type({}))
+print("type(function() end):", type(function() end))
+
+-- getmetatable tests
+local my_table_with_mt = {}
+local mt_for_get = { __index = function() return "metatable_value" end }
+setmetatable(my_table_with_mt, mt_for_get)
+print("getmetatable(my_table_with_mt):", getmetatable(my_table_with_mt))
+
+-- error tests
+pcall(function() error("This is an error message") end)

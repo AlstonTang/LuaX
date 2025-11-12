@@ -2,6 +2,8 @@
 #include <iostream>
 #include <variant>
 
+std::shared_ptr<LuaObject> _G = std::make_shared<LuaObject>();
+
 LuaValue LuaObject::get(const std::string& key) {
     if (properties.count(key)) {
         return properties[key];
@@ -20,7 +22,11 @@ void LuaObject::set(const std::string& key, const LuaValue& value) {
         auto newindex = metatable->get("__newindex");
         if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(newindex)) {
             // If __newindex is a function, call it
-            std::get<std::shared_ptr<LuaFunctionWrapper>>(newindex)->func(shared_from_this(), key, value);
+            auto args = std::make_shared<LuaObject>();
+            args->set("1", shared_from_this());
+            args->set("2", key);
+            args->set("3", value);
+            std::get<std::shared_ptr<LuaFunctionWrapper>>(newindex)->func(args);
             return;
         } else if (std::holds_alternative<std::shared_ptr<LuaObject>>(newindex)) {
             // If __newindex is a table, set the value in that table
@@ -65,7 +71,12 @@ double get_double(const LuaValue& value) {
 
 std::string to_cpp_string(const LuaValue& value) {
     if (std::holds_alternative<double>(value)) {
-        return std::to_string(std::get<double>(value));
+        double d = std::get<double>(value);
+        if (d == static_cast<long long>(d)) {
+            return std::to_string(static_cast<long long>(d));
+        } else {
+            return std::to_string(d);
+        }
     } else if (std::holds_alternative<std::string>(value)) {
         return std::get<std::string>(value);
     } else if (std::holds_alternative<bool>(value)) {
@@ -76,6 +87,15 @@ std::string to_cpp_string(const LuaValue& value) {
         return "nil";
     }
 }
+
+LuaValue rawget(std::shared_ptr<LuaObject> table, const LuaValue& key) {
+    std::string key_str = to_cpp_string(key);
+    if (table && table->properties.count(key_str)) {
+        return table->properties[key_str];
+    }
+    return std::monostate{};
+}
+
 
 bool operator<=(const LuaValue& lhs, const LuaValue& rhs) {
     if (std::holds_alternative<double>(lhs) && std::holds_alternative<double>(rhs)) {
