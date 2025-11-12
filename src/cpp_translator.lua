@@ -33,7 +33,8 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header)
         local return_type = "LuaValue"
         if node.type == "Root" then
             local cpp_code = ""
-                for _, child in ipairs(node.ordered_children) do
+                for i, child in ipairs(node.ordered_children) do
+                    print("DEBUG: Root processing child " .. i .. ", type: " .. child.type)
                     cpp_code = cpp_code .. translate_node_to_cpp(child, for_header, false) .. "\n"
                 end
             return cpp_code
@@ -128,6 +129,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header)
             end
             return cpp_code .. "\n"
         elseif node.type == "for_statement" then
+            print("DEBUG: Translating for_statement")
             local var_name = node.ordered_children[1].identifier
             local start_expr = translate_node_to_cpp(node.ordered_children[2], for_header, false)
             local end_expr = translate_node_to_cpp(node.ordered_children[3], for_header, false)
@@ -143,6 +145,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header)
             declared_variables[var_name] = true
             return "for (LuaValue " .. var_name .. " = " .. start_expr .. "; get_double(" .. var_name .. ") <= get_double(" .. end_expr .. "); " .. var_name .. " = LuaValue(get_double(" .. var_name .. ") + get_double(" .. step_expr .. "))) {\n" .. body .. "}"
         elseif node.type == "while_statement" then
+            print("DEBUG: Translating while_statement")
             local condition = translate_node_to_cpp(node.ordered_children[1], for_header, false)
             local body = translate_node_to_cpp(node.ordered_children[2], for_header, false)
             return "while (" .. condition .. ") {\n" .. body .. "}"
@@ -174,7 +177,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header)
                     if i > 1 then
                         cpp_code = cpp_code .. "print_value(" .. translate_node_to_cpp(arg_node, for_header, false) .. ");"
                         if i < #node.ordered_children then
-                            cpp_code = cpp_code .. "std::cout << \" \";" -- Add space between arguments
+                            cpp_code = cpp_code .. "std::cout << \"\\t\";" -- Add tab between arguments
                         end
                     end
                 end

@@ -42,9 +42,9 @@ local function translate_file(lua_file_path, output_file_name)
 end
 
 -- Translate other_module.lua
-translate_file("src/other_module.lua", "other_module")
+translate_file("examples/other_module.lua", "other_module")
 
 -- Translate main.lua
-translate_file("src/main.lua", "main")
+translate_file("examples/main.lua", "main")
 
 print("Translation complete.")

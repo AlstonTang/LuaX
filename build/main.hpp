@@ -13,9 +13,9 @@ int main() {
 LuaValue a = LuaValue(10.0);
 LuaValue b = LuaValue(20.0);
 LuaValue c = (get_double(a) + get_double(b));
-print_value("Sum:");std::cout << " ";print_value(c);std::cout << std::endl;;
+print_value("Sum:");std::cout << "\t";print_value(c);std::cout << std::endl;;
 std::string name = "World";
-print_value("Hello,");std::cout << " ";print_value(name);std::cout << std::endl;;
+print_value("Hello,");std::cout << "\t";print_value(name);std::cout << std::endl;;
 if ((get_double(a) > get_double(b))) {
     print_value("a is greater than b");std::cout << std::endl;;
 } else if ((get_double(a) < get_double(b))) {
@@ -25,9 +25,13 @@ if ((get_double(a) > get_double(b))) {
 }
 
 for (LuaValue i = LuaValue(1.0); get_double(i) <= get_double(LuaValue(3.0)); i = LuaValue(get_double(i) + get_double(LuaValue(1.0)))) {
-    print_value("For loop iteration:");std::cout << " ";print_value(i);std::cout << std::endl;;
+    print_value("For loop iteration:");std::cout << "\t";print_value(i);std::cout << std::endl;;
 }
 LuaValue count = LuaValue(0.0);
+while ((get_double(count) < get_double(LuaValue(2.0)))) {
+    print_value("While loop iteration:");std::cout << "\t";print_value(count);std::cout << std::endl;;
+    count = (get_double(count) + get_double(LuaValue(1.0)));
+}
 std::string text = "hello world";
 std::string pattern = "world";
 if (std::regex_search(text, std::regex(pattern))) {
@@ -35,12 +39,12 @@ if (std::regex_search(text, std::regex(pattern))) {
 }
 
 LuaValue pos = LuaValue(text.find("world") != std::string::npos ? static_cast<double>(text.find("world") + 1) : 0.0);
-print_value("Pattern 'world' found at position:");std::cout << " ";print_value(pos);std::cout << std::endl;;
+print_value("Pattern 'world' found at position:");std::cout << "\t";print_value(pos);std::cout << std::endl;;
 LuaValue new_text = std::regex_replace(text, std::regex("world"), "lua");
-print_value("String gsub:");std::cout << " ";print_value(new_text);std::cout << std::endl;;
+print_value("String gsub:");std::cout << "\t";print_value(new_text);std::cout << std::endl;;
 LuaValue other = other_module::load();
-print_value("Module name:");std::cout << " ";print_value(get_object(other)->get("name"));std::cout << std::endl;;
-print_value("Module version:");std::cout << " ";print_value(get_object(other)->get("version"));std::cout << std::endl;;
+print_value("Module name:");std::cout << "\t";print_value(get_object(other)->get("name"));std::cout << std::endl;;
+print_value("Module version:");std::cout << "\t";print_value(get_object(other)->get("version"));std::cout << std::endl;;
 LuaValue greeting = std::get<std::shared_ptr<LuaFunctionWrapper>>(get_object(other)->get("greet"))->func(LuaValue("Gemini"), std::monostate{}, std::monostate{});
 print_value(greeting);std::cout << std::endl;;
 std::shared_ptr<LuaObject> defaults = ( [&]() { auto temp_table_1976 = std::make_shared<LuaObject>();
@@ -51,13 +55,13 @@ temp_table_1976->set("color", "blue");
 std::shared_ptr<LuaObject> mt = ( [&]() { auto temp_table_3353 = std::make_shared<LuaObject>();
  return temp_table_3353; } )();
 get_object(LuaValue(mt))->set("__index", std::make_shared<LuaFunctionWrapper>(LuaFunctionWrapper{[=](LuaValue table, LuaValue key, LuaValue arg3) -> LuaValue {
-    print_value("Accessing missing key:");std::cout << " ";print_value(key);std::cout << std::endl;;
+    print_value("Accessing missing key:");std::cout << "\t";print_value(key);std::cout << std::endl;;
     return defaults;
     key;
 }}));
 get_object(LuaValue(mt))->set("__newindex", std::make_shared<LuaFunctionWrapper>(LuaFunctionWrapper{[=](LuaValue table, LuaValue key, LuaValue value) -> LuaValue {
-    print_value("Attempting to set new key:");std::cout << " ";print_value(key);std::cout << " ";print_value("with value:");std::cout << " ";print_value(value);std::cout << std::endl;;
-    if ((get_double(key) == get_double("z"))) {
+    print_value("Attempting to set new key:");std::cout << "\t";print_value(key);std::cout << "\t";print_value("with value:");std::cout << "\t";print_value(value);std::cout << std::endl;;
+    if (lua_equals(key, "z")) {
     get_object(table)->properties[std::get<std::string>(key)] = value;;
 } else {
     print_value(to_cpp_string(to_cpp_string("Cannot set key '") + to_cpp_string(key)) + to_cpp_string("'. Use rawset if intended."));std::cout << std::endl;;
@@ -68,13 +72,19 @@ return std::monostate{};
 std::shared_ptr<LuaObject> my_object = ( [&]() { auto temp_table_7683 = std::make_shared<LuaObject>();
  return temp_table_7683; } )();
 get_object(my_object)->set_metatable(get_object(mt));;
-print_value("my_object.x:");std::cout << " ";print_value(get_object(my_object)->get("x"));std::cout << std::endl;;
-print_value("my_object.color:");std::cout << " ";print_value(get_object(my_object)->get("color"));std::cout << std::endl;;
+print_value("my_object.x:");std::cout << "\t";print_value(get_object(my_object)->get("x"));std::cout << std::endl;;
+print_value("my_object.color:");std::cout << "\t";print_value(get_object(my_object)->get("color"));std::cout << std::endl;;
 get_object(LuaValue(my_object))->set("a", LuaValue(100.0));
 get_object(LuaValue(my_object))->set("z", LuaValue(50.0));
-print_value("my_object.z:");std::cout << " ";print_value(get_object(my_object)->get("z"));std::cout << std::endl;;
+print_value("my_object.z:");std::cout << "\t";print_value(get_object(my_object)->get("z"));std::cout << std::endl;;
 get_object(LuaValue(my_object))->set("x", LuaValue(99.0));
-print_value("my_object.x (after attempted set):");std::cout << " ";print_value(get_object(my_object)->get("x"));std::cout << std::endl;;
+print_value("my_object.x (after attempted set):");std::cout << "\t";print_value(get_object(my_object)->get("x"));std::cout << std::endl;;
+print_value("Begin loop");std::cout << std::endl;;
+LuaValue thing = LuaValue(1.0);
+for (LuaValue i = LuaValue(1.0); get_double(i) <= get_double(LuaValue(100000.0)); i = LuaValue(get_double(i) + get_double(LuaValue(1.0)))) {
+    thing = (get_double(thing) + get_double(std::get<std::shared_ptr<LuaFunctionWrapper>>(get_object(math)->get("sin"))->func(LuaValue(i), std::monostate{}, std::monostate{})));
+}
+print_value(thing);std::cout << std::endl;;
 
     return 0;
 }

@@ -596,8 +596,11 @@ function Parser:parse_while_statement()
 
     local end_token = self:peek()
     self.token_position = self.token_position + 1 -- consume 'end'
-end
 
+    while_node:AddChildren(condition, body_node)
+    
+    return while_node
+end
 
 
 function Parser:parse_if_statement()

@@ -15,8 +15,7 @@ std::shared_ptr<LuaObject> M = std::make_shared<LuaObject>();
 get_object(LuaValue(M))->set("name", "other_module");
 get_object(LuaValue(M))->set("version", "1.0");
 get_object(LuaValue(M))->set("greet", std::make_shared<LuaFunctionWrapper>(LuaFunctionWrapper{[=](LuaValue name, LuaValue arg2, LuaValue arg3) -> LuaValue {
-    print_value("Hello, ");std::cout << " ";print_value(name);std::cout << " ";print_value("!");std::cout << std::endl;;
-return std::monostate{};
+    return to_cpp_string(to_cpp_string(to_cpp_string(to_cpp_string(to_cpp_string(to_cpp_string("Hello, ") + to_cpp_string(name)) + to_cpp_string(" from ")) + to_cpp_string(get_object(M)->get("name"))) + to_cpp_string(" v")) + to_cpp_string(get_object(M)->get("version"))) + to_cpp_string("!");
 }}));
 return M;
 }

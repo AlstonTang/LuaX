@@ -87,3 +87,13 @@ print("my_object.z:", my_object.z)
 -- Test setting an existing key with __newindex
 my_object.x = 99
 print("my_object.x (after attempted set):", my_object.x)
+
+print("Begin loop")
+
+thing = 1
+
+for i=1, 100000 do
+    thing = thing + math.sin(i)
+end
+
+print(thing)
