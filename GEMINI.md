@@ -29,7 +29,7 @@ The following Lua standard libraries and global functions/constants have been su
 
 *   **Libraries:**
     *   `math` (partial, `math_tointeger` fixed)
-    *   `string` (`len`, `reverse`, `match`, `find`, `gsub`)
+    *   `string` (`len`, `reverse`, `match`, `find`, `gsub`, `byte`, `char`, `rep`, `sub`, `upper`, `lower`)
     *   `table` (`insert`, `remove`)
     *   `os` (`clock`, `time`)
     *   `io` (`write`, `read`)
@@ -45,18 +45,21 @@ The following Lua standard libraries and global functions/constants have been su
     *   `tostring`
     *   `type`
     *   `error` (throws `std::runtime_error`)
-    *   `pcall` (partially implemented, intended to catch exceptions)
+    *   `pcall` (fully implemented and correctly catches exceptions)
+    *   `getmetatable`
+    *   `assert`
+    *   `collectgarbage`
+    *   `select`
+    *   `warn`
+    *   `xpcall`
 
 ## Current Issues
 
-*   **`pcall` Exception Handling:** The `pcall` function is currently not correctly catching exceptions thrown by the `error` function. Despite `error` successfully throwing `std::runtime_error` and `pcall` having a `try-catch(...)` block, the exception does not seem to propagate correctly, leading to program termination rather than graceful handling by `pcall`.
+*   None. All identified compilation and runtime issues have been resolved.
 
 ## Immediate Next Steps
 
-1.  **Debug `pcall` and `error` Interaction:** Investigate why exceptions thrown by `error` are not being caught by `pcall`. This may involve:
-    *   Further simplifying the `pcall` implementation to isolate the issue.
-    *   Examining the `LuaFunctionWrapper` and `std::function` behavior regarding exception propagation.
-    *   Potentially adding more explicit exception handling or re-throwing mechanisms within the `LuaFunctionWrapper` if necessary.
+*   None.
 
 ## Long-Term Objectives
 
@@ -66,8 +69,6 @@ The following Lua standard libraries and global functions/constants have been su
     *   `utf8`
 2.  **Implement Remaining Global Functions:** Implement the rest of the global functions and constants from `vars.md`, such as:
     *   `_G`
-    *   `assert`
-    *   `collectgarbage`
     *   `dofile`
     *   `ipairs`
     *   `load`
@@ -75,8 +76,5 @@ The following Lua standard libraries and global functions/constants have been su
     *   `next`
     *   `pairs`
     *   `require`
-    *   `select`
-    *   `warn`
-    *   `xpcall`
 3.  **Native Lua Table Indexing:** Implement proper Lua table indexing (e.g., `my_table[i]`) directly in the translator to remove the current reliance on `rawget` in Lua code for array-like access.
 4.  **Comprehensive Testing:** Ensure all implemented features are thoroughly tested with a robust set of unit and integration tests.
