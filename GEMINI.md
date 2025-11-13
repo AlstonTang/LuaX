@@ -68,3 +68,6 @@ The following Lua standard libraries and global functions/constants have been su
     *   `require`
 3.  **Verify Native Lua Table Indexing:** Implement proper Lua table indexing (e.g., `my_table[i]`) directly in the translator to remove the current reliance on `rawget` in Lua code for array-like access.
 4.  **Comprehensive Testing:** Ensure all implemented features are thoroughly tested with a robust set of unit and integration tests.
+    *   This includes be able to use `scripts/luax.lua` to compile itself.
+5.  **Type Inference And Optimization:** Implement type inference so that certain types can be natively inferred to reduce usage of variants and to increase performance.
+6. **Better error information:** Ensure that any errors found within the luax transpiler can be traced more robustly to either the transpiler itself or the code that it is transpiling.
