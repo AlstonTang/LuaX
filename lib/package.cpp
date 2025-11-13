@@ -7,22 +7,6 @@
 #include <vector> // Added for std::vector
 using namespace std; // Temporarily added for debugging namespace issues
 
-// package.config
-std::vector<LuaValue> package_config(std::shared_ptr<LuaObject> args) {
-    // Lua 5.4 package.config string:
-    // field 1: directory separator (e.g., '/')
-    // field 2: path separator (e.g., ';')
-    // field 3: default path mark (e.g., '?')
-    // field 4: replacement for default path mark (e.g., '.lua')
-    // field 5: "binary" extension (e.g., '.so' or '.dll')
-    return {LuaValue(std::string("/;?.lua;.so"))}; // Simplified for now
-}
-
-// package.path
-std::vector<LuaValue> package_path(std::shared_ptr<LuaObject> args) {
-    return {LuaValue(std::string(""))}; // For now, return an empty string
-}
-
 // package.searchpath
 std::vector<LuaValue> package_searchpath(std::shared_ptr<LuaObject> args) {
     std::string name = to_cpp_string(args->get("1"));
@@ -68,11 +52,6 @@ std::vector<LuaValue> package_searchpath(std::shared_ptr<LuaObject> args) {
     return {std::monostate{}, error_msg}; // Return nil, error message would be second return value in Lua
 }
 
-// package.cpath
-std::vector<LuaValue> package_cpath(std::shared_ptr<LuaObject> args) {
-    return {LuaValue(std::string(""))}; // For now, return an empty string
-}
-
 // Global tables for package.loaded and package.preload
 std::shared_ptr<LuaObject> package_loaded_table = std::make_shared<LuaObject>();
 std::shared_ptr<LuaObject> package_preload_table = std::make_shared<LuaObject>();
@@ -80,7 +59,6 @@ std::shared_ptr<LuaObject> package_preload_table = std::make_shared<LuaObject>()
 std::shared_ptr<LuaObject> create_package_library() {
     auto package_lib = std::make_shared<LuaObject>();
 
-    package_lib->set("config", std::make_shared<LuaFunctionWrapper>(package_config));
     package_lib->set("cpath", LuaValue(std::string("")));
     package_lib->set("loaded", package_loaded_table);
     package_lib->set("preload", package_preload_table);

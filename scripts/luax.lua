@@ -89,10 +89,17 @@ local function find_dependencies(lua_file_path)
     return dependencies
 end
 
+local usage = "Usage: lua5.4 scripts/luax.lua <path_to_src_lua_file> <path_to_out_file>"
+
 -- Main script logic
 local input_lua_file = arg[1]
 if not input_lua_file then
-    error("Usage: lua5.4 scripts/luax.lua <path_to_lua_file>")
+    error(usage)
+end
+
+local path_to_out_file = arg[2]
+if not path_to_out_file then
+    error(usage)
 end
 
 -- Ensure build directory exists
@@ -150,7 +157,7 @@ local lib_cpp_files = {
     "lib/utf8.cpp",
 }
 
-local compile_command = "g++ -std=c++17 -Iinclude -o build/luax_app "
+local compile_command = "clang++ -std=c++17 -Iinclude -o " .. path_to_out_file .. " "
 
 -- Add all generated C++ files from the build directory
 -- Dynamically find them as they might vary based on dependencies

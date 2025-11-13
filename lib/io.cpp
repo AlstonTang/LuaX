@@ -135,13 +135,6 @@ std::vector<LuaValue> LuaFile::seek(std::shared_ptr<LuaObject> args) {
     return {static_cast<double>(file_stream.tellg())}; // Return current position
 }
 
-// LuaFile::setvbuf
-std::vector<LuaValue> LuaFile::setvbuf(std::shared_ptr<LuaObject> args) {
-    // C++ streams don't have a direct equivalent to Lua's setvbuf.
-    // We'll just return true, indicating success without actual change.
-    return {true};
-}
-
 // LuaFile::write
 std::vector<LuaValue> LuaFile::write(std::shared_ptr<LuaObject> args) {
     if (!file_stream.is_open() || is_closed) {
