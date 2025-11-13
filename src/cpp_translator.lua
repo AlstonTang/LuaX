@@ -4,6 +4,7 @@ local CppTranslator = {}
 local declared_variables = {}
 local required_modules = {}
 local module_global_vars = {} -- New table to store global variables declared in the current module
+local current_module_uses_g1_g2 = false -- New flag to track if g1 or g2 are used in the current module
 
 -- Helper function to map Lua types to C++ types
 local function map_lua_type_to_cpp(value)
@@ -26,6 +27,7 @@ function CppTranslator.translate(ast_root, file_name)
     declared_variables = {}
     required_modules = {}
     module_global_vars = {} -- Reset for each translation run
+    current_module_uses_g1_g2 = false -- Reset for each translation run
     return CppTranslator.translate_recursive(ast_root, file_name, false)
 end
 function CppTranslator.translate_recursive(ast_root, file_name, for_header, current_module_object_name)
@@ -156,7 +158,10 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                     local var_code = translate_node_to_cpp(var_node, for_header, false, current_module_object_name)
                     local declaration_prefix = ""
                     if var_node.type == "identifier" and not declared_variables[var_node.identifier] then
-                        if file_name == "main" then
+                        if var_node.identifier == "g1" or var_node.identifier == "g2" then
+                            declaration_prefix = "LuaValue "
+                            current_module_uses_g1_g2 = true -- Mark that g1 or g2 is used
+                        elseif file_name == "main" then
                             declaration_prefix = "LuaValue "
                         else
                             -- For modules, global variables need to be declared in the module's scope
@@ -306,7 +311,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 local translated_table = translate_node_to_cpp(table_node, for_header, false, current_module_object_name)
                 local translated_key = translate_node_to_cpp(key_node, for_header, false, current_module_object_name)
                 local translated_value = translate_node_to_cpp(value_node, for_header, false, current_module_object_name)
-                return "get_object(" .. translated_table .. ")->properties[std::get<std::string>(" .. translated_key .. ")] = " .. translated_value .. ";"
+                return "get_object(" .. translated_table .. ")->properties[to_cpp_string(" .. translated_key .. ")] = " .. translated_value .. ";"
             else
                 local translated_func_access = ""
                 if func_node.type == "identifier" and not declared_variables[func_node.identifier] then
@@ -624,6 +629,10 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 global_var_definitions = global_var_definitions .. "LuaValue " .. var_name .. ";\n"
             end
             local module_body_code = ""
+            if current_module_uses_g1_g2 then
+                module_body_code = module_body_code .. "    LuaValue g1;\n"
+                module_body_code = module_body_code .. "    LuaValue g2;\n"
+            end
             local module_identifier = ""
             local explicit_return_found = false
             local explicit_return_value = "std::make_shared<LuaObject>()" -- Default to empty table

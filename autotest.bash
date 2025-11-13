@@ -1,2 +1,2 @@
 lua5.4 src/translate_project.lua
-g++ -std=c++17 -Iinclude -o build/luax_app build/main.cpp build/other_module.cpp build/test_utf8.cpp build/test_multi_assign.cpp lib/lua_object.cpp lib/math.cpp lib/string.cpp lib/table.cpp lib/os.cpp lib/io.cpp lib/package.cpp lib/utf8.cpp -lstdc++fs && time ./build/luax_app
+g++ -std=c++17 -Iinclude -o build/luax_app build/main.cpp build/other_module.cpp build/test_utf8.cpp build/test_multi_assign.cpp build/test_metamethods.cpp lib/lua_object.cpp lib/math.cpp lib/string.cpp lib/table.cpp lib/os.cpp lib/io.cpp lib/package.cpp lib/utf8.cpp -lstdc++fs && time ./build/luax_app

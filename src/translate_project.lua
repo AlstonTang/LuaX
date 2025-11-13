@@ -60,4 +60,7 @@ translate_file("examples/test_utf8.lua", "test_utf8")
 -- Translate test_multi_assign.lua
 translate_file("examples/test_multi_assign.lua", "test_multi_assign")
 
+-- Translate test_metamethods.lua
+translate_file("examples/test_metamethods.lua", "test_metamethods")
+
 print("Translation complete.")

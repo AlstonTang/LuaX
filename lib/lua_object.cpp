@@ -12,6 +12,15 @@ LuaValue LuaObject::get(const std::string& key) {
         auto index = metatable->get("__index");
         if (std::holds_alternative<std::shared_ptr<LuaObject>>(index)) {
             return std::get<std::shared_ptr<LuaObject>>(index)->get(key);
+        } else if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(index)) {
+            // If __index is a function, call it
+            auto args = std::make_shared<LuaObject>();
+            args->set("1", shared_from_this());
+            args->set("2", key);
+            std::vector<LuaValue> results = std::get<std::shared_ptr<LuaFunctionWrapper>>(index)->func(args);
+            if (!results.empty()) {
+                return results[0];
+            }
         }
     }
     return std::monostate{}; // nil
