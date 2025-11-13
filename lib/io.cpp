@@ -4,8 +4,9 @@
 #include <fstream>
 #include <string>
 #include <memory>
-#include <cstdio> // For tmpnam
-#include <vector> // For LuaFile::read buffer
+#include <cstdio> // For remove (used by LuaFile destructor implicitly)
+#include <vector> // For LuaFile::read buffer and mkstemp buffer
+#include <unistd.h> // For mkstemp, close
 
 // Global file handles for stdin, stdout, stderr
 std::shared_ptr<LuaObject> io_stdin_handle = std::make_shared<LuaObject>();
@@ -274,9 +275,18 @@ std::vector<LuaValue> io_close_global(std::shared_ptr<LuaObject> args) {
 
 // io.tmpfile (global)
 std::vector<LuaValue> io_tmpfile_global(std::shared_ptr<LuaObject> args) {
-    char filename_buffer[L_tmpnam];
-    if (std::tmpnam(filename_buffer)) {
-        std::string filename = filename_buffer;
+    // mkstemp requires a template string like "XXXXXX"
+    std::string temp_filename_template = "/tmp/luax_io_temp_XXXXXX";
+    // mkstemp modifies the template string in place
+    std::vector<char> buffer(temp_filename_template.begin(), temp_filename_template.end());
+    buffer.push_back('\0'); // Null-terminate the string
+
+    int fd = mkstemp(buffer.data());
+    if (fd != -1) {
+        // mkstemp creates and opens the file. We need to close the fd,
+        // but keep the file on disk for io_open to use.
+        close(fd);
+        std::string filename = buffer.data();
         auto open_args = std::make_shared<LuaObject>();
         open_args->set("1", filename);
         open_args->set("2", "w+"); // Read and write mode

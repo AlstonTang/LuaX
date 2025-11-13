@@ -5,8 +5,10 @@
 #include <iomanip> // For std::put_time
 #include <sstream> // For std::stringstream
 #include <cstdlib> // For system, getenv, exit
-#include <cstdio> // For remove, rename, tmpnam
+#include <cstdio> // For remove, rename
 #include <locale> // For setlocale
+#include <unistd.h> // For mkstemp, close
+#include <vector> // For std::vector
 
 // os.execute
 std::vector<LuaValue> os_execute(std::shared_ptr<LuaObject> args) {
@@ -78,9 +80,17 @@ std::vector<LuaValue> os_setlocale(std::shared_ptr<LuaObject> args) {
 
 // os.tmpname
 std::vector<LuaValue> os_tmpname(std::shared_ptr<LuaObject> args) {
-    char buffer[L_tmpnam];
-    if (std::tmpnam(buffer)) {
-        return {std::string(buffer)};
+    // mkstemp requires a template string like "XXXXXX"
+    std::string temp_filename_template = "/tmp/luax_temp_XXXXXX";
+    // mkstemp modifies the template string in place
+    std::vector<char> buffer(temp_filename_template.begin(), temp_filename_template.end());
+    buffer.push_back('\0'); // Null-terminate the string
+
+    int fd = mkstemp(buffer.data());
+    if (fd != -1) {
+        // Close the file descriptor immediately as Lua's tmpname just returns the name
+        close(fd);
+        return {std::string(buffer.data())};
     }
     return {std::monostate{}}; // nil on failure
 }
