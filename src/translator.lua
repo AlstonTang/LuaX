@@ -346,9 +346,46 @@ function Parser:parse_table_constructor()
     return table_node
 end
 
+function Parser:parse_variable_list()
+    local variables = {}
+    repeat
+        local var_node = self:parse_function_call_or_member_access(self:parse_primary_expression())
+        if not var_node then error("Expected variable in list") end
+        table.insert(variables, var_node)
+        if self:peek() and self:peek().type == "comma" then
+            self.token_position = self.token_position + 1 -- consume ','
+        else
+            break
+        end
+    until false
+    local var_list_node = Node:new("variable_list")
+    var_list_node:AddChildren(table.unpack(variables))
+    return var_list_node
+end
+
+function Parser:parse_expression_list()
+    local expressions = {}
+    repeat
+        local expr_node = self:parse_expression()
+        if not expr_node then break end -- Allow empty expression list if no more expressions
+        table.insert(expressions, expr_node)
+        if self:peek() and self:peek().type == "comma" then
+            self.token_position = self.token_position + 1 -- consume ','
+        else
+            break
+        end
+    until false
+    local expr_list_node = Node:new("expression_list")
+    expr_list_node:AddChildren(table.unpack(expressions))
+    return expr_list_node
+end
+
 function Parser:parse_primary_expression()
     local token = self:peek()
-    if not token then return nil end
+    if not token then
+        print("DEBUG: parse_primary_expression: No token to peek, returning nil")
+        return nil
+    end
 
     local node = nil
     if token.value == '-' then -- Handle unary minus
@@ -398,7 +435,7 @@ function Parser:parse_expression(min_precedence)
     min_precedence = min_precedence or 0
     local left_expr = self:parse_primary_expression()
     if not left_expr then 
-        return nil 
+        error("parse_expression: parse_primary_expression returned nil. Current token: type=" .. (self:peek() and self:peek().type or "nil") .. ", value=" .. (self:peek() and self:peek().value or "nil"))
     end
 
     while true do
@@ -439,24 +476,14 @@ function Parser:parse_statement()
             local statement_node = self:parse_function_declaration(true) -- true for local function
             return statement_node
         else
-            local identifier_token = self:peek()
-            if not identifier_token or identifier_token.type ~= "identifier" then
-                error("Expected identifier after 'local'")
-            end
-            self.token_position = self.token_position + 1 -- consume identifier
-
             local local_declaration_node = Node:new("local_declaration")
-            local variable_node = Node:new("variable", nil, identifier_token.value)
-            local_declaration_node:AddChildren(variable_node)
+            local var_list_node = self:parse_variable_list()
+            local_declaration_node:AddChildren(var_list_node)
 
             if self:peek() and self:peek().value == '=' then
                 self.token_position = self.token_position + 1 -- consume '='
-                local expression_node = self:parse_expression()
-                if expression_node then
-                    local_declaration_node:AddChildren(expression_node)
-                else
-                    error("Expected expression after '=' in local declaration")
-                end
+                local expr_list_node = self:parse_expression_list()
+                local_declaration_node:AddChildren(expr_list_node)
             end
             return local_declaration_node
         end
@@ -484,9 +511,9 @@ function Parser:parse_statement()
     elseif current_token.type == "keyword" and current_token.value == "return" then
         self.token_position = self.token_position + 1 -- consume 'return'
         local return_node = Node:new("return_statement")
-        local expr = self:parse_expression() -- Return can have an expression
-        if expr then
-            return_node:AddChildren(expr)
+        local expr_list = self:parse_expression_list() -- Return can have multiple expressions
+        if #expr_list.ordered_children > 0 then
+            return_node:AddChildren(expr_list)
         end
         return return_node
     elseif current_token.type == "keyword" and current_token.value == "end" then
@@ -494,27 +521,41 @@ function Parser:parse_statement()
         -- The block parsing logic will consume it.
         return nil
     else
-        -- This could be an assignment or an expression statement
-        local left_hand_side = self:parse_expression()
-        local next_token = self:peek()
+        -- START: FIXED CODE BLOCK
+        -- This could be an assignment (a=1 or a,b=1,2) or an expression statement (myfunc()).
+        -- First, we parse a list of potential l-values (left-hand side variables).
+        local lvalue_list_node = self:parse_variable_list()
+        
+        -- If nothing could be parsed as a variable/expression, it's not a statement.
+        if #lvalue_list_node.ordered_children == 0 then
+            return nil
+        end
 
-        if next_token and next_token.value == '=' then
+        -- Now, we check if an '=' follows the list.
+        if self:peek() and self:peek().value == '=' then
+            -- It's an assignment statement.
             self.token_position = self.token_position + 1 -- consume '='
-            local right_hand_side = self:parse_expression(0)
-            if not right_hand_side then
-                error("Expected expression after '=' in assignment")
-            end
-            local assignment_node = Node:new("assignment", nil, nil)
-            assignment_node:AddChildren(left_hand_side, right_hand_side)
+            
+            -- Now parse the r-values (right-hand side expressions).
+            local rvalue_list_node = self:parse_expression_list()
+            
+            local assignment_node = Node:new("assignment")
+            assignment_node:AddChildren(lvalue_list_node, rvalue_list_node)
             return assignment_node
         else
-            -- It's a standalone expression statement
-            if left_hand_side then
+            -- It's not an assignment. It must be a standalone expression statement.
+            -- This is only valid if the "variable list" we parsed contained exactly one item.
+            if #lvalue_list_node.ordered_children == 1 then
                 local expression_statement_node = Node:new("expression_statement")
-                expression_statement_node:AddChildren(left_hand_side)
+                -- The single item from the list is the expression itself.
+                expression_statement_node:AddChildren(lvalue_list_node.ordered_children[1])
                 return expression_statement_node
+            else
+                -- This is a syntax error, e.g., "a, b" on a line by itself.
+                error("Invalid statement: unexpected symbol near ','")
             end
         end
+        -- END: FIXED CODE BLOCK
     end
     return nil
 end
@@ -760,9 +801,14 @@ function Parser:parse()
         if statement_node then
             root:AddChildren(statement_node)
         else
-            -- If a statement can't be parsed, it might be an empty line or comment, just advance
-            -- This needs to be more robust for actual error handling
-            self.token_position = self.token_position + 1
+            -- If parse_statement returns nil, it means either no statement was found
+            -- or we've reached the end of a block (like 'end').
+            -- We should only advance if we haven't reached the end of tokens.
+            if self.token_position <= #self.tokens then
+                self.token_position = self.token_position + 1
+            else
+                break -- Reached end of tokens
+            end
         end
     end
 

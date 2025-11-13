@@ -1,8 +1,12 @@
-local translator = require("src.translator")
 local cpp_translator = require("src.cpp_translator")
 
+local translator_chunk, err = loadfile("src/translator.lua")
+if not translator_chunk then
+    error("Error loading src/translator.lua: " .. err)
+end
+local translator = dofile("src/translator.lua")
+
 local function translate_file(lua_file_path, output_file_name)
-    print("DEBUG: Starting translation for file: " .. lua_file_path)
     print("Translating " .. lua_file_path .. "...")
     local file = io.open(lua_file_path, "r")
     if not file then
@@ -12,12 +16,15 @@ local function translate_file(lua_file_path, output_file_name)
     file:close()
 
     local ast = translator.translate(lua_code)
-    -- DEBUG: Print AST
-    print("--- AST for " .. lua_file_path .. " ---")
-    print(require("src.ast_printer").print_ast(ast))
-    print("--- End AST for " .. lua_file_path .. " ---")
-    local cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false) -- for .cpp
-    local hpp_code = cpp_translator.translate_recursive(ast, output_file_name, true) -- for .hpp
+    local cpp_code
+    local hpp_code
+    if output_file_name == "main" then
+        cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false, nil) -- for .cpp, global scope
+        hpp_code = cpp_translator.translate_recursive(ast, output_file_name, true, nil) -- for .hpp, global scope
+    else
+        cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false, output_file_name) -- for .cpp, module scope
+        hpp_code = cpp_translator.translate_recursive(ast, output_file_name, true, output_file_name) -- for .hpp, module scope
+    end
 
     local cpp_output_path = "build/" .. output_file_name .. ".cpp"
     local hpp_output_path = "build/" .. output_file_name .. ".hpp"
@@ -46,5 +53,11 @@ translate_file("examples/other_module.lua", "other_module")
 
 -- Translate main.lua
 translate_file("examples/main.lua", "main")
+
+-- Translate test_utf8.lua
+translate_file("examples/test_utf8.lua", "test_utf8")
+
+-- Translate test_multi_assign.lua
+translate_file("examples/test_multi_assign.lua", "test_multi_assign")
 
 print("Translation complete.")
