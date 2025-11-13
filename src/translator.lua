@@ -128,9 +128,53 @@ function Parser:tokenize()
 
         elseif char == '-' then
             if self.position + 1 <= #self.code and self.code:sub(self.position + 1, self.position + 1) == '-' then
-                -- This is a comment, consume until newline
-                while self.position <= #self.code and self.code:sub(self.position, self.position) ~= '\n' do
-                    self.position = self.position + 1
+                -- This is a comment
+                self.position = self.position + 2 -- consume '--'
+                local next_char = self.code:sub(self.position, self.position)
+                if next_char == '[' then
+                    -- Potentially a multi-line comment: --[[ or --[=[
+                    self.position = self.position + 1 -- consume first '['
+                    local num_equals = 0
+                    while self.position <= #self.code and self.code:sub(self.position, self.position) == '=' do
+                        num_equals = num_equals + 1
+                        self.position = self.position + 1
+                    end
+                    local second_bracket = self.code:sub(self.position, self.position)
+                    if second_bracket == '[' then
+                        -- Confirmed multi-line comment: --[=[...]=]
+                        self.position = self.position + 1 -- consume second '['
+                        local comment_end_found = false
+                        while self.position <= #self.code do
+                            local current_sub = self.code:sub(self.position, self.position + 1 + num_equals)
+                            local expected_end = ']'
+                            for i = 1, num_equals do
+                                expected_end = expected_end .. '='
+                            end
+                            expected_end = expected_end .. ']'
+
+                            if current_sub:sub(1, 1) == ']' and current_sub == expected_end then
+                                self.position = self.position + #expected_end
+                                comment_end_found = true
+                                break
+                            else
+                                self.position = self.position + 1
+                            end
+                        end
+                        if not comment_end_found then
+                            error("Unclosed multi-line comment")
+                        end
+                    else
+                        -- Single-line comment starting with --[...
+                        -- This is not standard Lua, but handle it as a single line comment
+                        while self.position <= #self.code and self.code:sub(self.position, self.position) ~= '\n' do
+                            self.position = self.position + 1
+                        end
+                    end
+                else
+                    -- Single-line comment: --
+                    while self.position <= #self.code and self.code:sub(self.position, self.position) ~= '\n' do
+                        self.position = self.position + 1
+                    end
                 end
             else
                 table.insert(self.tokens, { type = "operator", value = char })
