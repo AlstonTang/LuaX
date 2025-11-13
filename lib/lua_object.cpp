@@ -305,17 +305,7 @@ std::vector<LuaValue> lua_loadfile(std::shared_ptr<LuaObject> args) {
     return {}; // Should not be reached
 }
 
-// ipairs (not supported in translated environment)
-std::vector<LuaValue> lua_ipairs(std::shared_ptr<LuaObject> args) {
-    throw std::runtime_error("ipairs is not supported in the translated environment.");
-    return {}; // Should not be reached
-}
 
-// pairs (not supported in translated environment)
-std::vector<LuaValue> lua_pairs(std::shared_ptr<LuaObject> args) {
-    throw std::runtime_error("pairs is not supported in the translated environment.");
-    return {}; // Should not be reached
-}
 
 // dofile (not supported in translated environment)
 std::vector<LuaValue> lua_dofile(std::shared_ptr<LuaObject> args) {

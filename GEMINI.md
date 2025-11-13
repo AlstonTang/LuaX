@@ -4,20 +4,20 @@ This project is a Lua to C++ translator, named "LuaX". It takes Lua source files
 
 ## Building and Running
 
-The project can be built and run using the `autotest.bash` script:
+The project can be built and run for a specific Lua file using the `scripts/luax.lua` script:
 
 ```bash
-./autotest.bash
+lua5.4 scripts/luax.lua <path_to_lua_file>
 ```
 
 This script performs the following steps:
-1.  Translates the Lua files in the `examples/` directory into C++ files located in the `build/` directory.
-2.  Compiles the generated C++ code along with the runtime library (`lib/lua_object.cpp`) into an executable named `luax_app` in the `build/` directory.
-3.  Runs the `luax_app` executable.
+1.  Analyzes the provided Lua file for dependencies.
+2.  Translates the main Lua file and all its dependent Lua files into C++ files located in the `build/` directory.
+3.  Compiles the generated C++ code along with the runtime library (`lib/lua_object.cpp` and others) into an executable named `luax_app` in the `build/` directory.
 
 ## Development Conventions
 
-The core of the project is the translator located in `src/translate_project.lua`. The translator first builds an Abstract Syntax Tree (AST) from the Lua code and then generates the corresponding C++ code. The C++ runtime library in `lib/` and `include/` provides the necessary support for Lua features in the compiled C++ code.
+The primary entry point for translating individual Lua files is `scripts/luax.lua`. The translator itself is composed of modules like `src/translator.lua` (for AST generation) and `src/cpp_translator.lua` (for C++ code generation). The C++ runtime library in `lib/` and `include/` provides the necessary support for Lua features in the compiled C++ code.
 
 ---
 
@@ -53,9 +53,7 @@ The following Lua standard libraries and global functions/constants have been su
     *   `warn`
     *   `xpcall`
 
-## Current Issues
 
-*   None. All identified compilation and runtime issues have been resolved.
 
 ## Immediate Next Steps
 

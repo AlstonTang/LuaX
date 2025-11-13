@@ -216,21 +216,76 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 end
             end
             return cpp_code .. "\n"
-        elseif node.type == "for_statement" then
+        elseif node.type == "for_numeric_statement" then
             local var_name = node.ordered_children[1].identifier
             local start_expr_code = get_single_lua_value_cpp_code(node.ordered_children[2], for_header, false, current_module_object_name)
             local end_expr_code = get_single_lua_value_cpp_code(node.ordered_children[3], for_header, false, current_module_object_name)
             local step_expr_code
-            local body_code
+            local body_node
             if #node.ordered_children == 5 then
                 step_expr_code = get_single_lua_value_cpp_code(node.ordered_children[4], for_header, false, current_module_object_name)
-                body_code = translate_node_to_cpp(node.ordered_children[5], for_header, false, current_module_object_name)
+                body_node = node.ordered_children[5]
             else
                 step_expr_code = "LuaValue(1.0)"
-                body_code = translate_node_to_cpp(node.ordered_children[4], for_header, false, current_module_object_name)
+                body_node = node.ordered_children[4]
+            end
+            local loop_condition = ""
+            if step_expr_code == "LuaValue(1.0)" then -- Default step is 1.0, assume positive
+                loop_condition = "get_double(" .. var_name .. ") <= get_double(" .. end_expr_code .. ")"
+            else
+                -- Determine if step is positive or negative at runtime
+                loop_condition = "(get_double(" .. step_expr_code .. ") >= 0 ? get_double(" .. var_name .. ") <= get_double(" .. end_expr_code .. ") : get_double(" .. var_name .. ") >= get_double(" .. end_expr_code .. "))"
             end
             declared_variables[var_name] = true
-            return "for (LuaValue " .. var_name .. " = " .. start_expr_code .. "; get_double(" .. var_name .. ") <= get_double(" .. end_expr_code .. "); " .. var_name .. " = LuaValue(get_double(" .. var_name .. ") + get_double(" .. step_expr_code .. "))) {\n" .. body_code .. "}"
+            return "for (LuaValue " .. var_name .. " = " .. start_expr_code .. "; " .. loop_condition .. "; " .. var_name .. " = LuaValue(get_double(" .. var_name .. ") + get_double(" .. step_expr_code .. "))) {\n" .. translate_node_to_cpp(body_node, for_header, false, current_module_object_name) .. "}"
+        elseif node.type == "for_generic_statement" then
+            local var_list_node = node.ordered_children[1]
+            local expr_list_node = node.ordered_children[2]
+            local body_node = node.ordered_children[3]
+
+            local iterator_call_code = translate_node_to_cpp(expr_list_node, for_header, false, current_module_object_name)
+            
+            local loop_vars = {}
+            for _, var_node in ipairs(var_list_node.ordered_children) do
+                table.insert(loop_vars, var_node.identifier)
+                declared_variables[var_node.identifier] = true
+            end
+            local loop_vars_declaration = ""
+            for _, var_name in ipairs(loop_vars) do
+                loop_vars_declaration = loop_vars_declaration .. "LuaValue " .. var_name .. "; "
+            end
+
+            -- Assuming the iterator_call_code returns a vector of {iterator_func, state, initial_value}
+            -- This is a simplified approach and might need adjustment based on actual pairs/ipairs implementation
+            local iter_func_var = "iter_func_" .. tostring(math.random(10000))
+            local iter_state_var = "iter_state_" .. tostring(math.random(10000))
+            local iter_value_var = "iter_value_" .. tostring(math.random(10000))
+            local results_var = "iter_results_" .. tostring(math.random(10000))
+
+            local cpp_code = ""
+            cpp_code = cpp_code .. "std::vector<LuaValue> " .. results_var .. " = " .. iterator_call_code .. ";\n"
+            cpp_code = cpp_code .. "auto " .. iter_func_var .. " = std::get<std::shared_ptr<LuaFunctionWrapper>>(" .. results_var .. "[0]);\n"
+            cpp_code = cpp_code .. "LuaValue " .. iter_state_var .. " = " .. results_var .. "[1];\n"
+            cpp_code = cpp_code .. "LuaValue " .. iter_value_var .. " = " .. results_var .. "[2];\n"
+            
+            cpp_code = cpp_code .. "while (true) {\n"
+            cpp_code = cpp_code .. "    auto args_obj = std::make_shared<LuaObject>();\n"
+            cpp_code = cpp_code .. "    args_obj->set(\"1\", " .. iter_state_var .. ");\n"
+            cpp_code = cpp_code .. "    args_obj->set(\"2\", " .. iter_value_var .. ");\n"
+            cpp_code = cpp_code .. "    std::vector<LuaValue> current_values = " .. iter_func_var .. "->func(args_obj);\n"
+            
+            cpp_code = cpp_code .. "    if (current_values.empty() || std::holds_alternative<std::monostate>(current_values[0])) {\n"
+            cpp_code = cpp_code .. "        break;\n"
+            cpp_code = cpp_code .. "    }\n"
+
+            for i, var_name in ipairs(loop_vars) do
+                cpp_code = cpp_code .. "    LuaValue " .. var_name .. " = current_values[" .. (i - 1) .. "];\n"
+            end
+            cpp_code = cpp_code .. "    " .. iter_value_var .. " = " .. loop_vars[1] .. ";\n" -- The first return value becomes the next 'var' for the iterator
+
+            cpp_code = cpp_code .. translate_node_to_cpp(body_node, for_header, false, current_module_object_name) .. "\n"
+            cpp_code = cpp_code .. "}\n"
+            return cpp_code
         elseif node.type == "while_statement" then
             local condition = translate_node_to_cpp(node.ordered_children[1], for_header, false, current_module_object_name)
             local body = translate_node_to_cpp(node.ordered_children[2], for_header, false, current_module_object_name)

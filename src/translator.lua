@@ -562,60 +562,108 @@ end
 
 function Parser:parse_for_statement()
     self.token_position = self.token_position + 1 -- consume 'for'
-    local for_node = Node:new("for_statement")
-
-    local identifier_token = self:peek()
-    if not identifier_token or identifier_token.type ~= "identifier" then
+    
+    local first_identifier_token = self:peek()
+    if not first_identifier_token or first_identifier_token.type ~= "identifier" then
         error("Expected identifier after 'for'")
     end
-    self.token_position = self.token_position + 1 -- consume identifier
-    local variable_node = Node:new("variable", nil, identifier_token.value)
+    self.token_position = self.token_position + 1 -- consume first identifier
 
-    local equals_token = self:peek()
-    if not equals_token or equals_token.value ~= "=" then
-        error("Expected '=' after for loop variable")
-    end
-    self.token_position = self.token_position + 1 -- consume '='
+    local next_token = self:peek()
 
-    local start_expr = self:parse_expression()
-    if not start_expr then error("Expected start expression in for loop") end
+    if next_token and next_token.value == '=' then
+        -- Numeric for loop: for var = start, end, [step]
+        local for_node = Node:new("for_numeric_statement")
+        local variable_node = Node:new("identifier", first_identifier_token.value, first_identifier_token.value)
+        for_node:AddChildren(variable_node)
 
-    local comma_token = self:peek()
-    if not comma_token or comma_token.type ~= "comma" then
-        error("Expected ',' after for loop start expression")
-    end
-    self.token_position = self.token_position + 1 -- consume ','
+        self.token_position = self.token_position + 1 -- consume '='
 
-    local end_expr = self:parse_expression()
-    if not end_expr then error("Expected end expression in for loop") end
+        local start_expr = self:parse_expression()
+        if not start_expr then error("Expected start expression in numeric for loop") end
+        for_node:AddChildren(start_expr)
 
-    local step_expr = nil
-    if self:peek() and self:peek().type == "comma" then
+        local comma_token = self:peek()
+        if not comma_token or comma_token.type ~= "comma" then
+            error("Expected ',' after numeric for loop start expression")
+        end
         self.token_position = self.token_position + 1 -- consume ','
-        step_expr = self:parse_expression()
-        if not step_expr then error("Expected step expression in for loop") end
+
+        local end_expr = self:parse_expression()
+        if not end_expr then error("Expected end expression in numeric for loop") end
+        for_node:AddChildren(end_expr)
+
+        if self:peek() and self:peek().type == "comma" then
+            self.token_position = self.token_position + 1 -- consume ','
+            local step_expr = self:parse_expression()
+            if not step_expr then error("Expected step expression in numeric for loop") end
+            for_node:AddChildren(step_expr)
+        end
+
+        local do_token = self:peek()
+        if not do_token or do_token.value ~= "do" then error("Expected 'do' after numeric for loop expressions") end
+        self.token_position = self.token_position + 1 -- consume 'do'
+
+        local body_node = Node:new("block")
+        while self:peek() and self:peek().value ~= "end" do
+            local statement = self:parse_statement()
+            if statement then body_node:AddChildren(statement) end
+        end
+
+        local end_token = self:peek()
+        if not end_token or end_token.value ~= "end" then error("Expected 'end' to close numeric for statement") end
+        self.token_position = self.token_position + 1 -- consume 'end'
+
+        for_node:AddChildren(body_node)
+        return for_node
+    elseif next_token and (next_token.type == "comma" or next_token.value == "in") then
+        -- Generic for loop: for var_list in expr_list
+        local for_node = Node:new("for_generic_statement")
+        local var_list_node = Node:new("variable_list")
+        var_list_node:AddChildren(Node:new("identifier", first_identifier_token.value, first_identifier_token.value))
+
+        while self:peek() and self:peek().type == "comma" do
+            self.token_position = self.token_position + 1 -- consume ','
+            local identifier_token = self:peek()
+            if not identifier_token or identifier_token.type ~= "identifier" then
+                error("Expected identifier in generic for loop variable list")
+            end
+            self.token_position = self.token_position + 1 -- consume identifier
+            var_list_node:AddChildren(Node:new("identifier", identifier_token.value, identifier_token.value))
+        end
+        for_node:AddChildren(var_list_node)
+
+        local in_token = self:peek()
+        if not in_token or in_token.value ~= "in" then
+            error("Expected 'in' after generic for loop variable list")
+        end
+        self.token_position = self.token_position + 1 -- consume 'in'
+
+        local expr_list_node = self:parse_expression_list()
+        if #expr_list_node.ordered_children == 0 then
+            error("Expected expression list after 'in' in generic for loop")
+        end
+        for_node:AddChildren(expr_list_node)
+
+        local do_token = self:peek()
+        if not do_token or do_token.value ~= "do" then error("Expected 'do' after generic for loop expressions") end
+        self.token_position = self.token_position + 1 -- consume 'do'
+
+        local body_node = Node:new("block")
+        while self:peek() and self:peek().value ~= "end" do
+            local statement = self:parse_statement()
+            if statement then body_node:AddChildren(statement) end
+        end
+
+        local end_token = self:peek()
+        if not end_token or end_token.value ~= "end" then error("Expected 'end' to close generic for statement") end
+        self.token_position = self.token_position + 1 -- consume 'end'
+
+        for_node:AddChildren(body_node)
+        return for_node
+    else
+        error("Invalid 'for' loop syntax: expected '=' or 'in'")
     end
-
-    local do_token = self:peek()
-    if not do_token or do_token.value ~= "do" then error("Expected 'do' after for loop expressions") end
-    self.token_position = self.token_position + 1 -- consume 'do'
-
-    local body_node = Node:new("block")
-    while self:peek() and self:peek().value ~= "end" do
-        local statement = self:parse_statement()
-        if statement then body_node:AddChildren(statement) end
-    end
-
-    local end_token = self:peek()
-    if not end_token or end_token.value ~= "end" then error("Expected 'end' to close for statement") end
-    self.token_position = self.token_position + 1 -- consume 'end'
-
-    for_node:AddChildren(variable_node, start_expr, end_expr)
-    if step_expr then
-        for_node:AddChildren(step_expr)
-    end
-    for_node:AddChildren(body_node)
-    return for_node
 end
 
 function Parser:parse_while_statement()
