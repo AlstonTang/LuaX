@@ -320,13 +320,13 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 local pattern_node = node.ordered_children[3]
                 local base_string_code = translate_node_to_cpp(base_string_node, for_header, false, current_module_object_name)
                 local pattern_code = translate_node_to_cpp(pattern_node, for_header, false, current_module_object_name)
-                return "{LuaValue(std::regex_search(" .. base_string_code .. ", std::regex(" .. pattern_code .. ")))}"
+                return "{LuaValue(std::regex_search(to_cpp_string(" .. base_string_code .. "), std::regex(to_cpp_string(" .. pattern_code .. "))))}"
             elseif func_node.type == "member_expression" and func_node.ordered_children[1].identifier == "string" and func_node.ordered_children[2].identifier == "find" then
                 local base_string_node = node.ordered_children[2]
                 local pattern_node = node.ordered_children[3]
                 local base_string_code = translate_node_to_cpp(base_string_node, for_header, false, current_module_object_name)
                 local pattern_code = translate_node_to_cpp(pattern_node, for_header, false, current_module_object_name)
-                return "{LuaValue(" .. base_string_code .. ".find(" .. pattern_code .. ") != std::string::npos ? static_cast<double>(" .. base_string_code .. ".find(" .. pattern_code .. ") + 1) : 0.0)}"
+                return "{LuaValue(to_cpp_string(" .. base_string_code .. ").find(to_cpp_string(" .. pattern_code .. ")) != std::string::npos ? static_cast<double>(to_cpp_string(" .. base_string_code .. ").find(to_cpp_string(" .. pattern_code .. ")) + 1) : 0.0)}"
             elseif func_node.type == "member_expression" and func_node.ordered_children[1].identifier == "string" and func_node.ordered_children[2].identifier == "gsub" then
                 local base_string_node = node.ordered_children[2]
                 local pattern_node = node.ordered_children[3]
@@ -334,7 +334,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 local base_string_code = translate_node_to_cpp(base_string_node, for_header, false, current_module_object_name)
                 local pattern_code = translate_node_to_cpp(pattern_node, for_header, false, current_module_object_name)
                 local replacement_code = translate_node_to_cpp(replacement_node, for_header, false, current_module_object_name)
-                return "{LuaValue(std::regex_replace(" .. base_string_code .. ", std::regex(" .. pattern_code .. "), " .. replacement_code .. "))}"
+                return "{LuaValue(std::regex_replace(to_cpp_string(" .. base_string_code .. "), std::regex(to_cpp_string(" .. pattern_code .. ")), to_cpp_string(" .. replacement_code .. ")))}"
             elseif func_node.type == "identifier" and func_node.identifier == "print" then
                 local cpp_code = ""
                 for i, arg_node in ipairs(node.ordered_children) do
