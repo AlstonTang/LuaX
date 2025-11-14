@@ -353,7 +353,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 if module_name_node and module_name_node.type == "string" then
                     local module_name = module_name_node.value
                     required_modules[module_name] = true
-                    return module_name .. "::load()"
+                    return module_name .. "::load()[0]"
                 end
                 return "/* require call with non-string argument */"
             elseif func_node.type == "identifier" and func_node.identifier == "setmetatable" then
