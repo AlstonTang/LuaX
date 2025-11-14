@@ -1,0 +1,11 @@
+print("package.config:", package.config)
+print("package.path:", package.path)
+print("package.cpath:", package.cpath)
+print("package.loaded:", package.loaded)
+print("package.preload:", package.preload)
+print("package.searchers:", package.searchers)
+
+local status, result = pcall(function()
+    package.loadlib()
+end)
+print("pcall(package.loadlib):", status, result)

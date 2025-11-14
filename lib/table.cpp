@@ -195,31 +195,10 @@ std::vector<LuaValue> table_remove(std::shared_ptr<LuaObject> args) {
 
 // pairs iterator function
 std::vector<LuaValue> pairs_iterator(std::shared_ptr<LuaObject> args) {
-    auto table = get_object(args->get("1")); // The table being iterated (state)
-    LuaValue prev_key = args->get("2");    // The previous key (control variable)
-
-    if (!table) {
-        return {std::monostate{}}; // Return nil if table is invalid
-    }
-
-    // Find the next key in the map
-    auto it = table->properties.begin();
-    if (!std::holds_alternative<std::monostate>(prev_key)) {
-        // If prev_key is not nil, find it and move to the next element
-        std::string prev_key_str = to_cpp_string(prev_key);
-        it = table->properties.find(prev_key_str);
-        if (it != table->properties.end()) {
-            ++it; // Move to the next element
-        }
-    }
-
-    if (it != table->properties.end()) {
-        // Return the current key and value
-        return {LuaValue(it->first), it->second};
-    } else {
-        // No more elements, return nil
-        return {std::monostate{}};
-    }
+    // The pairs_iterator function is essentially a wrapper around lua_next.
+    // It receives the table (state) and the previous key (control variable).
+    // It needs to call lua_next with these arguments.
+    return lua_next(args);
 }
 
 // lua_pairs function

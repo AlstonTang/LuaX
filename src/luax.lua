@@ -3,8 +3,9 @@
 -- all required Lua files into C++, compiles them into a single executable,
 -- and then runs the executable.
 
-local cpp_translator = require("src.cpp_translator")
-local translator = require("src.translator")
+-- Use dofile to ensure latest versions are loaded, bypassing require's cache
+local cpp_translator = dofile("src/cpp_translator.lua")
+local translator = dofile("src/translator.lua")
 
 local function run_command(command_str, error_message)
     print("Executing command: " .. command_str)
@@ -158,6 +159,8 @@ local lib_cpp_files = {
     "lib/package.cpp",
     "lib/utf8.cpp",
     "lib/init.cpp",
+    "lib/debug.cpp",
+    "lib/coroutine.cpp"
 }
 
 local compile_command = "clang++ -std=c++17 -Iinclude -o " .. path_to_out_file .. " "
@@ -181,7 +184,7 @@ for _, file in ipairs(lib_cpp_files) do
     compile_command = compile_command .. file .. " "
 end
 
-compile_command = compile_command .. "-lstdc++fs -O2"
+compile_command = compile_command .. "-lstdc++fs -O0"
 
 run_command(compile_command, "Compilation failed.")
 

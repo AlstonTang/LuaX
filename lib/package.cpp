@@ -5,7 +5,7 @@
 #include <fstream> // Added for std::ifstream
 #include <numeric> // Added for std::accumulate
 #include <vector> // Added for std::vector
-using namespace std; // Temporarily added for debugging namespace issues
+#include <stdexcept>
 
 // package.searchpath
 std::vector<LuaValue> package_searchpath(std::shared_ptr<LuaObject> args) {
@@ -52,18 +52,28 @@ std::vector<LuaValue> package_searchpath(std::shared_ptr<LuaObject> args) {
     return {std::monostate{}, error_msg}; // Return nil, error message would be second return value in Lua
 }
 
+// package.loadlib
+std::vector<LuaValue> package_loadlib(std::shared_ptr<LuaObject> args) {
+    throw std::runtime_error("package.loadlib is not supported in the translated environment.");
+    return {}; // Should not be reached
+}
+
 // Global tables for package.loaded and package.preload
 std::shared_ptr<LuaObject> package_loaded_table = std::make_shared<LuaObject>();
 std::shared_ptr<LuaObject> package_preload_table = std::make_shared<LuaObject>();
+std::shared_ptr<LuaObject> package_searchers_table = std::make_shared<LuaObject>();
 
 std::shared_ptr<LuaObject> create_package_library() {
     auto package_lib = std::make_shared<LuaObject>();
 
-    package_lib->set("cpath", LuaValue(std::string("")));
+    package_lib->set("config", LuaValue(std::string("/\n;\n?\n!\n-\n")));
+    package_lib->set("cpath", LuaValue(std::string("./?.so;")));
     package_lib->set("loaded", package_loaded_table);
+    package_lib->set("loadlib", std::make_shared<LuaFunctionWrapper>(package_loadlib));
+    package_lib->set("path", LuaValue(std::string("./?.lua;")));
     package_lib->set("preload", package_preload_table);
+    package_lib->set("searchers", package_searchers_table);
     package_lib->set("searchpath", std::make_shared<LuaFunctionWrapper>(package_searchpath));
-    package_lib->set("path", LuaValue(std::string("")));
 
     return package_lib;
 }

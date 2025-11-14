@@ -100,14 +100,23 @@ function Parser:tokenize()
             self.position = self.position + 1
         elseif is_digit(char) then
             local start_pos = self.position
-            while self.position <= #self.code and is_digit(self.code:sub(self.position, self.position)) do
-                self.position = self.position + 1
+            local is_float = false
+            while self.position <= #self.code do
+                local current_char = self.code:sub(self.position, self.position)
+                if is_digit(current_char) then
+                    self.position = self.position + 1
+                elseif current_char == '.' and not is_float then
+                    is_float = true
+                    self.position = self.position + 1
+                else
+                    break
+                end
             end
             local val = self.code:sub(start_pos, self.position - 1)
-            if math.tointeger(val) then
-                table.insert(self.tokens, { type = "integer", value = val })
-            else
+            if is_float then
                 table.insert(self.tokens, { type = "number", value = val })
+            else
+                table.insert(self.tokens, { type = "integer", value = val })
             end
         elseif is_alpha(char) then
             local start_pos = self.position
@@ -249,8 +258,8 @@ function Parser:tokenize()
                     elseif escaped_char == 'a' then table.insert(buffer, '\a')
                     elseif escaped_char == 'v' then table.insert(buffer, '\v')
                     elseif escaped_char == '\\' then table.insert(buffer, '\\')
-                    elseif escaped_char == '"' then table.insert(buffer, '"')
-                    elseif escaped_char == "'" then table.insert(buffer, "'")
+                    elseif escaped_char == '"' then table.insert(buffer, '\"')
+                    elseif escaped_char == "'" then table.insert(buffer, "'" )
                     -- Add other escape sequences as needed (e.g., \ddd, \xdd, \u{hhhh})
                     else table.insert(buffer, escaped_char) -- For unknown escape sequences, just insert the char
                     end
@@ -264,6 +273,9 @@ function Parser:tokenize()
                 end
             end
             table.insert(self.tokens, { type = "string", value = table.concat(buffer) })
+        elseif char == '[' or char == ']' then
+            table.insert(self.tokens, { type = "square_bracket", value = char })
+            self.position = self.position + 1
         elseif char == '{' or char == '}' then
             table.insert(self.tokens, { type = "brace", value = char })
             self.position = self.position + 1
@@ -369,9 +381,22 @@ function Parser:parse_function_call_or_member_access(base_node)
                 else error("Expected '(' after method identifier") end
                 current_node = method_call_node
             else error("Expected identifier after ':'") end
+        elseif token.type == "square_bracket" and token.value == '[' then
+            self.token_position = self.token_position + 1 -- consume '['
+            local index_expr = self:parse_expression(0)
+            if not index_expr then error("Expected index expression inside '[]'") end
 
+            local close_bracket_token = self:peek()
+            if not close_bracket_token or not (close_bracket_token.type == "square_bracket" and close_bracket_token.value == ']') then
+                error("Expected ']' to close table index")
+            end
+            self.token_position = self.token_position + 1 -- consume ']'
+
+            local index_node = Node:new("table_index_expression")
+            index_node:AddChildren(current_node, index_expr)
+            current_node = index_node
         else
-            -- If the current token is not '(', '.', or ':', break the loop
+            -- If the current token is not '(', '.', ':', or '[', break the loop
             break
         end
     end
@@ -392,6 +417,25 @@ function Parser:parse_table_constructor()
             key_node = Node:new("identifier", current_token.value, current_token.value) -- Set identifier field
             self.token_position = self.token_position + 2 -- consume identifier and '='
             value_node = self:parse_expression(0)
+        elseif current_token.type == "square_bracket" and current_token.value == '[' then
+            -- Explicit key-value field: [expression] = expression
+            self.token_position = self.token_position + 1 -- consume '['
+            key_node = self:parse_expression(0) -- Parse the key expression
+            if not key_node then error("Expected key expression inside '[]'") end
+
+            local close_bracket_token = self:peek()
+            if not close_bracket_token or not (close_bracket_token.type == "square_bracket" and close_bracket_token.value == ']') then
+                error("Expected ']' to close table key")
+            end
+            self.token_position = self.token_position + 1 -- consume ']'
+
+            local equals_token = self:peek()
+            if not equals_token or equals_token.value ~= '=' then
+                error("Expected '=' after table key")
+            end
+            self.token_position = self.token_position + 1 -- consume '='
+
+            value_node = self:parse_expression(0) -- Parse the value expression
         else
             -- List-style field: expression
             value_node = self:parse_expression(0)
@@ -424,16 +468,19 @@ end
 
 function Parser:parse_variable_list()
     local variables = {}
-    repeat
-        local var_node = self:parse_function_call_or_member_access(self:parse_primary_expression())
-        if not var_node then error("Expected variable in list") end
+    -- Parse the first variable
+    local var_node = self:parse_function_call_or_member_access(self:parse_primary_expression())
+    if not var_node then error("Expected variable in list") end
+    table.insert(variables, var_node)
+
+    -- Parse subsequent variables if separated by commas
+    while self:peek() and self:peek().type == "comma" do
+        self.token_position = self.token_position + 1 -- consume ','
+        var_node = self:parse_function_call_or_member_access(self:parse_primary_expression())
+        if not var_node then error("Expected variable in list after comma") end
         table.insert(variables, var_node)
-        if self:peek() and self:peek().type == "comma" then
-            self.token_position = self.token_position + 1 -- consume ','
-        else
-            break
-        end
-    until false
+    end
+
     local var_list_node = Node:new("variable_list")
     var_list_node:AddChildren(table.unpack(variables))
     return var_list_node
@@ -459,7 +506,6 @@ end
 function Parser:parse_primary_expression()
     local token = self:peek()
     if not token then
-        print("DEBUG: parse_primary_expression: No token to peek, returning nil")
         return nil
     end
 
@@ -502,7 +548,7 @@ function Parser:parse_primary_expression()
     end
 
     if node then
-        return self:parse_function_call_or_member_access(node)
+        return node
     end
     return nil
 end
@@ -513,6 +559,8 @@ function Parser:parse_expression(min_precedence)
     if not left_expr then 
         error("parse_expression: parse_primary_expression returned nil. Current token: type=" .. (self:peek() and self:peek().type or "nil") .. ", value=" .. (self:peek() and self:peek().value or "nil"))
     end
+
+    left_expr = self:parse_function_call_or_member_access(left_expr)
 
     while true do
         local operator_token = self:peek()

@@ -145,15 +145,40 @@ std::vector<LuaValue> utf8_codepoint(std::shared_ptr<LuaObject> args) {
     return results_vec;
 }
 
-// utf8.codes (iterator for codepoints) - Placeholder
-std::vector<LuaValue> utf8_codes(std::shared_ptr<LuaObject> args) {
-    // This is a complex iterator function. For now, return a placeholder function.
-    // A proper implementation would involve a generator or stateful object.
-    return {std::make_shared<LuaFunctionWrapper>([](std::shared_ptr<LuaObject> iter_args) -> std::vector<LuaValue> {
-        // This lambda would typically return the next codepoint and its position
-        // For now, it just returns nil to stop iteration immediately.
+// utf8.codes (iterator for codepoints)
+std::vector<LuaValue> utf8_codes_iterator(std::shared_ptr<LuaObject> args) {
+    LuaValue s_val = args->get("1");
+    if (!std::holds_alternative<std::string>(s_val)) {
         return {std::monostate{}};
-    })};
+    }
+    std::string s = std::get<std::string>(s_val);
+
+    LuaValue offset_val = args->get("2");
+    size_t offset = 0;
+    if (std::holds_alternative<double>(offset_val)) {
+        offset = static_cast<size_t>(std::get<double>(offset_val));
+    }
+
+    if (offset >= s.length()) {
+        return {std::monostate{}};
+    }
+
+    size_t original_offset = offset;
+    int codepoint = decode_utf8(s, offset);
+
+    if (offset > original_offset) {
+        return {LuaValue(static_cast<double>(offset)), LuaValue(static_cast<double>(codepoint))};
+    } else {
+        return {std::monostate{}};
+    }
+}
+
+std::vector<LuaValue> utf8_codes(std::shared_ptr<LuaObject> args) {
+    LuaValue s_val = args->get("1");
+    if (!std::holds_alternative<std::string>(s_val)) {
+        throw std::runtime_error("bad argument #1 to 'codes' (string expected)");
+    }
+    return {std::make_shared<LuaFunctionWrapper>(utf8_codes_iterator), s_val, LuaValue(0.0)};
 }
 
 // utf8.len (length of UTF-8 string)

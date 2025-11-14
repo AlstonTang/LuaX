@@ -5,18 +5,53 @@
 std::shared_ptr<LuaObject> _G = std::make_shared<LuaObject>();
 
 LuaValue LuaObject::get(const std::string& key) {
-    if (properties.count(key)) {
-        return properties[key];
+    return get_item(key);
+}
+
+void LuaObject::set(const std::string& key, const LuaValue& value) {
+    set_item(key, value);
+}
+
+void LuaObject::set_metatable(std::shared_ptr<LuaObject> mt) {
+    metatable = mt;
+}
+
+LuaValue LuaObject::get_item(const LuaValue& key) {
+    // Try to access as integer key first
+    if (std::holds_alternative<long long>(key)) {
+        long long int_key = std::get<long long>(key);
+        if (array_properties.count(int_key)) {
+            return array_properties[int_key];
+        }
+    } else if (std::holds_alternative<double>(key)) {
+        double double_key = std::get<double>(key);
+        if (double_key == static_cast<long long>(double_key)) { // Check if it's an integer
+            long long int_key = static_cast<long long>(double_key);
+            if (array_properties.count(int_key)) {
+                return array_properties[int_key];
+            }
+        } else {
+            if (array_properties.count(double_key)) {
+                return array_properties[double_key];
+            }
+        }
     }
+
+    // Then try to access as string key
+    std::string key_str = to_cpp_string(key);
+    if (properties.count(key_str)) {
+        return properties[key_str];
+    }
+
+    // Metatable __index logic
     if (metatable) {
-        auto index = metatable->get("__index");
+        auto index = metatable->get_item("__index"); // Use get_item for metatable access
         if (std::holds_alternative<std::shared_ptr<LuaObject>>(index)) {
-            return std::get<std::shared_ptr<LuaObject>>(index)->get(key);
+            return std::get<std::shared_ptr<LuaObject>>(index)->get_item(key);
         } else if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(index)) {
-            // If __index is a function, call it
             auto args = std::make_shared<LuaObject>();
-            args->set("1", shared_from_this());
-            args->set("2", key);
+            args->set_item("1", shared_from_this());
+            args->set_item("2", key);
             std::vector<LuaValue> results = std::get<std::shared_ptr<LuaFunctionWrapper>>(index)->func(args);
             if (!results.empty()) {
                 return results[0];
@@ -26,28 +61,40 @@ LuaValue LuaObject::get(const std::string& key) {
     return std::monostate{}; // nil
 }
 
-void LuaObject::set(const std::string& key, const LuaValue& value) {
+void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
+    // Metatable __newindex logic
     if (metatable) {
-        auto newindex = metatable->get("__newindex");
+        auto newindex = metatable->get_item("__newindex"); // Use get_item for metatable access
         if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(newindex)) {
-            // If __newindex is a function, call it
             auto args = std::make_shared<LuaObject>();
-            args->set("1", shared_from_this());
-            args->set("2", key);
-            args->set("3", value);
+            args->set_item("1", shared_from_this());
+            args->set_item("2", key);
+            args->set_item("3", value);
             std::get<std::shared_ptr<LuaFunctionWrapper>>(newindex)->func(args);
             return;
         } else if (std::holds_alternative<std::shared_ptr<LuaObject>>(newindex)) {
-            // If __newindex is a table, set the value in that table
-            std::get<std::shared_ptr<LuaObject>>(newindex)->set(key, value);
+            std::get<std::shared_ptr<LuaObject>>(newindex)->set_item(key, value);
             return;
         }
     }
-    properties[key] = value;
-}
 
-void LuaObject::set_metatable(std::shared_ptr<LuaObject> mt) {
-    metatable = mt;
+    // Try to set as integer key first
+    if (std::holds_alternative<long long>(key)) {
+        long long int_key = std::get<long long>(key);
+        array_properties[int_key] = value;
+        return;
+    } else if (std::holds_alternative<double>(key)) {
+        double double_key = std::get<double>(key);
+        if (double_key == static_cast<long long>(double_key)) { // Check if it's an integer
+            long long int_key = static_cast<long long>(double_key);
+            array_properties[int_key] = value;
+            return;
+        }
+    }
+
+    // Then set as string key
+    std::string key_str = to_cpp_string(key);
+    properties[key_str] = value;
 }
 
 std::shared_ptr<LuaObject> get_object(const LuaValue& value) {
@@ -68,6 +115,10 @@ void print_value(const LuaValue& value) {
         std::cout << (std::get<bool>(value) ? "true" : "false");
     } else if (std::holds_alternative<std::shared_ptr<LuaObject>>(value)) {
         std::cout << "<table>";
+    } else if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(value)) {
+        std::cout << "<function>";
+    } else if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(value)) {
+        std::cout << "<thread>";
     } else {
         std::cout << "nil";
     }
@@ -85,6 +136,8 @@ double get_double(const LuaValue& value) {
 long long get_long_long(const LuaValue& value) {
     if (std::holds_alternative<long long>(value)) {
         return std::get<long long>(value);
+    } else if (std::holds_alternative<double>(value)) {
+        return static_cast<long long>(std::get<double>(value));
     }
     return 0;
 }
@@ -97,24 +150,53 @@ std::string to_cpp_string(const LuaValue& value) {
         } else {
             return std::to_string(d);
         }
-    } else if (std::holds_alternative<long long>(value)) { // Added this case
+    } else if (std::holds_alternative<long long>(value)) {
         return std::to_string(std::get<long long>(value));
     } else if (std::holds_alternative<std::string>(value)) {
         return std::get<std::string>(value);
     } else if (std::holds_alternative<bool>(value)) {
         return std::get<bool>(value) ? "true" : "false";
     } else if (std::holds_alternative<std::shared_ptr<LuaObject>>(value)) {
-        return "<table>";
+        return "<table>"; // Or a unique identifier for the table
+    } else if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(value)) {
+        return "<function>"; // Or a unique identifier for the function
+    } else if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(value)) {
+        return "<thread>"; // Or a unique identifier for the coroutine
     } else {
         return "nil";
     }
 }
 
 LuaValue rawget(std::shared_ptr<LuaObject> table, const LuaValue& key) {
+    if (!table) {
+        return std::monostate{};
+    }
+    // Rawget bypasses metatables, so directly use get_item's internal logic
+    // but without the metatable checks.
+    // This is a simplified version of get_item for raw access.
+
+    // Try to access as integer key first
+    if (std::holds_alternative<long long>(key)) {
+        long long int_key = std::get<long long>(key);
+        if (table->array_properties.count(int_key)) {
+            return table->array_properties[int_key];
+        }
+    } else if (std::holds_alternative<double>(key)) {
+        double double_key = std::get<double>(key);
+        if (double_key == static_cast<long long>(double_key)) { // Check if it's an integer
+            long long int_key = static_cast<long long>(double_key);
+            if (table->array_properties.count(int_key)) {
+                return table->array_properties[int_key];
+            }
+        }
+    }
+
+    // Then try to access as string key
     std::string key_str = to_cpp_string(key);
-    if (table && table->properties.count(key_str)) {
+    if (table->properties.count(key_str)) {
         return table->properties[key_str];
     }
+
     return std::monostate{};
 }
 
@@ -144,6 +226,18 @@ bool lua_equals(const LuaValue& a, const LuaValue& b) {
         if (std::holds_alternative<std::string>(a) && std::holds_alternative<double>(b)) {
             try { return std::stod(std::get<std::string>(a)) == std::get<double>(b); } catch (...) { return false; }
         }
+        if (std::holds_alternative<long long>(a) && std::holds_alternative<std::string>(b)) {
+            try { return std::get<long long>(a) == std::stoll(std::get<std::string>(b)); } catch (...) { return false; }
+        }
+        if (std::holds_alternative<std::string>(a) && std::holds_alternative<long long>(b)) {
+            try { return std::stoll(std::get<std::string>(a)) == std::get<long long>(b); } catch (...) { return false; }
+        }
+        if (std::holds_alternative<double>(a) && std::holds_alternative<long long>(b)) {
+            return std::get<double>(a) == static_cast<double>(std::get<long long>(b));
+        }
+        if (std::holds_alternative<long long>(a) && std::holds_alternative<double>(b)) {
+            return static_cast<double>(std::get<long long>(a)) == std::get<double>(b);
+        }
         return false; // Different types, not equal
     }
 
@@ -154,6 +248,8 @@ bool lua_equals(const LuaValue& a, const LuaValue& b) {
         return std::get<bool>(a) == std::get<bool>(b);
     } else if (std::holds_alternative<double>(a)) {
         return std::get<double>(a) == std::get<double>(b);
+    } else if (std::holds_alternative<long long>(a)) {
+        return std::get<long long>(a) == std::get<long long>(b);
     } else if (std::holds_alternative<std::string>(a)) {
         return std::get<std::string>(a) == std::get<std::string>(b);
     } else if (std::holds_alternative<std::shared_ptr<LuaObject>>(a)) {
@@ -163,15 +259,14 @@ bool lua_equals(const LuaValue& a, const LuaValue& b) {
     }
     return false; // Should not reach here
 }
-
 // select
 std::vector<LuaValue> lua_select(std::shared_ptr<LuaObject> args) {
-    LuaValue index_val = args->get("1");
+    LuaValue index_val = args->get_item("1");
     if (std::holds_alternative<std::string>(index_val) && std::get<std::string>(index_val) == "#") {
         // select("#", ...) returns the total number of arguments
         long long count = 0;
         for (int i = 2; ; ++i) {
-            if (std::holds_alternative<std::monostate>(args->get(std::to_string(i)))) {
+            if (std::holds_alternative<std::monostate>(args->get_item(std::to_string(i)))) {
                 break;
             }
             count++;
@@ -182,7 +277,7 @@ std::vector<LuaValue> lua_select(std::shared_ptr<LuaObject> args) {
         long long n = static_cast<long long>(std::get<double>(index_val));
         std::vector<LuaValue> results_vec;
         for (long long i = n + 1; ; ++i) {
-            LuaValue val = args->get(std::to_string(i));
+            LuaValue val = args->get_item(std::to_string(i));
             if (std::holds_alternative<std::monostate>(val)) {
                 break;
             }
@@ -195,8 +290,8 @@ std::vector<LuaValue> lua_select(std::shared_ptr<LuaObject> args) {
 
 // xpcall
 std::vector<LuaValue> lua_xpcall(std::shared_ptr<LuaObject> args) {
-    LuaValue func_to_call = args->get("1");
-    LuaValue error_handler = args->get("2");
+    LuaValue func_to_call = args->get_item("1");
+    LuaValue error_handler = args->get_item("2");
 
     if (!std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(func_to_call)) {
         return {false}; // Not a callable function
@@ -210,9 +305,9 @@ std::vector<LuaValue> lua_xpcall(std::shared_ptr<LuaObject> args) {
 
     auto func_args = std::make_shared<LuaObject>();
     for (int i = 3; ; ++i) { // Arguments for func_to_call start from index 3
-        LuaValue arg = args->get(std::to_string(i));
+        LuaValue arg = args->get_item(std::to_string(i));
         if (std::holds_alternative<std::monostate>(arg)) break;
-        func_args->set(std::to_string(i - 2), arg);
+        func_args->set_item(std::to_string(i - 2), arg);
     }
 
     try {
@@ -223,7 +318,7 @@ std::vector<LuaValue> lua_xpcall(std::shared_ptr<LuaObject> args) {
         return results_vec;
     } catch (const std::exception& e) {
         auto err_args = std::make_shared<LuaObject>();
-        err_args->set("1", e.what());
+        err_args->set_item("1", std::string(e.what()));
         std::vector<LuaValue> handled_error_msg = callable_err_handler->func(err_args);
 
         std::vector<LuaValue> results_vec;
@@ -232,7 +327,7 @@ std::vector<LuaValue> lua_xpcall(std::shared_ptr<LuaObject> args) {
         return results_vec;
     } catch (...) {
         auto err_args = std::make_shared<LuaObject>();
-        err_args->set("1", "An unknown error occurred");
+        err_args->set_item("1", std::string("An unknown error occurred"));
         std::vector<LuaValue> handled_error_msg = callable_err_handler->func(err_args);
 
         std::vector<LuaValue> results_vec;
@@ -245,7 +340,7 @@ std::vector<LuaValue> lua_xpcall(std::shared_ptr<LuaObject> args) {
 // warn (prints to stderr)
 std::vector<LuaValue> lua_warn(std::shared_ptr<LuaObject> args) {
     for (int i = 1; ; ++i) {
-        LuaValue val = args->get(std::to_string(i));
+        LuaValue val = args->get_item(std::to_string(i));
         if (std::holds_alternative<std::monostate>(val)) break;
         std::cerr << "Lua warning: " << to_cpp_string(val) << std::endl;
     }
@@ -254,7 +349,7 @@ std::vector<LuaValue> lua_warn(std::shared_ptr<LuaObject> args) {
 
 // rawlen
 std::vector<LuaValue> lua_rawlen(std::shared_ptr<LuaObject> args) {
-    LuaValue v = args->get("1");
+    LuaValue v = args->get_item("1");
     if (std::holds_alternative<std::string>(v)) {
         return {static_cast<double>(std::get<std::string>(v).length())};
     } else if (std::holds_alternative<std::shared_ptr<LuaObject>>(v)) {
@@ -262,7 +357,7 @@ std::vector<LuaValue> lua_rawlen(std::shared_ptr<LuaObject> args) {
         // For tables, rawlen returns the size of the sequence part
         long long count = 0;
         for (long long i = 1; ; ++i) {
-            if (obj->properties.count(std::to_string(i))) {
+            if (obj->array_properties.count(i)) {
                 count++;
             } else {
                 break;
@@ -275,8 +370,8 @@ std::vector<LuaValue> lua_rawlen(std::shared_ptr<LuaObject> args) {
 
 // rawequal
 std::vector<LuaValue> lua_rawequal(std::shared_ptr<LuaObject> args) {
-    LuaValue a = args->get("1");
-    LuaValue b = args->get("2");
+    LuaValue a = args->get_item("1");
+    LuaValue b = args->get_item("2");
     // Raw equality bypasses metamethods and type conversions.
     // It's essentially a direct comparison of the underlying C++ types.
     // For LuaObjects and LuaFunctionWrappers, it's pointer equality.
@@ -300,10 +395,64 @@ std::vector<LuaValue> lua_rawequal(std::shared_ptr<LuaObject> args) {
     return {false};
 }
 
-// next (not supported in translated environment)
+// next (iterator for tables)
 std::vector<LuaValue> lua_next(std::shared_ptr<LuaObject> args) {
-    throw std::runtime_error("next is not supported in the translated environment.");
-    return {}; // Should not be reached
+    auto table = get_object(args->get_item("1"));
+    if (!table) {
+        throw std::runtime_error("bad argument #1 to 'next' (table expected)");
+    }
+    LuaValue key = args->get_item("2");
+
+    // Combine keys from both array_properties and properties for iteration
+    std::vector<LuaValue> all_keys;
+    for (auto const& [k, v] : table->array_properties) {
+        all_keys.push_back(k);
+    }
+    for (auto const& [k, v] : table->properties) {
+        all_keys.push_back(k);
+    }
+
+    // Sort keys to ensure consistent iteration order (Lua's next has an unspecified order for non-integer keys)
+    // For simplicity, we'll sort by string representation.
+    std::sort(all_keys.begin(), all_keys.end(), [](const LuaValue& a, const LuaValue& b) {
+        // Custom comparison logic for LuaValue
+        // Prioritize numerical comparison for numbers
+        if (std::holds_alternative<long long>(a) && std::holds_alternative<long long>(b)) {
+            return std::get<long long>(a) < std::get<long long>(b);
+        }
+        if (std::holds_alternative<double>(a) && std::holds_alternative<double>(b)) {
+            return std::get<double>(a) < std::get<double>(b);
+        }
+        if (std::holds_alternative<long long>(a) && std::holds_alternative<double>(b)) {
+            return static_cast<double>(std::get<long long>(a)) < std::get<double>(b);
+        }
+        if (std::holds_alternative<double>(a) && std::holds_alternative<long long>(b)) {
+            return std::get<double>(a) < static_cast<double>(std::get<long long>(b));
+        }
+
+        // Fallback to string comparison for other types or mixed types
+        return to_cpp_string(a) < to_cpp_string(b);
+    });
+
+    if (std::holds_alternative<std::monostate>(key)) { // key is nil, return first element
+        if (!all_keys.empty()) {
+            LuaValue first_key = all_keys[0];
+            return {first_key, table->get_item(first_key)};
+        }
+    } else { // key is not nil, return next element
+        bool found_current_key = false;
+        for (size_t i = 0; i < all_keys.size(); ++i) {
+            if (lua_equals(all_keys[i], key)) {
+                found_current_key = true;
+                if (i + 1 < all_keys.size()) {
+                    LuaValue next_key = all_keys[i+1];
+                    return {next_key, table->get_item(next_key)};
+                }
+                break;
+            }
+        }
+    }
+    return {std::monostate{}}; // No more elements
 }
 
 // load (not supported in translated environment)
@@ -333,9 +482,9 @@ std::vector<LuaValue> lua_collectgarbage(std::shared_ptr<LuaObject> args) {
 
 // assert
 std::vector<LuaValue> lua_assert(std::shared_ptr<LuaObject> args) {
-    LuaValue condition = args->get("1");
+    LuaValue condition = args->get_item("1");
     if (!std::holds_alternative<bool>(condition) || !std::get<bool>(condition)) {
-        LuaValue message = args->get("2");
+        LuaValue message = args->get_item("2");
         if (std::holds_alternative<std::monostate>(message)) {
             throw std::runtime_error("assertion failed!");
         } else {
@@ -345,7 +494,7 @@ std::vector<LuaValue> lua_assert(std::shared_ptr<LuaObject> args) {
     // Return all arguments after the condition
     std::vector<LuaValue> results_vec;
     for (int i = 2; ; ++i) {
-        LuaValue val = args->get(std::to_string(i));
+        LuaValue val = args->get_item(std::to_string(i));
         if (std::holds_alternative<std::monostate>(val)) break;
         results_vec.push_back(val);
     }

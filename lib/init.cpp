@@ -1,4 +1,5 @@
 #include "init.hpp"
+#include "debug.hpp"
 
 void init_G() {
     _G->set("assert", std::make_shared<LuaFunctionWrapper>(lua_assert));
@@ -22,6 +23,7 @@ void init_G() {
     _G->set("io", create_io_library());
     _G->set("package", create_package_library());
     _G->set("utf8", create_utf8_library());
+    _G->set("debug", create_debug_library());
     _G->set("_VERSION", LuaValue(std::string("Lua 5.4")));
     _G->set("tonumber", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
         // tonumber implementation

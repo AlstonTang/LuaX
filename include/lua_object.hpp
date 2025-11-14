@@ -11,6 +11,7 @@
 // Forward declarations
 class LuaObject;
 struct LuaFunctionWrapper;
+class LuaCoroutine; // Forward declaration for LuaCoroutine
 
 // Define LuaValue first, using forward declarations for recursive types
 using LuaValue = std::variant<
@@ -20,7 +21,8 @@ using LuaValue = std::variant<
     long long,
     std::string,
     std::shared_ptr<LuaObject>, // Breaks recursion for LuaObject
-    std::shared_ptr<LuaFunctionWrapper> // Breaks recursion for functions
+    std::shared_ptr<LuaFunctionWrapper>, // Breaks recursion for functions
+    std::shared_ptr<LuaCoroutine> // Added for coroutines
 >;
 
 // Now define LuaFunctionWrapper, which can now use LuaValue
@@ -34,10 +36,13 @@ class LuaObject : public std::enable_shared_from_this<LuaObject> {
 public:
     virtual ~LuaObject() = default; // Make LuaObject polymorphic
     std::map<std::string, LuaValue> properties;
+    std::map<long long, LuaValue> array_properties; // For integer-indexed tables
     std::shared_ptr<LuaObject> metatable;
 
     LuaValue get(const std::string& key);
     void set(const std::string& key, const LuaValue& value);
+    LuaValue get_item(const LuaValue& key); // New method for LuaValue keys
+    void set_item(const LuaValue& key, const LuaValue& value); // New method for LuaValue keys
     void set_metatable(std::shared_ptr<LuaObject> mt);
 };
 
