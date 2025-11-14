@@ -101,6 +101,35 @@ function Parser:tokenize()
         elseif is_digit(char) then
             local start_pos = self.position
             local is_float = false
+            
+            -- Check for hexadecimal literal
+            if char == '0' and self.position + 1 <= #self.code then
+                local next_char = self.code:sub(self.position + 1, self.position + 1)
+                if next_char == 'x' or next_char == 'X' then
+                    self.position = self.position + 2 -- Consume '0x'
+                    local hex_start_pos = self.position
+                    while self.position <= #self.code do
+                        local hex_char = self.code:sub(self.position, self.position)
+                        if (hex_char >= '0' and hex_char <= '9') or
+                           (hex_char >= 'a' and hex_char <= 'f') or
+                           (hex_char >= 'A' and hex_char <= 'F') then
+                            self.position = self.position + 1
+                        else
+                            break
+                        end
+                    end
+                    local hex_val_str = self.code:sub(hex_start_pos, self.position - 1)
+                    if #hex_val_str == 0 then
+                        error("Malformed hexadecimal number")
+                    end
+                    -- Convert hex string to decimal number
+                    local decimal_val = tonumber(hex_val_str, 16)
+                    table.insert(self.tokens, { type = "integer", value = decimal_val })
+                    goto continue_tokenize_loop
+                end
+            end
+
+            -- Original decimal number parsing
             while self.position <= #self.code do
                 local current_char = self.code:sub(self.position, self.position)
                 if is_digit(current_char) then
@@ -118,6 +147,7 @@ function Parser:tokenize()
             else
                 table.insert(self.tokens, { type = "integer", value = val })
             end
+            ::continue_tokenize_loop::
         elseif is_alpha(char) then
             local start_pos = self.position
             while self.position <= #self.code and (is_alpha(self.code:sub(self.position, self.position)) or is_digit(self.code:sub(self.position, self.position))) do
