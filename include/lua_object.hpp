@@ -68,6 +68,8 @@ std::vector<LuaValue> lua_next(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> lua_pairs(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> lua_rawequal(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> lua_rawlen(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> lua_rawget(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> lua_rawset(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> lua_select(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> lua_warn(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> lua_xpcall(std::shared_ptr<LuaObject> args);

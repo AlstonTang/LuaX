@@ -12,6 +12,8 @@ void init_G() {
     _G->set("pairs", std::make_shared<LuaFunctionWrapper>(lua_pairs));
     _G->set("rawequal", std::make_shared<LuaFunctionWrapper>(lua_rawequal));
     _G->set("rawlen", std::make_shared<LuaFunctionWrapper>(lua_rawlen));
+    _G->set("rawget", std::make_shared<LuaFunctionWrapper>(lua_rawget));
+    _G->set("rawset", std::make_shared<LuaFunctionWrapper>(lua_rawset));
     _G->set("select", std::make_shared<LuaFunctionWrapper>(lua_select));
     _G->set("warn", std::make_shared<LuaFunctionWrapper>(lua_warn));
     _G->set("warn", std::make_shared<LuaFunctionWrapper>(lua_warn));

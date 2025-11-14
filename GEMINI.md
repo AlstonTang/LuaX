@@ -30,9 +30,11 @@ The following Lua standard libraries and global functions/constants have been su
 *   **Libraries:**
     *   `math`
     *   `string` (missing `dump`, `format`, `pack`, `packsize`, `unpack`)
-    *   `table` (missing `pack`)
+    *   `table`
     *   `os`
     *   `io` (missing `popen`, `file:lines`, `file:setvbuf`)
+    *   `package`
+    *   `utf8`
 *   **Global Functions/Constants:**
     *   `_VERSION`
     *   `print`
@@ -52,24 +54,19 @@ The following Lua standard libraries and global functions/constants have been su
     *   `warn`
     *   `xpcall`
 
+## Unimplemted Libraries
+*   `debug` (This makes little sense given the context of code being compiled)
+*   `coroutine` (Not implemented yet. Quite complicated currently.)
+*   Any variable pertaining with dynamic lua execution (for now).
 
 ## Immediate Next Steps
 
-1.  **Fix table accesses:** Fix table accesses after the attempt on implicitly trying to convert double to long long. It is suspected that integer keys are assigned as doubles, while loops that use integers/longs access long long keys, which return nil because the keys are doubles.
-2.  **Fix delimiters in strings:** Fix the issue where adding delimiters like "\n" would break the code.
-3.  **Complete Core Lua Libraries:** Continue porting and building-out the remaining core Lua libraries from `vars.md`, including:
-    *   `coroutine`
-    *   `debug`
-    *   `utf8`
-    *   `package`
-    *   Other libraries that are partially implemented.
-4.  **Implement Remaining Global Functions:** Implement the rest of the global functions and constants from `vars.md`, such as:
+1.  **Decide Remaining Global Functions:** Decide whether the rest of the global functions and constants from `vars.md` should be implemented, such as:
     *   `dofile`
     *   `load`
     *   `loadfile`
     *   `next`
     *   `require`
-5.  **Native Lua Table Indexing:** Implement proper Lua table indexing (e.g., `my_table[i]` or `my_table["string input"]`) directly in the translator to remove the current reliance on `rawget` in Lua code for array-like access.
 
 ## Long-Term Goals
 

@@ -98,13 +98,13 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                     local expr_node = expr_list_node.ordered_children[i]
                     if expr_node.type == "call_expression" then
                         -- For function calls, take from the results vector
-                        initial_value_code = "(" .. function_call_results_var .. ".size() > " .. (i - 1) .. " ? " .. function_call_results_var .. "[" .. (i - 1) .. "] : LuaValue(std::monostate{}))"
+                        initial_value_code = "(" .. function_call_results_var .. ".size() > " .. (i - 1) .. " ? " .. function_call_results_var .. "[" .. (i - 1) .. "] : std::monostate{})"
                     else
                         initial_value_code = translate_node_to_cpp(expr_node, for_header, false, current_module_object_name)
 
                     end
                 elseif has_function_call_expr then
-                    initial_value_code = "(" .. function_call_results_var .. ".size() > " .. (i - 1) .. " ? " .. function_call_results_var .. "[" .. (i - 1) .. "] : LuaValue(std::monostate{}))"
+                    initial_value_code = "(" .. function_call_results_var .. ".size() > " .. (i - 1) .. " ? " .. function_call_results_var .. "[" .. (i - 1) .. "] : std::monostate{})"
                 end
                 cpp_code = cpp_code .. var_type .. " " .. var_name .. " = " .. initial_value_code .. ";\n"
             end
@@ -144,12 +144,12 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                     local expr_node = expr_list_node.ordered_children[i]
                     if expr_node.type == "call_expression" then
                         -- For function calls, take from the results vector
-                        value_code = "(" .. function_call_results_var .. ".size() > " .. (i - 1) .. " ? " .. function_call_results_var .. "[" .. (i - 1) .. "] : LuaValue(std::monostate{}))"
+                        value_code = "(" .. function_call_results_var .. ".size() > " .. (i - 1) .. " ? " .. function_call_results_var .. "[" .. (i - 1) .. "] : std::monostate{})"
                     else
                         value_code = translate_node_to_cpp(expr_node, for_header, false, current_module_object_name)
                     end
                 elseif has_function_call_expr then
-                    value_code = "(" .. function_call_results_var .. ".size() > " .. (i - 1) .. " ? " .. function_call_results_var .. "[" .. (i - 1) .. "] : LuaValue(std::monostate{}))"
+                    value_code = "(" .. function_call_results_var .. ".size() > " .. (i - 1) .. " ? " .. function_call_results_var .. "[" .. (i - 1) .. "] : std::monostate{})"
                 end
 
                 if var_node.type == "member_expression" then

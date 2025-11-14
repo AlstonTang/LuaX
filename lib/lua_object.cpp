@@ -1,6 +1,7 @@
 #include "lua_object.hpp"
 #include <iostream>
 #include <variant>
+#include <algorithm> // for std::sort
 
 std::shared_ptr<LuaObject> _G = std::make_shared<LuaObject>();
 
@@ -29,10 +30,6 @@ LuaValue LuaObject::get_item(const LuaValue& key) {
             long long int_key = static_cast<long long>(double_key);
             if (array_properties.count(int_key)) {
                 return array_properties[int_key];
-            }
-        } else {
-            if (array_properties.count(double_key)) {
-                return array_properties[double_key];
             }
         }
     }
@@ -167,26 +164,30 @@ std::string to_cpp_string(const LuaValue& value) {
     }
 }
 
-LuaValue rawget(std::shared_ptr<LuaObject> table, const LuaValue& key) {
+// rawget
+std::vector<LuaValue> lua_rawget(std::shared_ptr<LuaObject> args) {
+    auto table_val = args->get_item("1");
+    auto key = args->get_item("2");
+
+    auto table = get_object(table_val);
     if (!table) {
-        return std::monostate{};
+        throw std::runtime_error("bad argument #1 to 'rawget' (table expected)");
     }
-    // Rawget bypasses metatables, so directly use get_item's internal logic
-    // but without the metatable checks.
-    // This is a simplified version of get_item for raw access.
+
+    // Rawget bypasses metatables, so we access the properties directly.
 
     // Try to access as integer key first
     if (std::holds_alternative<long long>(key)) {
         long long int_key = std::get<long long>(key);
         if (table->array_properties.count(int_key)) {
-            return table->array_properties[int_key];
+            return {table->array_properties.at(int_key)};
         }
     } else if (std::holds_alternative<double>(key)) {
         double double_key = std::get<double>(key);
         if (double_key == static_cast<long long>(double_key)) { // Check if it's an integer
             long long int_key = static_cast<long long>(double_key);
             if (table->array_properties.count(int_key)) {
-                return table->array_properties[int_key];
+                return {table->array_properties.at(int_key)};
             }
         }
     }
@@ -194,10 +195,46 @@ LuaValue rawget(std::shared_ptr<LuaObject> table, const LuaValue& key) {
     // Then try to access as string key
     std::string key_str = to_cpp_string(key);
     if (table->properties.count(key_str)) {
-        return table->properties[key_str];
+        return {table->properties.at(key_str)};
     }
 
-    return std::monostate{};
+    return {std::monostate{}}; // Return nil
+}
+
+// rawset
+std::vector<LuaValue> lua_rawset(std::shared_ptr<LuaObject> args) {
+    auto table_val = args->get_item("1");
+    auto key = args->get_item("2");
+    auto value = args->get_item("3");
+
+    auto table = get_object(table_val);
+    if (!table) {
+        throw std::runtime_error("bad argument #1 to 'rawset' (table expected)");
+    }
+
+    // Rawset bypasses metatables, so we set the properties directly.
+
+    // Try to set as integer key first
+    if (std::holds_alternative<long long>(key)) {
+        long long int_key = std::get<long long>(key);
+        table->array_properties[int_key] = value;
+    } else if (std::holds_alternative<double>(key)) {
+        double double_key = std::get<double>(key);
+        if (double_key == static_cast<long long>(double_key)) { // Check if it's an integer
+            long long int_key = static_cast<long long>(double_key);
+            table->array_properties[int_key] = value;
+        } else {
+            // Non-integer doubles become string keys
+            std::string key_str = to_cpp_string(key);
+            table->properties[key_str] = value;
+        }
+    } else {
+        // All other types become string keys
+        std::string key_str = to_cpp_string(key);
+        table->properties[key_str] = value;
+    }
+
+    return {table_val}; // Return the table
 }
 
 
