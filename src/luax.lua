@@ -1,4 +1,3 @@
-
 -- This script automates the translation and compilation of LuaX projects.
 -- It takes a single Lua file as input, analyzes its dependencies, translates
 -- all required Lua files into C++, compiles them into a single executable,
@@ -10,12 +9,13 @@ local translator = require("src.translator")
 local function run_command(command_str, error_message)
     print("Executing command: " .. command_str)
     local success = os.execute(command_str)
-    if not success then
+    if not success and error_message then
         error(error_message)
     end
 end
 
-local function translate_file(lua_file_path, output_file_name)
+-- Updated function signature to accept is_main_entry flag
+local function translate_file(lua_file_path, output_file_name, is_main_entry)
     print("Translating " .. lua_file_path .. "...")
     local file = io.open(lua_file_path, "r")
     if not file then
@@ -27,12 +27,16 @@ local function translate_file(lua_file_path, output_file_name)
     local ast = translator.translate(lua_code)
     local cpp_code
     local hpp_code
-    if output_file_name == "main" then
-        cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false, nil) -- for .cpp, global scope
-        hpp_code = cpp_translator.translate_recursive(ast, output_file_name, true, nil) -- for .hpp, global scope
+    
+    -- Check the flag instead of the output_file_name string
+    if is_main_entry then
+        -- Primary entry point: use global scope (nil for module name)
+        cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false, nil, true) 
+        hpp_code = cpp_translator.translate_recursive(ast, output_file_name, true, nil, true)
     else
-        cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false, output_file_name) -- for .cpp, module scope
-        hpp_code = cpp_translator.translate_recursive(ast, output_file_name, true, output_file_name) -- for .hpp, module scope
+        -- Module: use module scope (output_file_name as module name)
+        cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false, output_file_name, false) 
+        hpp_code = cpp_translator.translate_recursive(ast, output_file_name, true, output_file_name, false) 
     end
 
     local cpp_output_path = "build/" .. output_file_name .. ".cpp"
@@ -102,7 +106,8 @@ if not path_to_out_file then
     error(usage)
 end
 
--- Ensure build directory exists
+--- Cleans and recreates the build directory
+run_command("rm -r build")
 run_command("mkdir -p build", "Failed to create build directory.")
 
 local files_to_translate = {}
@@ -135,14 +140,11 @@ for file_path, _ in pairs(files_to_translate) do
     if not basename then
         error("Invalid Lua file name for translation: " .. file_path)
     end
-
-    if file_path == input_lua_file then
-        -- For the primary input file, generate 'main'
-        translate_file(file_path, "main")
-    else
-        -- For other dependent files, use their basename
-        translate_file(file_path, basename)
-    end
+    
+    local is_main_entry = (file_path == input_lua_file)
+    
+    -- Use the file's basename for the C++ file name for both main and modules
+    translate_file(file_path, basename, is_main_entry)
 end
 
 -- Construct compilation command
@@ -155,6 +157,7 @@ local lib_cpp_files = {
     "lib/io.cpp",
     "lib/package.cpp",
     "lib/utf8.cpp",
+    "lib/init.cpp",
 }
 
 local compile_command = "clang++ -std=c++17 -Iinclude -o " .. path_to_out_file .. " "
@@ -169,11 +172,8 @@ build_cpp_files_handle:close()
 print("DEBUG: build_cpp_files_str: " .. build_cpp_files_str)
 
 
-
 for file_path in build_cpp_files_str:gmatch("([^\n]+)") do
-
     compile_command = compile_command .. file_path .. " "
-
 end
 
 -- Add all C++ runtime library files

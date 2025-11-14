@@ -7,7 +7,7 @@ This project is a Lua to C++ translator, named "LuaX". It takes Lua source files
 The project can be built and run for a specific Lua file using the `scripts/luax.lua` script:
 
 ```bash
-lua5.4 scripts/luax.lua <path_to_lua_file> <path_to_output_executable>
+lua5.4 src/luax.lua <path_to_lua_file> <path_to_output_executable>
 ```
 
 This script performs the following steps:
@@ -32,7 +32,7 @@ The following Lua standard libraries and global functions/constants have been su
     *   `string` (missing `dump`, `format`, `pack`, `packsize`, `unpack`)
     *   `table` (missing `pack`)
     *   `os`
-    *   `io` (missing `popen`, `file:lines()`, `file:setvbuf()`)
+    *   `io` (missing `popen`, `file:lines`, `file:setvbuf`)
 *   **Global Functions/Constants:**
     *   `_VERSION`
     *   `print`
@@ -55,19 +55,25 @@ The following Lua standard libraries and global functions/constants have been su
 
 ## Immediate Next Steps
 
-1.  **Complete Core Lua Libraries:** Continue porting the remaining core Lua libraries from `vars.md`, including:
+1.  **Fix table accesses:** Fix table accesses after the attempt on implicitly trying to convert double to long long. It is suspected that integer keys are assigned as doubles, while loops that use integers/longs access long long keys, which return nil because the keys are doubles.
+2.  **Fix delimiters in strings:** Fix the issue where adding delimiters like "\n" would break the code.
+3.  **Complete Core Lua Libraries:** Continue porting and building-out the remaining core Lua libraries from `vars.md`, including:
     *   `coroutine`
     *   `debug`
     *   `utf8`
     *   `package`
-2.  **Implement Remaining Global Functions:** Implement the rest of the global functions and constants from `vars.md`, such as:
+    *   Other libraries that are partially implemented.
+4.  **Implement Remaining Global Functions:** Implement the rest of the global functions and constants from `vars.md`, such as:
     *   `dofile`
     *   `load`
     *   `loadfile`
     *   `next`
     *   `require`
-3.  **Verify Native Lua Table Indexing:** Implement proper Lua table indexing (e.g., `my_table[i]`) directly in the translator to remove the current reliance on `rawget` in Lua code for array-like access.
-4.  **Comprehensive Testing:** Ensure all implemented features are thoroughly tested with a robust set of unit and integration tests.
+5.  **Native Lua Table Indexing:** Implement proper Lua table indexing (e.g., `my_table[i]` or `my_table["string input"]`) directly in the translator to remove the current reliance on `rawget` in Lua code for array-like access.
+
+## Long-Term Goals
+
+1.  **Comprehensive Testing:** Ensure all implemented features are thoroughly tested with a robust set of unit and integration tests.
     *   This includes be able to use `scripts/luax.lua` to compile itself.
-5.  **Type Inference And Optimization:** Implement type inference so that certain types can be natively inferred to reduce usage of variants and to increase performance.
-6. **Better error information:** Ensure that any errors found within the luax transpiler can be traced more robustly to either the transpiler itself or the code that it is transpiling.
+2.  **Type Inference And Optimization:** Implement type inference so that certain types can be natively inferred to reduce usage of variants and to increase performance.
+3. **Better error information:** Ensure that any errors found within the luax transpiler can be traced more robustly to either the transpiler itself or the code that it is transpiling.

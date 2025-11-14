@@ -1,4 +1,3 @@
-
 -- Node class implementation
 local Node = {}
 Node.__index = Node
@@ -104,7 +103,12 @@ function Parser:tokenize()
             while self.position <= #self.code and is_digit(self.code:sub(self.position, self.position)) do
                 self.position = self.position + 1
             end
-            table.insert(self.tokens, { type = "number", value = self.code:sub(start_pos, self.position - 1) })
+            local val = self.code:sub(start_pos, self.position - 1)
+            if math.tointeger(val) then
+                table.insert(self.tokens, { type = "integer", value = val })
+            else
+                table.insert(self.tokens, { type = "number", value = val })
+            end
         elseif is_alpha(char) then
             local start_pos = self.position
             while self.position <= #self.code and (is_alpha(self.code:sub(self.position, self.position)) or is_digit(self.code:sub(self.position, self.position))) do
@@ -128,50 +132,59 @@ function Parser:tokenize()
 
         elseif char == '-' then
             if self.position + 1 <= #self.code and self.code:sub(self.position + 1, self.position + 1) == '-' then
-                -- This is a comment
-                self.position = self.position + 2 -- consume '--'
+                -- Start of comment: consume '--'
+                self.position = self.position + 2 
+                
                 local next_char = self.code:sub(self.position, self.position)
+                
+                -- Check for long comment start: --[
                 if next_char == '[' then
-                    -- Potentially a multi-line comment: --[[ or --[=[
                     self.position = self.position + 1 -- consume first '['
                     local num_equals = 0
+                    -- Count equals signs
                     while self.position <= #self.code and self.code:sub(self.position, self.position) == '=' do
                         num_equals = num_equals + 1
                         self.position = self.position + 1
                     end
+                    
                     local second_bracket = self.code:sub(self.position, self.position)
+                    
                     if second_bracket == '[' then
                         -- Confirmed multi-line comment: --[=[...]=]
                         self.position = self.position + 1 -- consume second '['
+                        
+                        -- Determine expected closing sequence
+                        local expected_end = ']'
+                        for i = 1, num_equals do
+                            expected_end = expected_end .. '='
+                        end
+                        expected_end = expected_end .. ']'
+                        local end_len = #expected_end
+                        
                         local comment_end_found = false
                         while self.position <= #self.code do
-                            local current_sub = self.code:sub(self.position, self.position + 1 + num_equals)
-                            local expected_end = ']'
-                            for i = 1, num_equals do
-                                expected_end = expected_end .. '='
+                            -- Check for the closing sequence, ensuring we don't index past the end
+                            if self.position + end_len - 1 <= #self.code then
+                                if self.code:sub(self.position, self.position + end_len - 1) == expected_end then
+                                    self.position = self.position + end_len
+                                    comment_end_found = true
+                                    break
+                                end
                             end
-                            expected_end = expected_end .. ']'
-
-                            if current_sub:sub(1, 1) == ']' and current_sub == expected_end then
-                                self.position = self.position + #expected_end
-                                comment_end_found = true
-                                break
-                            else
-                                self.position = self.position + 1
-                            end
+                            self.position = self.position + 1
                         end
+                        
                         if not comment_end_found then
                             error("Unclosed multi-line comment")
                         end
                     else
-                        -- Single-line comment starting with --[...
-                        -- This is not standard Lua, but handle it as a single line comment
+                        -- Not a valid long comment start (e.g., --[a or --[=a). Treat as single line.
                         while self.position <= #self.code and self.code:sub(self.position, self.position) ~= '\n' do
                             self.position = self.position + 1
                         end
                     end
                 else
-                    -- Single-line comment: --
+                    -- Standard single-line comment: --
                     while self.position <= #self.code and self.code:sub(self.position, self.position) ~= '\n' do
                         self.position = self.position + 1
                     end
@@ -222,16 +235,35 @@ function Parser:tokenize()
             local start_pos = self.position
             local quote_char = char
             self.position = self.position + 1 -- consume the opening quote
-            while self.position <= #self.code and self.code:sub(self.position, self.position) ~= quote_char do
-                self.position = self.position + 1
+            local buffer = {}
+            while self.position <= #self.code do
+                local char_in_string = self.code:sub(self.position, self.position)
+                if char_in_string == '\\' then
+                    self.position = self.position + 1 -- consume '\'
+                    local escaped_char = self.code:sub(self.position, self.position)
+                    if escaped_char == 'n' then table.insert(buffer, '\n')
+                    elseif escaped_char == 't' then table.insert(buffer, '\t')
+                    elseif escaped_char == 'r' then table.insert(buffer, '\r')
+                    elseif escaped_char == 'b' then table.insert(buffer, '\b')
+                    elseif escaped_char == 'f' then table.insert(buffer, '\f')
+                    elseif escaped_char == 'a' then table.insert(buffer, '\a')
+                    elseif escaped_char == 'v' then table.insert(buffer, '\v')
+                    elseif escaped_char == '\\' then table.insert(buffer, '\\')
+                    elseif escaped_char == '"' then table.insert(buffer, '"')
+                    elseif escaped_char == "'" then table.insert(buffer, "'")
+                    -- Add other escape sequences as needed (e.g., \ddd, \xdd, \u{hhhh})
+                    else table.insert(buffer, escaped_char) -- For unknown escape sequences, just insert the char
+                    end
+                    self.position = self.position + 1
+                elseif char_in_string == quote_char then
+                    self.position = self.position + 1 -- consume the closing quote
+                    break
+                else
+                    table.insert(buffer, char_in_string)
+                    self.position = self.position + 1
+                end
             end
-            if self.position <= #self.code then -- found closing quote
-                self.position = self.position + 1 -- consume the closing quote
-                table.insert(self.tokens, { type = "string", value = self.code:sub(start_pos + 1, self.position - 2) })
-            else
-                -- Error: unclosed string
-                error("Unclosed string literal")
-            end
+            table.insert(self.tokens, { type = "string", value = table.concat(buffer) })
         elseif char == '{' or char == '}' then
             table.insert(self.tokens, { type = "brace", value = char })
             self.position = self.position + 1
@@ -444,7 +476,7 @@ function Parser:parse_primary_expression()
         if not operand then error("Expected expression after unary not") end
         node = Node:new("unary_expression", "not")
         node:AddChildren(operand)
-    elseif token.type == "number" or token.type == "string" then
+    elseif token.type == "number" or token.type == "string" or token.type == "integer" then
         self.token_position = self.token_position + 1
         node = Node:new(token.type, token.value)
     elseif token.type == "identifier" then
@@ -565,7 +597,6 @@ function Parser:parse_statement()
         -- The block parsing logic will consume it.
         return nil
     else
-        -- START: FIXED CODE BLOCK
         -- This could be an assignment (a=1 or a,b=1,2) or an expression statement (myfunc()).
         -- First, we parse a list of potential l-values (left-hand side variables).
         local lvalue_list_node = self:parse_variable_list()
@@ -599,7 +630,6 @@ function Parser:parse_statement()
                 error("Invalid statement: unexpected symbol near ','")
             end
         end
-        -- END: FIXED CODE BLOCK
     end
     return nil
 end

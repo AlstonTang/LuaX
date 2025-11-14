@@ -17,6 +17,7 @@ using LuaValue = std::variant<
     std::monostate, // for nil
     bool,
     double,
+    long long,
     std::string,
     std::shared_ptr<LuaObject>, // Breaks recursion for LuaObject
     std::shared_ptr<LuaFunctionWrapper> // Breaks recursion for functions
@@ -46,6 +47,7 @@ extern std::shared_ptr<LuaObject> _G;
 std::shared_ptr<LuaObject> get_object(const LuaValue& value);
 void print_value(const LuaValue& value);
 double get_double(const LuaValue& value);
+long long get_long_long(const LuaValue& value);
 std::string to_cpp_string(const LuaValue& value);
 LuaValue rawget(std::shared_ptr<LuaObject> table, const LuaValue& key);
 void rawset(std::shared_ptr<LuaObject> table, const LuaValue& key, const LuaValue& value); // Declaration for rawset

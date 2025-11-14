@@ -23,7 +23,6 @@ public:
     std::vector<LuaValue> lines(std::shared_ptr<LuaObject> args); // Returns an iterator
     std::vector<LuaValue> read(std::shared_ptr<LuaObject> args);
     std::vector<LuaValue> seek(std::shared_ptr<LuaObject> args);
-    std::vector<LuaValue> setvbuf(std::shared_ptr<LuaObject> args);
     std::vector<LuaValue> write(std::shared_ptr<LuaObject> args);
 };
 

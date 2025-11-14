@@ -60,6 +60,8 @@ std::shared_ptr<LuaObject> get_object(const LuaValue& value) {
 void print_value(const LuaValue& value) {
     if (std::holds_alternative<double>(value)) {
         std::cout << std::get<double>(value);
+    } else if (std::holds_alternative<long long>(value)) {
+        std::cout << std::get<long long>(value);
     } else if (std::holds_alternative<std::string>(value)) {
         std::cout << std::get<std::string>(value);
     } else if (std::holds_alternative<bool>(value)) {
@@ -74,8 +76,17 @@ void print_value(const LuaValue& value) {
 double get_double(const LuaValue& value) {
     if (std::holds_alternative<double>(value)) {
         return std::get<double>(value);
+    } else if (std::holds_alternative<long long>(value)) {
+        return static_cast<double>(std::get<long long>(value));
     }
     return 0.0;
+}
+
+long long get_long_long(const LuaValue& value) {
+    if (std::holds_alternative<long long>(value)) {
+        return std::get<long long>(value);
+    }
+    return 0;
 }
 
 std::string to_cpp_string(const LuaValue& value) {
@@ -86,6 +97,8 @@ std::string to_cpp_string(const LuaValue& value) {
         } else {
             return std::to_string(d);
         }
+    } else if (std::holds_alternative<long long>(value)) { // Added this case
+        return std::to_string(std::get<long long>(value));
     } else if (std::holds_alternative<std::string>(value)) {
         return std::get<std::string>(value);
     } else if (std::holds_alternative<bool>(value)) {

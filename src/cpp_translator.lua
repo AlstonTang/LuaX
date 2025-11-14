@@ -4,12 +4,13 @@ local CppTranslator = {}
 local declared_variables = {}
 local required_modules = {}
 local module_global_vars = {} -- New table to store global variables declared in the current module
-local current_module_uses_g1_g2 = false -- New flag to track if g1 or g2 are used in the current module
 
 -- Helper function to map Lua types to C++ types
 local function map_lua_type_to_cpp(value)
     if type(value) == "number" then
         return "double"
+    elseif type(value) == "integer" then
+        return "long long"
     elseif type(value) == "string" then
         return "std::string"
     elseif type(value) == "boolean" then
@@ -23,14 +24,16 @@ end
 
 
 -- Main translation function
-function CppTranslator.translate(ast_root, file_name)
+function CppTranslator.translate(ast_root, file_name, is_main_script) -- ADDED is_main_script parameter
     declared_variables = {}
     required_modules = {}
     module_global_vars = {} -- Reset for each translation run
-    current_module_uses_g1_g2 = false -- Reset for each translation run
-    return CppTranslator.translate_recursive(ast_root, file_name, false)
+    -- Pass is_main_script down
+    return CppTranslator.translate_recursive(ast_root, file_name, false, nil, is_main_script)
 end
-function CppTranslator.translate_recursive(ast_root, file_name, for_header, current_module_object_name)
+
+-- Modified Signature to include is_main_script
+function CppTranslator.translate_recursive(ast_root, file_name, for_header, current_module_object_name, is_main_script)
     local function translate_node_to_cpp(node, for_header, is_lambda, current_module_object_name)
         if not node then
             return "" -- Return empty string for nil nodes to prevent errors
@@ -115,7 +118,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             local num_vars = #var_list_node.ordered_children
             local num_exprs = #expr_list_node.ordered_children
 
-            local function_call_results_var = "func_results_" .. tostring(math.random(10000))
+            local function_call_results_var = "func_results_" .. tostring(os.time()) .. "_" .. tostring(math.random(10000))
             local has_function_call_expr = false
             local first_call_expr_node = nil
 
@@ -158,10 +161,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                     local var_code = translate_node_to_cpp(var_node, for_header, false, current_module_object_name)
                     local declaration_prefix = ""
                     if var_node.type == "identifier" and not declared_variables[var_node.identifier] then
-                        if var_node.identifier == "g1" or var_node.identifier == "g2" then
-                            declaration_prefix = "LuaValue "
-                            current_module_uses_g1_g2 = true -- Mark that g1 or g2 is used
-                        elseif file_name == "main" then
+                        if is_main_script then -- CHECK: Use is_main_script flag
                             declaration_prefix = "LuaValue "
                         else
                             -- For modules, global variables need to be declared in the module's scope
@@ -218,8 +218,10 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             return cpp_code .. "\n"
         elseif node.type == "for_numeric_statement" then
             local var_name = node.ordered_children[1].identifier
+            local var_type = node.ordered_children[1].type
             local start_expr_code = get_single_lua_value_cpp_code(node.ordered_children[2], for_header, false, current_module_object_name)
             local end_expr_code = get_single_lua_value_cpp_code(node.ordered_children[3], for_header, false, current_module_object_name)
+            local end_expr_type = node.ordered_children[3].type
             local step_expr_code
             local body_node
             if #node.ordered_children == 5 then
@@ -230,8 +232,12 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 body_node = node.ordered_children[4]
             end
             local loop_condition = ""
-            if step_expr_code == "LuaValue(1.0)" then -- Default step is 1.0, assume positive
-                loop_condition = "get_double(" .. var_name .. ") <= get_double(" .. end_expr_code .. ")"
+            if step_expr_code == "LuaValue(1.0)" or step_expr_code == "LuaValue(1)" then -- Default step is 1.0, assume positive
+                if var_type == "integer" and end_expr_type == "integer" then
+                    loop_condition = "get_long_long(" .. var_name .. ") <= get_long_long(" .. end_expr_code .. ")"
+                else
+                    loop_condition = "get_double(" .. var_name .. ") <= get_double(" .. end_expr_code .. ")"
+                end
             else
                 -- Determine if step is positive or negative at runtime
                 loop_condition = "(get_double(" .. step_expr_code .. ") >= 0 ? get_double(" .. var_name .. ") <= get_double(" .. end_expr_code .. ") : get_double(" .. var_name .. ") >= get_double(" .. end_expr_code .. "))"
@@ -386,8 +392,13 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 return "get_object(" .. base_code .. ")->get(\"" .. member_node.identifier .. "\")"
             end
         elseif node.type == "string" then
-            local escaped_value = node.value:gsub('"', '\\"')
-            return "\"" .. escaped_value .. "\""
+            local s = node.value
+            s = s:gsub('\\', '\\\\') -- Escape backslashes first
+            s = s:gsub('"', '\\"')   -- Escape double quotes
+            s = s:gsub('\n', '\\n')  -- Escape newlines
+            s = s:gsub('\t', '\\t')  -- Escape tabs
+            s = s:gsub('\r', '\\r')  -- Escape carriage returns
+            return "\"" .. s .. "\""
         elseif node.type == "number" then
             local num_str = tostring(node.value)
             if string.find(num_str, "%.") then
@@ -395,6 +406,9 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             else
                 return "LuaValue(" .. num_str .. ".0)"
             end
+        elseif node.type == "integer" then
+            local num_str = tostring(node.value)
+            return "LuaValue(" .. num_str .. ")"
         elseif node.type == "identifier" then
             if node.identifier == "_VERSION" then
                 return "get_object(_G)->get(\"_VERSION\")"
@@ -459,46 +473,45 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             return translated_expr .. ";"
         end
         return ""
-                    elseif node.type == "function_declaration" or node.type == "method_declaration" then
-                        local func_name = node.identifier
-                        if node.method_name then
-                            func_name = func_name .. "_" .. node.method_name
-                        end
-                        local params_node = node.ordered_children[1]
-                        local body_node = node.ordered_children[2]
-                        local return_type = "std::vector<LuaValue>"
+    elseif node.type == "function_declaration" or node.type == "method_declaration" then
+        local func_name = node.identifier
+        if node.method_name then
+            func_name = func_name .. "_" .. node.method_name
+        end
+        local params_node = node.ordered_children[1]
+        local body_node = node.ordered_children[2]
+        local return_type = "std::vector<LuaValue>"
 
-                        local params_extraction = ""
-                        for i, param_node in ipairs(params_node.ordered_children) do
-                            params_extraction = params_extraction .. "    LuaValue " .. param_node.identifier .. " = args->get(\"" .. tostring(i) .. "\");\n"
-                        end
+        local params_extraction = ""
+        for i, param_node in ipairs(params_node.ordered_children) do
+            params_extraction = params_extraction .. "    LuaValue " .. param_node.identifier .. " = args->get(\"" .. tostring(i) .. "\");\n"
+        end
 
-                        local lambda_body = translate_node_to_cpp(body_node, for_header, false, current_module_object_name)
-                        local has_explicit_return = false
-                        for _, child_statement in ipairs(body_node.ordered_children) do
-                            if child_statement.type == "return_statement" then
-                                has_explicit_return = true
-                                break
-                            end
-                        end
-                        if not has_explicit_return then
-                            lambda_body = lambda_body .. "return {std::monostate{}};\n"
-                        end
+        local lambda_body = translate_node_to_cpp(body_node, for_header, false, current_module_object_name)
+        local has_explicit_return = false
+        for _, child_statement in ipairs(body_node.ordered_children) do
+            if child_statement.type == "return_statement" then
+                has_explicit_return = true
+                break
+            end
+        end
+        if not has_explicit_return then
+            lambda_body = lambda_body .. "return {std::monostate{}};\n"
+        end
 
-                        local lambda_code = "std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> " .. return_type .. " {\n" .. params_extraction .. lambda_body .. "})"
+        local lambda_code = "std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> " .. return_type .. " {\n" .. params_extraction .. lambda_body .. "})"
 
-                        if is_lambda then
-                            return lambda_code
-                        end
+        if is_lambda then
+            return lambda_code
+        end
 
-                        if node.method_name ~= nil then
-                            return "get_object(LuaValue(" .. node.identifier .. "))->set(\"" .. node.method_name .. "\", " .. lambda_code .. ");"
-                        elseif node.identifier ~= nil then
-                            return "_G->set(\"" .. node.identifier .. "\", " .. lambda_code .. ");"
-                        else
-                            return lambda_code
-                        end
-
+        if node.method_name ~= nil then
+            return "get_object(LuaValue(" .. node.identifier .. "))->set(\"" .. node.method_name .. "\", " .. lambda_code .. ");"
+        elseif node.identifier ~= nil then
+            return "_G->set(\"" .. node.identifier .. "\", " .. lambda_code .. ");"
+        else
+            return lambda_code
+        end
         elseif node.type == "return_statement" then
             local expr_list_node = node.ordered_children[1]
             if expr_list_node and #expr_list_node.ordered_children > 0 then
@@ -556,112 +569,11 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
     header = header .. "#include \"io.hpp\"\n"
     header = header .. "#include \"package.hpp\"\n"
     header = header .. "#include \"utf8.hpp\"\n"
+    header = header .. "#include \"init.hpp\"\n"
     
-    if file_name == "main" then
+    if is_main_script then -- CHECK: Use is_main_script flag
         local main_function_start = "int main() {\n" ..
-                                    "    _G->set(\"assert\", std::make_shared<LuaFunctionWrapper>(lua_assert));\n" ..
-                                    "    _G->set(\"collectgarbage\", std::make_shared<LuaFunctionWrapper>(lua_collectgarbage));\n" ..
-                                    "    _G->set(\"dofile\", std::make_shared<LuaFunctionWrapper>(lua_dofile));\n" ..
-                                    "    _G->set(\"ipairs\", std::make_shared<LuaFunctionWrapper>(lua_ipairs));\n" ..
-                                    "    _G->set(\"load\", std::make_shared<LuaFunctionWrapper>(lua_load));\n" ..
-                                    "    _G->set(\"loadfile\", std::make_shared<LuaFunctionWrapper>(lua_loadfile));\n" ..
-                                    "    _G->set(\"math\", create_math_library());\n" ..
-                                    "    _G->set(\"next\", std::make_shared<LuaFunctionWrapper>(lua_next));\n" ..
-                                    "    _G->set(\"pairs\", std::make_shared<LuaFunctionWrapper>(lua_pairs));\n" ..
-                                    "    _G->set(\"rawequal\", std::make_shared<LuaFunctionWrapper>(lua_rawequal));\n" ..
-                                    "    _G->set(\"rawlen\", std::make_shared<LuaFunctionWrapper>(lua_rawlen));\n" ..
-                                    "    _G->set(\"select\", std::make_shared<LuaFunctionWrapper>(lua_select));\n" ..
-                                    "    _G->set(\"warn\", std::make_shared<LuaFunctionWrapper>(lua_warn));\n" ..
-                                    "    _G->set(\"warn\", std::make_shared<LuaFunctionWrapper>(lua_warn));\n" ..
-                                    "    _G->set(\"xpcall\", std::make_shared<LuaFunctionWrapper>(lua_xpcall));\n" ..
-                                    "    _G->set(\"string\", create_string_library());\n" ..
-                                    "    _G->set(\"table\", create_table_library());\n" ..
-                                    "    _G->set(\"os\", create_os_library());\n" ..
-                                    "    _G->set(\"io\", create_io_library());\n" ..
-                                    "    _G->set(\"package\", create_package_library());\n" ..
-                                    "    _G->set(\"utf8\", create_utf8_library());\n" ..
-                                    "    _G->set(\"_VERSION\", LuaValue(std::string(\"Lua 5.4\")));\n" ..
-                                    "    _G->set(\"tonumber\", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {\n" ..
-                                    "        // tonumber implementation\n" ..
-                                    "        LuaValue val = args->get(\"1\");\n" ..
-                                    "        if (std::holds_alternative<double>(val)) {\n" ..
-                                    "            return {val};\n" ..
-                                    "        } else if (std::holds_alternative<std::string>(val)) {\n" ..
-                                    "            std::string s = std::get<std::string>(val);\n" ..
-                                    "            try {\n" ..
-                                    "                // Check if the string contains only digits and an optional decimal point\n" ..
-                                    "                if (s.find_first_not_of(\"0123456789.\") == std::string::npos) {\n" ..
-                                    "                    return {std::stod(s)};\n" ..
-                                    "                }\n" ..
-                                    "            } catch (...) {\n" ..
-                                    "                // Fall through to return nil\n" ..
-                                    "            }\n" ..
-                                    "        }\n" ..
-                                    "        return {std::monostate{}}; // nil\n" ..
-                                    "    }));\n" ..
-                                    "    _G->set(\"tostring\", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {\n" ..
-                                    "        // tostring implementation\n" ..
-                                    "        return {to_cpp_string(args->get(\"1\"))};\n" ..
-                                    "    }));\n" ..
-                                    "    _G->set(\"type\", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {\n" ..
-                                    "        // type implementation\n" ..
-                                    "        LuaValue val = args->get(\"1\");\n" ..
-                                    "        if (std::holds_alternative<std::monostate>(val)) return {\"nil\"};\n" ..
-                                    "        if (std::holds_alternative<bool>(val)) return {\"boolean\"};\n" ..
-                                    "        if (std::holds_alternative<double>(val)) return {\"number\"};\n" ..
-                                    "        if (std::holds_alternative<std::string>(val)) return {\"string\"};\n" ..
-                                    "        if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) return {\"table\"};\n" ..
-                                    "        if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(val)) return {\"function\"};\n" ..
-                                    "        return {\"unknown\"};\n" ..
-                                    "    }));\n" ..
-                                    "    _G->set(\"getmetatable\", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {\n" ..
-                                    "        // getmetatable implementation\n" ..
-                                    "        LuaValue val = args->get(\"1\");\n" ..
-                                    "        if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) {\n" ..
-                                    "            auto obj = std::get<std::shared_ptr<LuaObject>>(val);\n" ..
-                                    "            if (obj->metatable) {\n" ..
-                                    "                return {obj->metatable};\n" ..
-                                    "            }\n" ..
-                                    "        }\n" ..
-                                    "        return {std::monostate{}}; // nil\n" ..
-                                    "    }));\n" ..
-                                    "    _G->set(\"error\", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {\n" ..
-                                    "        // error implementation\n" ..
-                                    "        LuaValue message = args->get(\"1\");\n" ..
-                                    "        throw std::runtime_error(to_cpp_string(message));\n" ..
-                                    "        return {std::monostate{}}; // Should not be reached\n" ..
-                                    "    }));\n" ..
-                                    "    _G->set(\"pcall\", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {\n" ..
-                                    "        // pcall implementation\n" ..
-                                    "        LuaValue func_to_call = args->get(\"1\");\n" ..
-                                    "        if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(func_to_call)) {\n" ..
-                                    "            auto callable_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(func_to_call);\n" ..
-                                    "            auto func_args = std::make_shared<LuaObject>();\n" ..
-                                    "            for (int i = 2; ; ++i) {\n" ..
-                                    "                LuaValue arg = args->get(std::to_string(i));\n" ..
-                                    "                if (std::holds_alternative<std::monostate>(arg)) break;\n" ..
-                                    "                func_args->set(std::to_string(i - 1), arg);\n" ..
-                                    "            }\n" ..
-                                    "            try {\n" ..
-                                    "                std::vector<LuaValue> results_from_func = callable_func->func(func_args);\n" ..
-                                    "                std::vector<LuaValue> pcall_results;\n" ..
-                                    "                pcall_results.push_back(true);\n" ..
-                                    "                pcall_results.insert(pcall_results.end(), results_from_func.begin(), results_from_func.end());\n" ..
-                                    "                return pcall_results;\n" ..
-                                    "            } catch (const std::exception& e) {\n" ..
-                                    "                std::vector<LuaValue> pcall_results;\n" ..
-                                    "                pcall_results.push_back(false);\n" ..
-                                    "                pcall_results.push_back(LuaValue(e.what()));\n" ..
-                                    "                return pcall_results;\n" ..
-                                    "            } catch (...) {\n" ..
-                                    "                std::vector<LuaValue> pcall_results;\n" ..
-                                    "                pcall_results.push_back(false);\n" ..
-                                    "                pcall_results.push_back(LuaValue(\"An unknown C++ error occurred\"));\n" ..
-                                    "                return pcall_results;\n" ..
-                                    "            }\n" ..
-                                    "        }\n" ..
-                                    "        return {false}; // Not a callable function\n" ..
-                                    "    }));\n"
+                                    "init_G();\n"
         local main_function_end = "\n    return 0;\n}"
         return header .. main_function_start .. generated_code .. main_function_end
     else -- Module generation
@@ -684,10 +596,6 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 global_var_definitions = global_var_definitions .. "LuaValue " .. var_name .. ";\n"
             end
             local module_body_code = ""
-            if current_module_uses_g1_g2 then
-                module_body_code = module_body_code .. "    LuaValue g1;\n"
-                module_body_code = module_body_code .. "    LuaValue g2;\n"
-            end
             local module_identifier = ""
             local explicit_return_found = false
             local explicit_return_value = "std::make_shared<LuaObject>()" -- Default to empty table
@@ -700,15 +608,15 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 elseif child.type == "return_statement" then
                     explicit_return_found = true
                     local return_expr_node = child.ordered_children[1]
-                                    if return_expr_node then
-                                        if return_expr_node.type == "expression_list" then
-                                            explicit_return_value = translate_node_to_cpp(return_expr_node, false, false, current_module_object_name)
-                                        else
-                                            explicit_return_value = translate_node_to_cpp(return_expr_node, false, false, current_module_object_name)
-                                        end
-                                    else
-                                        explicit_return_value = "std::monostate{}" -- Lua's implicit nil
-                                    end                    -- Do not append to module_body_code, as it's an explicit return for the module
+                    if return_expr_node then
+                        if return_expr_node.type == "expression_list" then
+                            explicit_return_value = translate_node_to_cpp(return_expr_node, false, false, current_module_object_name)
+                        else
+                            explicit_return_value = translate_node_to_cpp(return_expr_node, false, false, current_module_object_name)
+                        end
+                    else
+                        explicit_return_value = "std::monostate{}" -- Lua's implicit nil
+                    end                    -- Do not append to module_body_code, as it's an explicit return for the module
                 else
                     module_body_code = module_body_code .. translate_node_to_cpp(child, false, false, current_module_object_name) .. "\n"
                 end

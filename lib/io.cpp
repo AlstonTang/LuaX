@@ -165,7 +165,6 @@ std::vector<LuaValue> io_open(std::shared_ptr<LuaObject> args) {
         file_obj->set("flush", std::make_shared<LuaFunctionWrapper>([file_obj](std::shared_ptr<LuaObject> f_args) -> std::vector<LuaValue> { return file_obj->flush(f_args); }));
         file_obj->set("read", std::make_shared<LuaFunctionWrapper>([file_obj](std::shared_ptr<LuaObject> f_args) -> std::vector<LuaValue> { return file_obj->read(f_args); }));
         file_obj->set("seek", std::make_shared<LuaFunctionWrapper>([file_obj](std::shared_ptr<LuaObject> f_args) -> std::vector<LuaValue> { return file_obj->seek(f_args); }));
-        file_obj->set("setvbuf", std::make_shared<LuaFunctionWrapper>([file_obj](std::shared_ptr<LuaObject> f_args) -> std::vector<LuaValue> { return file_obj->setvbuf(f_args); }));
         file_obj->set("write", std::make_shared<LuaFunctionWrapper>([file_obj](std::shared_ptr<LuaObject> f_args) -> std::vector<LuaValue> { return file_obj->write(f_args); }));
         return {file_obj};
     }
