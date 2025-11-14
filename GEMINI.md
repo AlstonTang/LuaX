@@ -29,7 +29,7 @@ The following Lua standard libraries and global functions/constants have been su
 
 *   **Libraries:**
     *   `math`
-    *   `string` (missing `dump`, `format`, `pack`, `packsize`, `unpack`)
+    *   `string` (missing `dump`, `format`, `pack`, `packsize`, `unpack`, but regex functions are now correctly handled)
     *   `table`
     *   `os`
     *   `io` (missing `popen`, `file:lines`, `file:setvbuf`)
@@ -59,14 +59,12 @@ The following Lua standard libraries and global functions/constants have been su
 *   `coroutine` (Not implemented yet. Quite complicated currently.)
 *   Any variable pertaining with dynamic lua execution (for now).
 
-## Immediate Next Steps
+## Resolved Issues
 
-1.  **Decide Remaining Global Functions:** Decide whether the rest of the global functions and constants from `vars.md` should be implemented, such as:
-    *   `dofile`
-    *   `load`
-    *   `loadfile`
-    *   `next`
-    *   `require`
+All issues previously listed in `ISSUES.md` have been addressed:
+*   Compilation errors related to `std::regex` and `string.find`/`gsub` in `examples/main.lua` are fixed.
+*   Compilation errors related to return type mismatch in `examples/other_module.lua` are fixed.
+*   Hexadecimal literals in `examples/test_utf8.lua` are now correctly parsed.
 
 ## Long-Term Goals
 
