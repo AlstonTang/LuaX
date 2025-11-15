@@ -193,59 +193,6 @@ std::vector<LuaValue> table_remove(std::shared_ptr<LuaObject> args) {
     return {std::monostate{}};
 }
 
-// pairs iterator function
-std::vector<LuaValue> pairs_iterator(std::shared_ptr<LuaObject> args) {
-    // The pairs_iterator function is essentially a wrapper around lua_next.
-    // It receives the table (state) and the previous key (control variable).
-    // It needs to call lua_next with these arguments.
-    return lua_next(args);
-}
-
-// lua_pairs function
-std::vector<LuaValue> lua_pairs(std::shared_ptr<LuaObject> args) {
-    auto table = args->get("1");
-    if (!std::holds_alternative<std::shared_ptr<LuaObject>>(table)) {
-        // If not a table, return nil, error, or handle as appropriate for Lua
-        return {std::make_shared<LuaFunctionWrapper>(pairs_iterator), table, std::monostate{}};
-    }
-    // Return the iterator function, the table (as state), and nil (as initial control variable)
-    return {std::make_shared<LuaFunctionWrapper>(pairs_iterator), table, std::monostate{}};
-}
-
-// ipairs iterator function
-std::vector<LuaValue> ipairs_iterator(std::shared_ptr<LuaObject> args) {
-    auto table = get_object(args->get("1")); // The table being iterated (state)
-    double prev_key_double = get_double(args->get("2")); // The previous key (control variable)
-
-    if (!table) {
-        return {std::monostate{}}; // Return nil if table is invalid
-    }
-
-    long long key = static_cast<long long>(prev_key_double) + 1; // Start from the next integer key
-    std::string current_key_str = std::to_string(key);
-
-    if (table->properties.count(current_key_str)) {
-        LuaValue value = table->properties[current_key_str];
-        if (!std::holds_alternative<std::monostate>(value)) {
-            return {LuaValue(static_cast<double>(key)), value};
-        }
-    }
-    // If key not found or value is nil, stop
-    return {std::monostate{}};
-}
-
-// lua_ipairs function
-std::vector<LuaValue> lua_ipairs(std::shared_ptr<LuaObject> args) {
-    auto table = args->get("1");
-    if (!std::holds_alternative<std::shared_ptr<LuaObject>>(table)) {
-        // If not a table, return nil, error, or handle as appropriate for Lua
-        return {std::make_shared<LuaFunctionWrapper>(ipairs_iterator), table, LuaValue(0.0)};
-    }
-    // Return the iterator function, the table (as state), and 0 (as initial control variable)
-    return {std::make_shared<LuaFunctionWrapper>(ipairs_iterator), table, LuaValue(0.0)};
-}
-
-
 std::shared_ptr<LuaObject> create_table_library() {
     auto table_lib = std::make_shared<LuaObject>();
 

@@ -94,12 +94,7 @@ void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
     properties[key_str] = value;
 }
 
-std::shared_ptr<LuaObject> get_object(const LuaValue& value) {
-    if (std::holds_alternative<std::shared_ptr<LuaObject>>(value)) {
-        return std::get<std::shared_ptr<LuaObject>>(value);
-    }
-    return nullptr;
-}
+
 
 void print_value(const LuaValue& value) {
     if (std::holds_alternative<double>(value)) {
@@ -491,6 +486,73 @@ std::vector<LuaValue> lua_next(std::shared_ptr<LuaObject> args) {
     }
     return {std::monostate{}}; // No more elements
 }
+
+// ipairs iterator function
+std::vector<LuaValue> ipairs_iterator(std::shared_ptr<LuaObject> args) {
+    auto table = get_object(args->get_item("1"));
+    if (!table) {
+        // This should not happen if used correctly, but it's good practice to check.
+        throw std::runtime_error("ipairs iterator called with non-table state");
+    }
+    long long index = get_long_long(args->get_item("2"));
+
+    long long next_index = index + 1;
+    // Use get_item to respect potential __index metamethods on the array part
+    LuaValue next_value = table->get_item(static_cast<double>(next_index));
+
+    if (std::holds_alternative<std::monostate>(next_value)) {
+        return {}; // End of iteration, return nil
+    }
+
+    return {static_cast<double>(next_index), next_value};
+}
+
+// ipairs
+std::vector<LuaValue> lua_ipairs(std::shared_ptr<LuaObject> args) {
+    auto table = get_object(args->get_item("1"));
+    if (!table) {
+        throw std::runtime_error("bad argument #1 to 'ipairs' (table expected)");
+    }
+
+    // Check for __ipairs metamethod
+    if (table->metatable) {
+        auto ipairs_meta = table->metatable->get_item("__ipairs");
+        if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(ipairs_meta)) {
+            auto meta_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(ipairs_meta);
+            auto meta_args = std::make_shared<LuaObject>();
+            meta_args->set_item("1", table);
+            return meta_func->func(meta_args);
+        }
+    }
+
+    // Return the standard iterator function, the table, and initial index 0
+    auto iterator_func_wrapper = std::make_shared<LuaFunctionWrapper>(ipairs_iterator);
+    return {iterator_func_wrapper, table, 0.0};
+}
+
+// pairs
+std::vector<LuaValue> lua_pairs(std::shared_ptr<LuaObject> args) {
+    auto table = get_object(args->get_item("1"));
+    if (!table) {
+        throw std::runtime_error("bad argument #1 to 'pairs' (table expected)");
+    }
+
+    // Check for __pairs metamethod
+    if (table->metatable) {
+        auto pairs_meta = table->metatable->get_item("__pairs");
+        if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(pairs_meta)) {
+            auto meta_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(pairs_meta);
+            auto meta_args = std::make_shared<LuaObject>();
+            meta_args->set_item("1", table);
+            return meta_func->func(meta_args);
+        }
+    }
+
+    // Default behavior: return next, the table, and nil
+    auto next_func_wrapper = std::make_shared<LuaFunctionWrapper>(lua_next);
+    return {next_func_wrapper, table, std::monostate{}};
+}
+
 
 // load (not supported in translated environment)
 std::vector<LuaValue> lua_load(std::shared_ptr<LuaObject> args) {

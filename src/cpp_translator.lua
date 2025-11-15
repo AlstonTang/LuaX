@@ -256,31 +256,36 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             local expr_list_node = node.ordered_children[2]
             local body_node = node.ordered_children[3]
 
-            local iterator_call_code = translate_node_to_cpp(expr_list_node, for_header, false, current_module_object_name)
-            
             local loop_vars = {}
             for _, var_node in ipairs(var_list_node.ordered_children) do
                 table.insert(loop_vars, var_node.identifier)
-                declared_variables[var_node.identifier] = true
-            end
-            local loop_vars_declaration = ""
-            for _, var_name in ipairs(loop_vars) do
-                loop_vars_declaration = loop_vars_declaration .. "LuaValue " .. var_name .. "; "
+                declared_variables[var_node.identifier] = true -- Mark as declared for the scope of the loop
             end
 
-            -- Assuming the iterator_call_code returns a vector of {iterator_func, state, initial_value}
-            -- This is a simplified approach and might need adjustment based on actual pairs/ipairs implementation
             local iter_func_var = "iter_func_" .. tostring(math.random(10000))
             local iter_state_var = "iter_state_" .. tostring(math.random(10000))
             local iter_value_var = "iter_value_" .. tostring(math.random(10000))
             local results_var = "iter_results_" .. tostring(math.random(10000))
 
             local cpp_code = ""
-            cpp_code = cpp_code .. "std::vector<LuaValue> " .. results_var .. " = " .. iterator_call_code .. ";\n"
+
+            -- Distinguish between `for in func()` and `for in a, b, c`
+            if #expr_list_node.ordered_children == 1 and expr_list_node.ordered_children[1].type == "call_expression" then
+                -- Case: for ... in func_call() -> The call returns the vector of iterator components
+                local iterator_call_code = translate_node_to_cpp(expr_list_node.ordered_children[1], for_header, false, current_module_object_name)
+                cpp_code = cpp_code .. "std::vector<LuaValue> " .. results_var .. " = " .. iterator_call_code .. ";\n"
+            else
+                -- Case: for ... in iter, state, initial -> Build the vector from the expressions
+                local iterator_values_code = translate_node_to_cpp(expr_list_node, for_header, false, current_module_object_name)
+                cpp_code = cpp_code .. "std::vector<LuaValue> " .. results_var .. " = " .. iterator_values_code .. ";\n"
+            end
+
+            -- Unpack the iterator components
             cpp_code = cpp_code .. "auto " .. iter_func_var .. " = std::get<std::shared_ptr<LuaFunctionWrapper>>(" .. results_var .. "[0]);\n"
             cpp_code = cpp_code .. "LuaValue " .. iter_state_var .. " = " .. results_var .. "[1];\n"
             cpp_code = cpp_code .. "LuaValue " .. iter_value_var .. " = " .. results_var .. "[2];\n"
             
+            -- Generate the while loop
             cpp_code = cpp_code .. "while (true) {\n"
             cpp_code = cpp_code .. "    auto args_obj = std::make_shared<LuaObject>();\n"
             cpp_code = cpp_code .. "    args_obj->set(\"1\", " .. iter_state_var .. ");\n"
@@ -291,11 +296,15 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             cpp_code = cpp_code .. "        break;\n"
             cpp_code = cpp_code .. "    }\n"
 
+            -- Assign to loop variables (and declare them in the loop's scope)
             for i, var_name in ipairs(loop_vars) do
-                cpp_code = cpp_code .. "    LuaValue " .. var_name .. " = current_values[" .. (i - 1) .. "];\n"
+                cpp_code = cpp_code .. "    LuaValue " .. var_name .. " = (current_values.size() > " .. (i - 1) .. ") ? current_values[" .. (i - 1) .. "] : std::monostate{};\n"
             end
-            cpp_code = cpp_code .. "    " .. iter_value_var .. " = " .. loop_vars[1] .. ";\n" -- The first return value becomes the next 'var' for the iterator
+            
+            -- Update the control variable for the next iteration
+            cpp_code = cpp_code .. "    " .. iter_value_var .. " = " .. loop_vars[1] .. ";\n"
 
+            -- Translate the loop body
             cpp_code = cpp_code .. translate_node_to_cpp(body_node, for_header, false, current_module_object_name) .. "\n"
             cpp_code = cpp_code .. "}\n"
             return cpp_code
@@ -353,7 +362,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 if module_name_node and module_name_node.type == "string" then
                     local module_name = module_name_node.value
                     required_modules[module_name] = true
-                    return module_name .. "::load()[0]"
+                    return module_name .. "::load()"
                 end
                 return "/* require call with non-string argument */"
             elseif func_node.type == "identifier" and func_node.identifier == "setmetatable" then
@@ -443,16 +452,50 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
     elseif node.type == "method_call_expression" then
         local base_node = node.ordered_children[1]
         local method_node = node.ordered_children[2]
-        local cpp_code = translate_node_to_cpp(base_node, for_header, false, current_module_object_name) .. "->" .. method_node.identifier .. "("
-        for i, arg_node in ipairs(node.ordered_children) do
-            if i > 2 then
-                cpp_code = cpp_code .. translate_node_to_cpp(arg_node, for_header, false, current_module_object_name)
-                if i < #node.ordered_children then
-                    cpp_code = cpp_code .. ", "
-                end
-            end
+        local method_name = method_node.identifier
+        local translated_base = translate_node_to_cpp(base_node, for_header, false, current_module_object_name)
+
+        -- Build a list of translated arguments
+        local args_list = {}
+        for i = 3, #node.ordered_children do
+            table.insert(args_list, translate_node_to_cpp(node.ordered_children[i], for_header, false, current_module_object_name))
         end
-        return cpp_code .. ")"
+
+        -- Special handling for string methods, which are not real methods on C++ strings
+        if method_name == "match" or method_name == "find" or method_name == "gsub" then
+            -- This translates `str:match(p)` into `lua_string_match(str, p)`
+            local all_args = { translated_base }
+            for _, arg_code in ipairs(args_list) do
+                table.insert(all_args, arg_code)
+            end
+            return "lua_string_" .. method_name .. "(" .. table.concat(all_args, ", ") .. ")"
+        elseif method_name == "lines" then
+             -- This translates `file:lines()` into `lua_file_lines(file)`
+            return "lua_file_lines(" .. translated_base .. ")"
+        else
+            -- GENERIC METHOD CALL LOGIC for everything else (including file:read, file:write, etc.)
+            -- This correctly simulates Lua's obj:method(a, b) which is sugar for obj.method(obj, a, b)
+
+            -- 1. Get the function from the object.
+            local func_access = "get_object(" .. translated_base .. ")->get_item(\"" .. method_name .. "\")"
+
+            -- 2. Build the arguments table, with the object itself ('self') as the first argument.
+            local self_arg = "temp_args->set_item(\"1\", " .. translated_base .. ");\n"
+            local other_args_init_code = ""
+            for i, arg_code in ipairs(args_list) do
+                other_args_init_code = other_args_init_code .. "    temp_args->set_item(\"" .. tostring(i + 1) .. "\", " .. arg_code .. ");\n"
+            end
+
+            local args_code_builder = "( [&]() { \n" ..
+                                      "    auto temp_args = std::make_shared<LuaObject>();\n" ..
+                                      "    " .. self_arg ..
+                                      "    " .. other_args_init_code ..
+                                      "    return temp_args; \n" ..
+                                      "} )()"
+
+            -- 3. Call the function.
+            return "std::get<std::shared_ptr<LuaFunctionWrapper>>(" .. func_access .. ")->func(" .. args_code_builder .. ")"
+        end
     elseif node.type == "expression_statement" then
         local expr_node = node.ordered_children[1]
         if expr_node then

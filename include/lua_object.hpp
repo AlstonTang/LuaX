@@ -5,25 +5,14 @@
 #include <vector>
 #include <map>
 #include <memory>
-#include <variant>
 #include <functional>
+#include <stdexcept> // Required for std::runtime_error
+#include "lua_value.hpp" // Include the new LuaValue header
 
-// Forward declarations
-class LuaObject;
-struct LuaFunctionWrapper;
-class LuaCoroutine; // Forward declaration for LuaCoroutine
-
-// Define LuaValue first, using forward declarations for recursive types
-using LuaValue = std::variant<
-    std::monostate, // for nil
-    bool,
-    double,
-    long long,
-    std::string,
-    std::shared_ptr<LuaObject>, // Breaks recursion for LuaObject
-    std::shared_ptr<LuaFunctionWrapper>, // Breaks recursion for functions
-    std::shared_ptr<LuaCoroutine> // Added for coroutines
->;
+// Forward declarations (already in lua_value.hpp, but good to have here for clarity if needed)
+// class LuaObject; // Already forward declared in lua_value.hpp
+// struct LuaFunctionWrapper; // Already forward declared in lua_value.hpp
+// class LuaCoroutine; // Already forward declared in lua_value.hpp
 
 // Now define LuaFunctionWrapper, which can now use LuaValue
 struct LuaFunctionWrapper {
@@ -53,6 +42,14 @@ std::shared_ptr<LuaObject> get_object(const LuaValue& value);
 void print_value(const LuaValue& value);
 double get_double(const LuaValue& value);
 long long get_long_long(const LuaValue& value);
+inline std::shared_ptr<LuaObject> get_object(const LuaValue& value) {
+    if (std::holds_alternative<std::shared_ptr<LuaObject>>(value)) {
+        return std::get<std::shared_ptr<LuaObject>>(value);
+    }
+    throw std::runtime_error("Type error: expected table or userdata.");
+}
+
+// Helper to safely get a LuaFile from a LuaValue. Throws on type error.
 std::string to_cpp_string(const LuaValue& value);
 LuaValue rawget(std::shared_ptr<LuaObject> table, const LuaValue& key);
 void rawset(std::shared_ptr<LuaObject> table, const LuaValue& key, const LuaValue& value); // Declaration for rawset
@@ -73,6 +70,9 @@ std::vector<LuaValue> lua_rawset(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> lua_select(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> lua_warn(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> lua_xpcall(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> pairs_iterator(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> ipairs_iterator(std::shared_ptr<LuaObject> args);
+
 bool is_lua_truthy(const LuaValue& val);
 
 bool operator<=(const LuaValue& lhs, const LuaValue& rhs);
