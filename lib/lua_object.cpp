@@ -611,3 +611,59 @@ bool is_lua_truthy(const LuaValue& val) {
     }
     return true;
 }
+
+// ADD THIS HELPER FUNCTION TO lua_object.cpp
+// Helper to get the string name of a LuaValue's type for error messages
+std::string get_lua_type_name(const LuaValue& val) {
+    if (std::holds_alternative<std::monostate>(val)) return "nil";
+    if (std::holds_alternative<bool>(val)) return "boolean";
+    if (std::holds_alternative<double>(val) || std::holds_alternative<long long>(val)) return "number";
+    if (std::holds_alternative<std::string>(val)) return "string";
+    if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) return "table";
+    if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(val)) return "function";
+    if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) return "thread";
+    return "unknown";
+}
+
+
+// ADD THIS FUNCTION IMPLEMENTATION TO lua_object.cpp
+// Safely calls a LuaValue, checking for callability and handling the __call metamethod.
+std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<LuaObject> args) {
+    // Case 1: The value is a direct function.
+    if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(callable)) {
+        auto func_wrapper = std::get<std::shared_ptr<LuaFunctionWrapper>>(callable);
+        return func_wrapper->func(args);
+    }
+
+    // Case 2: The value is a table or userdata; check for a __call metamethod.
+    if (std::holds_alternative<std::shared_ptr<LuaObject>>(callable)) {
+        auto table_obj = std::get<std::shared_ptr<LuaObject>>(callable);
+        if (table_obj->metatable) {
+            LuaValue call_meta = table_obj->metatable->get_item("__call");
+            if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(call_meta)) {
+                // The metamethod exists and is a function.
+                auto meta_func_wrapper = std::get<std::shared_ptr<LuaFunctionWrapper>>(call_meta);
+
+                // Create new arguments: the first argument is the table itself,
+                // followed by the original arguments.
+                auto new_args = std::make_shared<LuaObject>();
+                new_args->set_item("1", table_obj); // 'self' is the table being called
+
+                // Copy original arguments, shifting their indices by 1.
+                for (long long i = 1; ; ++i) {
+                    LuaValue original_arg = args->get_item(std::to_string(i));
+                    if (std::holds_alternative<std::monostate>(original_arg)) {
+                        break; // No more arguments
+                    }
+                    new_args->set_item(std::to_string(i + 1), original_arg);
+                }
+
+                // Call the metamethod with the new arguments.
+                return meta_func_wrapper->func(new_args);
+            }
+        }
+    }
+
+    // Case 3: The value is not callable. Throw a runtime error.
+    throw std::runtime_error("attempt to call a " + get_lua_type_name(callable) + " value");
+}

@@ -46,13 +46,18 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 
         -- Helper function to get the C++ code for a single LuaValue, extracting from vector if necessary
         local function get_single_lua_value_cpp_code(node_to_translate, for_header_arg, is_lambda_arg, current_module_object_name_arg)
-            local translated_code = translate_node_to_cpp(node_to_translate, for_header_arg, is_lambda_arg, current_module_object_name_arg)
-            if node_to_translate.type == "call_expression" then
-                return translated_code .. "[0]"
+            if not node_to_translate then return "std::monostate{}" end
+
+            if node_to_translate.type == "call_expression" or node_to_translate.type == "method_call_expression" then
+                local translated_code = translate_node_to_cpp(node_to_translate, for_header_arg, is_lambda_arg, current_module_object_name_arg)
+                -- Wrap the call in a lambda to extract the first element, or return nil if empty.
+                return "( [&]() -> LuaValue { auto results = " .. translated_code .. "; return results.empty() ? LuaValue(std::monostate{}) : results[0]; } )()"
             else
-                return translated_code
+                -- For non-calls, just translate directly.
+                return translate_node_to_cpp(node_to_translate, for_header_arg, is_lambda_arg, current_module_object_name_arg)
             end
-        end        if node.type == "Root" then
+        end
+        if node.type == "Root" then
             local cpp_code = ""
                 for i, child in ipairs(node.ordered_children) do
                     cpp_code = cpp_code .. translate_node_to_cpp(child, for_header, false, current_module_object_name) .. "\n"
@@ -74,7 +79,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             -- First pass: check if any expression is a function call
             for i = 1, num_exprs do
                 local expr_node = expr_list_node.ordered_children[i]
-                if expr_node.type == "call_expression" then
+                if expr_node.type == "call_expression" or expr_node.type == "method_call_expression" then
                     has_function_call_expr = true
                     first_call_expr_node = expr_node
                     break
@@ -96,7 +101,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 
                 if i <= num_exprs then
                     local expr_node = expr_list_node.ordered_children[i]
-                    if expr_node.type == "call_expression" then
+                    if expr_node.type == "call_expression" or expr_node.type == "method_call_expression" then
                         -- For function calls, take from the results vector
                         initial_value_code = "(" .. function_call_results_var .. ".size() > " .. (i - 1) .. " ? " .. function_call_results_var .. "[" .. (i - 1) .. "] : std::monostate{})"
                     else
@@ -124,7 +129,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             -- First pass: check if any expression is a function call
             for i = 1, num_exprs do
                 local expr_node = expr_list_node.ordered_children[i]
-                if expr_node.type == "call_expression" then
+                if expr_node.type == "call_expression" or expr_node.type == "method_call_expression" then
                     has_function_call_expr = true
                     first_call_expr_node = expr_node
                     break
@@ -142,7 +147,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 
                 if i <= num_exprs then
                     local expr_node = expr_list_node.ordered_children[i]
-                    if expr_node.type == "call_expression" then
+                    if expr_node.type == "call_expression" or expr_node.type == "method_call_expression" then
                         -- For function calls, take from the results vector
                         value_code = "(" .. function_call_results_var .. ".size() > " .. (i - 1) .. " ? " .. function_call_results_var .. "[" .. (i - 1) .. "] : std::monostate{})"
                     else
@@ -184,38 +189,50 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             local left_node = node.ordered_children[1]
             local right_node = node.ordered_children[2]
             local operator = node.value
-            local translated_left = translate_node_to_cpp(left_node, for_header, false, current_module_object_name)
-            local translated_right = translate_node_to_cpp(right_node, for_header, false, current_module_object_name)
+
+            if operator == "and" then
+                -- Lua: A and B -> if A is falsey, return A, else return B.
+                -- Use a lambda to ensure left operand is evaluated only once and handle types correctly.
+                local temp_var = "left_and_val_" .. tostring(math.random(10000))
+                local translated_left_single = get_single_lua_value_cpp_code(left_node, for_header, false, current_module_object_name)
+                local translated_right_single = get_single_lua_value_cpp_code(right_node, for_header, false, current_module_object_name)
+                return "( [&]() -> LuaValue { const auto " .. temp_var .. " = " .. translated_left_single .. "; return is_lua_truthy(" .. temp_var .. ") ? (" .. translated_right_single .. ") : " .. temp_var .. "; } )()"
+            elseif operator == "or" then
+                -- Lua: A or B -> if A is truthy, return A, else return B.
+                -- Use a lambda to ensure left operand is evaluated only once and handle types correctly.
+                local temp_var = "left_or_val_" .. tostring(math.random(10000))
+                local translated_left_single = get_single_lua_value_cpp_code(left_node, for_header, false, current_module_object_name)
+                local translated_right_single = get_single_lua_value_cpp_code(right_node, for_header, false, current_module_object_name)
+                return "( [&]() -> LuaValue { const auto " .. temp_var .. " = " .. translated_left_single .. "; return is_lua_truthy(" .. temp_var .. ") ? " .. temp_var .. " : (" .. translated_right_single .. "); } )()"
+            end
+
+            -- All other binary operators work on single values extracted from their operands.
+            local translated_left = get_single_lua_value_cpp_code(left_node, for_header, false, current_module_object_name)
+            local translated_right = get_single_lua_value_cpp_code(right_node, for_header, false, current_module_object_name)
 
             if operator == ".." then
                 return "to_cpp_string(" .. translated_left .. ") + to_cpp_string(" .. translated_right .. ")"
-            elseif operator == "and" then
-                -- Lua: A and B -> if A is falsey, return A, else return B.
-                return "(is_lua_truthy(" .. translated_left .. ") ? " .. translated_right .. " : " .. translated_left .. ")"
-            elseif operator == "or" then
-                -- Lua: A or B -> if A is truthy, return A, else return B.
-                return "(is_lua_truthy(" .. translated_left .. ") ? " .. translated_left .. " : " .. translated_right .. ")"
             elseif operator == "==" then
                 return "lua_equals(" .. translated_left .. ", " .. translated_right .. ")"
             elseif operator == "~=" then
                 return "lua_not_equals(" .. translated_left .. ", " .. translated_right .. ")"
             end
             -- Arithmetic/Comparison operators return LuaValue (number or boolean)
-            return "(get_double(" .. get_single_lua_value_cpp_code(left_node, for_header, false, current_module_object_name) .. ") " .. operator .. " get_double(" .. get_single_lua_value_cpp_code(right_node, for_header, false, current_module_object_name) .. "))"
+            return "(get_double(" .. translated_left .. ") " .. operator .. " get_double(" .. translated_right .. "))"
         elseif node.type == "if_statement" then
             local cpp_code = ""
             local first_clause = true
             for i, clause in ipairs(node.ordered_children) do
                 if clause.type == "if_clause" then
-                    local condition = translate_node_to_cpp(clause.ordered_children[1], for_header, false, current_module_object_name)
+                    -- FIX: Use helper to get single value for condition
+                    local condition = get_single_lua_value_cpp_code(clause.ordered_children[1], for_header, false, current_module_object_name)
                     local body = translate_node_to_cpp(clause.ordered_children[2], for_header, false, current_module_object_name)
-                    -- FIX: Wrap condition in is_lua_truthy
                     cpp_code = cpp_code .. "if (is_lua_truthy(" .. condition .. ")) {\n" .. body .. "}"
                     first_clause = false
                 elseif clause.type == "elseif_clause" then
-                    local condition = translate_node_to_cpp(clause.ordered_children[1], for_header, false, current_module_object_name)
+                    -- FIX: Use helper to get single value for condition
+                    local condition = get_single_lua_value_cpp_code(clause.ordered_children[1], for_header, false, current_module_object_name)
                     local body = translate_node_to_cpp(clause.ordered_children[2], for_header, false, current_module_object_name)
-                    -- FIX: Wrap condition in is_lua_truthy
                     cpp_code = cpp_code .. " else if (is_lua_truthy(" .. condition .. ")) {\n" .. body .. "}"
                 elseif clause.type == "else_clause" then
                     local body = translate_node_to_cpp(clause.ordered_children[1], for_header, false, current_module_object_name)
@@ -270,7 +287,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             local cpp_code = ""
 
             -- Distinguish between `for in func()` and `for in a, b, c`
-            if #expr_list_node.ordered_children == 1 and expr_list_node.ordered_children[1].type == "call_expression" then
+            if #expr_list_node.ordered_children == 1 and (expr_list_node.ordered_children[1].type == "call_expression" or expr_list_node.ordered_children[1].type == "method_call_expression") then
                 -- Case: for ... in func_call() -> The call returns the vector of iterator components
                 local iterator_call_code = translate_node_to_cpp(expr_list_node.ordered_children[1], for_header, false, current_module_object_name)
                 cpp_code = cpp_code .. "std::vector<LuaValue> " .. results_var .. " = " .. iterator_call_code .. ";\n"
@@ -280,8 +297,8 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 cpp_code = cpp_code .. "std::vector<LuaValue> " .. results_var .. " = " .. iterator_values_code .. ";\n"
             end
 
-            -- Unpack the iterator components
-            cpp_code = cpp_code .. "auto " .. iter_func_var .. " = std::get<std::shared_ptr<LuaFunctionWrapper>>(" .. results_var .. "[0]);\n"
+            -- Unpack the iterator components without unsafe casting
+            cpp_code = cpp_code .. "LuaValue " .. iter_func_var .. " = " .. results_var .. "[0];\n"
             cpp_code = cpp_code .. "LuaValue " .. iter_state_var .. " = " .. results_var .. "[1];\n"
             cpp_code = cpp_code .. "LuaValue " .. iter_value_var .. " = " .. results_var .. "[2];\n"
             
@@ -290,7 +307,8 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             cpp_code = cpp_code .. "    auto args_obj = std::make_shared<LuaObject>();\n"
             cpp_code = cpp_code .. "    args_obj->set(\"1\", " .. iter_state_var .. ");\n"
             cpp_code = cpp_code .. "    args_obj->set(\"2\", " .. iter_value_var .. ");\n"
-            cpp_code = cpp_code .. "    std::vector<LuaValue> current_values = " .. iter_func_var .. "->func(args_obj);\n"
+            -- Use a helper function that performs a runtime check before calling
+            cpp_code = cpp_code .. "    std::vector<LuaValue> current_values = call_lua_value(" .. iter_func_var .. ", args_obj);\n"
             
             cpp_code = cpp_code .. "    if (current_values.empty() || std::holds_alternative<std::monostate>(current_values[0])) {\n"
             cpp_code = cpp_code .. "        break;\n"
@@ -309,9 +327,9 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             cpp_code = cpp_code .. "}\n"
             return cpp_code
         elseif node.type == "while_statement" then
-            local condition = translate_node_to_cpp(node.ordered_children[1], for_header, false, current_module_object_name)
+            -- FIX: Use helper to get single value for condition
+            local condition = get_single_lua_value_cpp_code(node.ordered_children[1], for_header, false, current_module_object_name)
             local body = translate_node_to_cpp(node.ordered_children[2], for_header, false, current_module_object_name)
-            -- FIX: Wrap condition in is_lua_truthy
             return "while (is_lua_truthy(" .. condition .. ")) {\n" .. body .. "}"
         elseif node.type == "call_expression" then
             local func_node = node.ordered_children[1]
@@ -329,13 +347,15 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 local pattern_node = node.ordered_children[3]
                 local base_string_code = translate_node_to_cpp(base_string_node, for_header, false, current_module_object_name)
                 local pattern_code = translate_node_to_cpp(pattern_node, for_header, false, current_module_object_name)
-                return "{LuaValue(std::regex_search(to_cpp_string(" .. base_string_code .. "), std::regex(to_cpp_string(" .. pattern_code .. "))))}"
+                -- FIX: Return a valid std::vector expression
+                return "std::vector<LuaValue>{LuaValue(std::regex_search(to_cpp_string(" .. base_string_code .. "), std::regex(to_cpp_string(" .. pattern_code .. "))))}"
             elseif func_node.type == "member_expression" and func_node.ordered_children[1].identifier == "string" and func_node.ordered_children[2].identifier == "find" then
                 local base_string_node = node.ordered_children[2]
                 local pattern_node = node.ordered_children[3]
                 local base_string_code = translate_node_to_cpp(base_string_node, for_header, false, current_module_object_name)
                 local pattern_code = translate_node_to_cpp(pattern_node, for_header, false, current_module_object_name)
-                return "{LuaValue(to_cpp_string(" .. base_string_code .. ").find(to_cpp_string(" .. pattern_code .. ")) != std::string::npos ? static_cast<double>(to_cpp_string(" .. base_string_code .. ").find(to_cpp_string(" .. pattern_code .. ")) + 1) : 0.0)}"
+                -- FIX: Return a valid std::vector expression and handle nil return correctly
+                return "std::vector<LuaValue>{ (to_cpp_string(" .. base_string_code .. ").find(to_cpp_string(" .. pattern_code .. ")) != std::string::npos ? LuaValue(static_cast<double>(to_cpp_string(" .. base_string_code .. ").find(to_cpp_string(" .. pattern_code .. ")) + 1)) : LuaValue(std::monostate{})) }"
             elseif func_node.type == "member_expression" and func_node.ordered_children[1].identifier == "string" and func_node.ordered_children[2].identifier == "gsub" then
                 local base_string_node = node.ordered_children[2]
                 local pattern_node = node.ordered_children[3]
@@ -343,7 +363,8 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 local base_string_code = translate_node_to_cpp(base_string_node, for_header, false, current_module_object_name)
                 local pattern_code = translate_node_to_cpp(pattern_node, for_header, false, current_module_object_name)
                 local replacement_code = translate_node_to_cpp(replacement_node, for_header, false, current_module_object_name)
-                return "{LuaValue(std::regex_replace(to_cpp_string(" .. base_string_code .. "), std::regex(to_cpp_string(" .. pattern_code .. ")), to_cpp_string(" .. replacement_code .. ")))}"
+                -- FIX: Return a valid std::vector expression
+                return "std::vector<LuaValue>{LuaValue(std::regex_replace(to_cpp_string(" .. base_string_code .. "), std::regex(to_cpp_string(" .. pattern_code .. ")), to_cpp_string(" .. replacement_code .. ")))}"
             elseif func_node.type == "identifier" and func_node.identifier == "print" then
                 local cpp_code = ""
                 for i, arg_node in ipairs(node.ordered_children) do
@@ -379,7 +400,8 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 else
                     translated_func_access = translate_node_to_cpp(func_node, for_header, false, current_module_object_name)
                 end
-                return "std::get<std::shared_ptr<LuaFunctionWrapper>>(" .. translated_func_access .. ")->func(" .. args_code .. ")"
+                -- MODIFIED: Use a safe call helper instead of direct std::get
+                return "call_lua_value(" .. translated_func_access .. ", " .. args_code .. ")"
             end
         elseif node.type == "member_expression" then
             local base_node = node.ordered_children[1]
@@ -462,18 +484,21 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
         end
 
         -- Special handling for string methods, which are not real methods on C++ strings
-        if method_name == "match" or method_name == "find" or method_name == "gsub" then
-            -- This translates `str:match(p)` into `lua_string_match(str, p)`
-            local all_args = { translated_base }
-            for _, arg_code in ipairs(args_list) do
-                table.insert(all_args, arg_code)
-            end
-            return "lua_string_" .. method_name .. "(" .. table.concat(all_args, ", ") .. ")"
-        elseif method_name == "lines" then
-             -- This translates `file:lines()` into `lua_file_lines(file)`
-            return "lua_file_lines(" .. translated_base .. ")"
+        if method_name == "match" then
+            local pattern_code = args_list[1]
+            -- FIX: Return a valid std::vector expression
+            return "std::vector<LuaValue>{LuaValue(std::regex_search(to_cpp_string(" .. translated_base .. "), std::regex(to_cpp_string(" .. pattern_code .. "))))}"
+        elseif method_name == "find" then
+            local pattern_code = args_list[1]
+            -- FIX: Return a valid std::vector expression and handle nil return correctly
+            return "std::vector<LuaValue>{ (to_cpp_string(" .. translated_base .. ").find(to_cpp_string(" .. pattern_code .. ")) != std::string::npos ? LuaValue(static_cast<double>(to_cpp_string(" .. translated_base .. ").find(to_cpp_string(" .. pattern_code .. ")) + 1)) : LuaValue(std::monostate{})) }"
+        elseif method_name == "gsub" then
+            local pattern_code = args_list[1]
+            local replacement_code = args_list[2]
+            -- FIX: Return a valid std::vector expression
+            return "std::vector<LuaValue>{LuaValue(std::regex_replace(to_cpp_string(" .. translated_base .. "), std::regex(to_cpp_string(" .. pattern_code .. ")), to_cpp_string(" .. replacement_code .. ")))}"
         else
-            -- GENERIC METHOD CALL LOGIC for everything else (including file:read, file:write, etc.)
+            -- GENERIC METHOD CALL LOGIC for everything else (including file:read, file:write, file:lines etc.)
             -- This correctly simulates Lua's obj:method(a, b) which is sugar for obj.method(obj, a, b)
 
             -- 1. Get the function from the object.
@@ -493,8 +518,8 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                                       "    return temp_args; \n" ..
                                       "} )()"
 
-            -- 3. Call the function.
-            return "std::get<std::shared_ptr<LuaFunctionWrapper>>(" .. func_access .. ")->func(" .. args_code_builder .. ")"
+            -- 3. Call the function using a safe helper that performs a runtime check.
+            return "call_lua_value(" .. func_access .. ", " .. args_code_builder .. ")"
         end
     elseif node.type == "expression_statement" then
         local expr_node = node.ordered_children[1]
@@ -564,11 +589,11 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
         elseif node.type == "unary_expression" then
             local operator = node.value
             local operand_node = node.ordered_children[1]
-            local translated_operand = translate_node_to_cpp(operand_node, for_header, false, current_module_object_name)
+            -- FIX: Use helper to get single value for operand
+            local translated_operand = get_single_lua_value_cpp_code(operand_node, for_header, false, current_module_object_name)
             if operator == "-" then
                 return "LuaValue(-get_double(" .. translated_operand .. "))"
             elseif operator == "not" then
-                -- FIX: Implement Lua 'not' logic
                 return "LuaValue(!is_lua_truthy(" .. translated_operand .. "))"
             else
                 return operator .. translated_operand

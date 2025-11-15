@@ -72,6 +72,7 @@ std::vector<LuaValue> lua_warn(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> lua_xpcall(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> pairs_iterator(std::shared_ptr<LuaObject> args);
 std::vector<LuaValue> ipairs_iterator(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<LuaObject> args);
 
 bool is_lua_truthy(const LuaValue& val);
 
