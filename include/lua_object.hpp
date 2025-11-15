@@ -32,6 +32,7 @@ public:
     void set(const std::string& key, const LuaValue& value);
     LuaValue get_item(const LuaValue& key); // New method for LuaValue keys
     void set_item(const LuaValue& key, const LuaValue& value); // New method for LuaValue keys
+    void set_item(const LuaValue& key, std::vector<LuaValue> value); // New method for LuaValue keys
     void set_metatable(std::shared_ptr<LuaObject> mt);
 };
 
@@ -51,6 +52,7 @@ inline std::shared_ptr<LuaObject> get_object(const LuaValue& value) {
 
 // Helper to safely get a LuaFile from a LuaValue. Throws on type error.
 std::string to_cpp_string(const LuaValue& value);
+std::string to_cpp_string(std::vector<LuaValue> value);
 LuaValue rawget(std::shared_ptr<LuaObject> table, const LuaValue& key);
 void rawset(std::shared_ptr<LuaObject> table, const LuaValue& key, const LuaValue& value); // Declaration for rawset
 

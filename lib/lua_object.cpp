@@ -94,6 +94,9 @@ void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
     properties[key_str] = value;
 }
 
+void LuaObject::set_item(const LuaValue& key, std::vector<LuaValue> value) {
+    LuaObject::set_item(key, value.at(0));
+}
 
 
 void print_value(const LuaValue& value) {
@@ -157,6 +160,10 @@ std::string to_cpp_string(const LuaValue& value) {
     } else {
         return "nil";
     }
+}
+
+std::string to_cpp_string(std::vector<LuaValue> value) {
+    return to_cpp_string(value.at(0));
 }
 
 // rawget

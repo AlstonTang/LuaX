@@ -10,6 +10,6 @@
 #include "table.hpp"
 #include "utf8.hpp"
 
-void init_G();
+void init_G(int argc, char* argv[]);
 
 #endif // INIT_HPP

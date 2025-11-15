@@ -1,7 +1,16 @@
 #include "init.hpp"
 #include "debug.hpp"
 
-void init_G() {
+void init_G(int argc, char* argv[]) {
+    _G->set("arg", (([=](){
+        auto arg = std::make_shared<LuaObject>();
+
+        for (int i = 0; i < argc; i++) {
+            arg->set_item(i, argv[i]);
+        }
+
+        return arg;
+    })()));
     _G->set("assert", std::make_shared<LuaFunctionWrapper>(lua_assert));
     _G->set("collectgarbage", std::make_shared<LuaFunctionWrapper>(lua_collectgarbage));
     _G->set("dofile", std::make_shared<LuaFunctionWrapper>(lua_dofile));

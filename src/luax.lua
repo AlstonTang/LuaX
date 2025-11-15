@@ -1,7 +1,7 @@
 -- This script automates the translation and compilation of LuaX projects.
 -- It takes a single Lua file as input, analyzes its dependencies, translates
--- all required Lua files into C++, compiles them into a single executable,
--- and then runs the executable.
+-- all required Lua files into C++, generates a Makefile, and then uses
+-- make to compile them into a single executable.
 
 -- Use dofile to ensure latest versions are loaded, bypassing require's cache
 local cpp_translator = dofile("src/cpp_translator.lua")
@@ -94,6 +94,80 @@ local function find_dependencies(lua_file_path)
     return dependencies
 end
 
+-- NEW: Function to generate and execute a Makefile
+local function generate_and_run_makefile(output_path, generated_basenames, dep_graph)
+    local makefile_path = "build/Makefile"
+    print("Generating " .. makefile_path .. "...")
+
+    local lib_cpp_files = {
+        "lib/lua_object.cpp", "lib/math.cpp", "lib/string.cpp", "lib/table.cpp",
+        "lib/os.cpp", "lib/io.cpp", "lib/package.cpp", "lib/utf8.cpp",
+        "lib/init.cpp", "lib/debug.cpp", "lib/coroutine.cpp"
+    }
+
+    -- Use ../ to reference files from the build directory
+    local lib_srcs_str = table.concat(lib_cpp_files, " "):gsub("lib/", "../lib/")
+
+    local gen_srcs = {}
+    for _, basename in ipairs(generated_basenames) do
+        table.insert(gen_srcs, basename .. ".cpp")
+    end
+    local gen_srcs_str = table.concat(gen_srcs, " ")
+
+    local content = {
+        "CXX = clang++",
+        "CXXFLAGS = -std=c++17 -I../include -g -O2",
+        "LDFLAGS = -lstdc++fs",
+        "TARGET = ../" .. output_path, -- The final executable will be in the root or specified path
+        "",
+        "LIB_SRCS = " .. lib_srcs_str,
+        "GEN_SRCS = " .. gen_srcs_str,
+        "",
+        "LIB_OBJS = $(LIB_SRCS:.cpp=.o)",
+        "GEN_OBJS = $(GEN_SRCS:.cpp=.o)",
+        "",
+        ".PHONY: all clean",
+        "",
+        "all: $(TARGET)",
+        "",
+        "$(TARGET): $(LIB_OBJS) $(GEN_OBJS)",
+        "\t$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)",
+        "",
+        -- Generic rule to compile any .cpp into a .o
+        "%.o: %.cpp",
+        "\t$(CXX) $(CXXFLAGS) -c -o $@ $<",
+        "",
+    }
+
+    for lua_path, deps in pairs(dep_graph) do
+        local basename = lua_path:match(".*/(.*)%.lua$") or lua_path:match("(.*)%.lua$")
+        local obj_file = basename .. ".o"
+        local hpp_deps = {}
+        for _, dep_lua_path in ipairs(deps) do
+            local dep_basename = dep_lua_path:match(".*/(.*)%.lua$") or dep_lua_path:match("(.*)%.lua$")
+            table.insert(hpp_deps, dep_basename .. ".hpp")
+        end
+        if #hpp_deps > 0 then
+            table.insert(content, obj_file .. ": " .. table.concat(hpp_deps, " "))
+        end
+    end
+
+    table.insert(content, "")
+    table.insert(content, "clean:")
+    table.insert(content, "\trm -f $(TARGET) $(LIB_OBJS) $(GEN_OBJS)")
+
+    local file = io.open(makefile_path, "w")
+    if not file then
+        error("Could not write to " .. makefile_path)
+    end
+    file:write(table.concat(content, "\n"))
+    file:close()
+
+    -- Run make from within the build directory
+    run_command("make -j -C build", "Compilation failed.")
+end
+
+
 local usage = "Usage: lua5.4 scripts/luax.lua <path_to_src_lua_file> <path_to_out_file>"
 
 -- Main script logic
@@ -108,12 +182,14 @@ if not path_to_out_file then
 end
 
 --- Cleans and recreates the build directory
-run_command("rm -r build")
+-- Note: We no longer remove the whole directory, to preserve .o files for faster recompilation.
+-- We'll rely on `make clean` for a full rebuild.
 run_command("mkdir -p build", "Failed to create build directory.")
 
 local files_to_translate = {}
 local queue = {}
 local visited = {}
+local dep_graph = {} -- NEW: To store dependencies for the Makefile
 
 -- Add initial file to queue and set
 table.insert(queue, input_lua_file)
@@ -126,6 +202,8 @@ while head <= #queue do
     head = head + 1
 
     local deps = find_dependencies(current_file)
+    dep_graph[current_file] = deps -- Store dependencies for this file
+
     for _, dep_file in ipairs(deps) do
         if not visited[dep_file] then
             visited[dep_file] = true
@@ -135,6 +213,7 @@ while head <= #queue do
     end
 end
 
+local generated_basenames = {}
 -- Perform translation for all identified files
 for file_path, _ in pairs(files_to_translate) do
     local basename = file_path:match(".*/(.*)%.lua$") or file_path:match("(.*)%.lua$")
@@ -142,50 +221,15 @@ for file_path, _ in pairs(files_to_translate) do
         error("Invalid Lua file name for translation: " .. file_path)
     end
     
+    table.insert(generated_basenames, basename)
+    
     local is_main_entry = (file_path == input_lua_file)
     
     -- Use the file's basename for the C++ file name for both main and modules
     translate_file(file_path, basename, is_main_entry)
 end
 
--- Construct compilation command
-local lib_cpp_files = {
-    "lib/lua_object.cpp",
-    "lib/math.cpp",
-    "lib/string.cpp",
-    "lib/table.cpp",
-    "lib/os.cpp",
-    "lib/io.cpp",
-    "lib/package.cpp",
-    "lib/utf8.cpp",
-    "lib/init.cpp",
-    "lib/debug.cpp",
-    "lib/coroutine.cpp"
-}
+-- Generate the Makefile and run the compilation
+generate_and_run_makefile(path_to_out_file, generated_basenames, dep_graph)
 
-local compile_command = "clang++ -std=c++17 -Iinclude -o " .. path_to_out_file .. " "
-
--- Add all generated C++ files from the build directory
--- Dynamically find them as they might vary based on dependencies
-local build_cpp_files_command = "find build -name '*.cpp'"
-local build_cpp_files_handle = io.popen(build_cpp_files_command)
-local build_cpp_files_str = build_cpp_files_handle:read("*all")
-build_cpp_files_handle:close()
-
-print("DEBUG: build_cpp_files_str: " .. build_cpp_files_str)
-
-
-for file_path in build_cpp_files_str:gmatch("([^\n]+)") do
-    compile_command = compile_command .. file_path .. " "
-end
-
--- Add all C++ runtime library files
-for _, file in ipairs(lib_cpp_files) do
-    compile_command = compile_command .. file .. " "
-end
-
-compile_command = compile_command .. "-lstdc++fs -O0"
-
-run_command(compile_command, "Compilation failed.")
-
-print("Compiled.")
+print("Compilation complete. Executable at: " .. path_to_out_file)

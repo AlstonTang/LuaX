@@ -436,7 +436,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 return "get_object(_G)->get_item(\"_VERSION\")"
             elseif node.identifier == "nil" then
                 return "std::monostate{}"
-            elseif node.identifier == "math" or node.identifier == "string" or node.identifier == "table" or node.identifier == "os" or node.identifier == "io" or node.identifier == "package" or node.identifier == "utf8" or node.identifier == "debug" then
+            elseif node.identifier == "math" or node.identifier == "string" or node.identifier == "table" or node.identifier == "os" or node.identifier == "io" or node.identifier == "package" or node.identifier == "utf8" or node.identifier == "debug" or node.identifier == "arg" then
                 return "get_object(_G->get_item(\"" .. node.identifier .. "\"))"
             else
                 return node.identifier
@@ -633,8 +633,8 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
     header = header .. "#include \"init.hpp\"\n"
     
     if is_main_script then -- CHECK: Use is_main_script flag
-        local main_function_start = "int main() {\n" ..
-                                    "init_G();\n"
+        local main_function_start = "int main(int argc, char* argv[]) {\n" ..
+                                    "init_G(argc, argv);\n"
         local main_function_end = "\n    return 0;\n}"
         return header .. main_function_start .. generated_code .. main_function_end
     else -- Module generation
