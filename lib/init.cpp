@@ -1,5 +1,6 @@
 #include "init.hpp"
 #include "debug.hpp"
+#include "coroutine.hpp"
 
 void init_G(int argc, char* argv[]) {
     _G->set("arg", (([=](){
@@ -70,6 +71,7 @@ void init_G(int argc, char* argv[]) {
         if (std::holds_alternative<std::string>(val)) return {"string"};
         if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) return {"table"};
         if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(val)) return {"function"};
+        if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) return {"thread"};
         return {"unknown"};
     }));
     _G->set("getmetatable", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {

@@ -27,6 +27,7 @@ public:
     
     Status status;
     bool started;
+    bool error_occurred = false;
     
     // The function to be executed
     std::shared_ptr<LuaFunctionWrapper> func;

@@ -74,6 +74,13 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry)
     end
 end
 
+-- Helper to check if file exists
+local function file_exists(path)
+    local f = io.open(path, "r")
+    if f then f:close() return true end
+    return false
+end
+
 -- Function to find dependencies (simple require pattern matching)
 local function find_dependencies(lua_file_path)
     local dependencies = {}
@@ -85,25 +92,39 @@ local function find_dependencies(lua_file_path)
     local current_dir = lua_file_path:match("(.*/)") or "" -- Extract directory of current file
 
     for line in file:lines() do
-        -- Match require("module.name") or require('module.name')
+        -- Ignore comments
+        if not line:match("^%s*%-%-") then
+            -- Match require("module.name") or require('module.name')
         local module_name = line:match('require%s*%([\'"]([%w%._-]+)[\'"]%)')
         if module_name then
             local dep_path
             -- This logic correctly handles both `src.utils` and `utils` style requires
-            if module_name:find("%.") then -- If module name contains a dot, assume it's a path like src.module
-                dep_path = module_name:gsub("%.", "/") .. ".lua"
-            else -- Otherwise, assume it's relative to the current file's directory
-                dep_path = current_dir .. module_name .. ".lua"
+            local rel_path = module_name:gsub("%.", "/") .. ".lua"
+            local path_from_current = current_dir .. rel_path
+            local path_from_root = rel_path
+
+            if file_exists(path_from_current) then
+                dep_path = path_from_current
+            elseif file_exists(path_from_root) then
+                dep_path = path_from_root
+            else
+                -- Fallback to existing logic if neither found (or to produce a consistent error later)
+                if module_name:find("%.") then
+                    dep_path = path_from_root
+                else
+                    dep_path = path_from_current
+                end
             end
-            table.insert(dependencies, dep_path)
+            table.insert(dependencies, {path = dep_path, name = module_name})
         end
+        end -- End if not comment
     end
     file:close()
     return dependencies
 end
 
 -- Function to generate and execute a Makefile
-local function generate_and_run_makefile(output_path, generated_basenames, dep_graph)
+local function generate_and_run_makefile(output_path, generated_basenames, dep_graph, files_to_translate)
     local makefile_path = "build/Makefile"
     print("Generating " .. makefile_path .. "...")
 
@@ -148,15 +169,18 @@ local function generate_and_run_makefile(output_path, generated_basenames, dep_g
     }
 
     for lua_path, deps in pairs(dep_graph) do
-        local basename = lua_path:match(".*/(.*)%.lua$") or lua_path:match("(.*)%.lua$")
-        local obj_file = basename .. ".o"
-        local hpp_deps = {}
-        for _, dep_lua_path in ipairs(deps) do
-            local dep_basename = dep_lua_path:match(".*/(.*)%.lua$") or dep_lua_path:match("(.*)%.lua$")
-            table.insert(hpp_deps, dep_basename .. ".hpp")
-        end
-        if #hpp_deps > 0 then
-            table.insert(content, obj_file .. ": " .. table.concat(hpp_deps, " "))
+        local basename = files_to_translate[lua_path]
+        if basename then
+            local obj_file = basename .. ".o"
+            local hpp_deps = {}
+            for _, dep in ipairs(deps) do
+                local dep_name = dep.name
+                local sanitized_dep_name = dep_name:gsub("%.", "_")
+                table.insert(hpp_deps, sanitized_dep_name .. ".hpp")
+            end
+            if #hpp_deps > 0 then
+                table.insert(content, obj_file .. ": " .. table.concat(hpp_deps, " "))
+            end
         end
     end
 
@@ -201,7 +225,9 @@ local dep_graph = {} -- To store dependencies for the Makefile
 
 -- Add initial file to queue and set
 table.insert(queue, input_lua_file)
-files_to_translate[input_lua_file] = true
+-- For the main file, we use the output filename provided by the user (stripped of extension)
+local main_basename = path_to_out_file:match(".*/(.*)") or path_to_out_file
+files_to_translate[input_lua_file] = main_basename
 visited[input_lua_file] = true
 
 local head = 1
@@ -212,10 +238,14 @@ while head <= #queue do
     local deps = find_dependencies(current_file)
     dep_graph[current_file] = deps -- Store dependencies for this file
 
-    for _, dep_file in ipairs(deps) do
+    for _, dep in ipairs(deps) do
+        local dep_file = dep.path
+        local module_name = dep.name
         if not visited[dep_file] then
             visited[dep_file] = true
-            files_to_translate[dep_file] = true
+            -- Sanitize module name for filename (replace dots with underscores)
+            local sanitized_name = module_name:gsub("%.", "_")
+            files_to_translate[dep_file] = sanitized_name
             table.insert(queue, dep_file)
         end
     end
@@ -223,21 +253,15 @@ end
 
 local generated_basenames = {}
 -- Perform translation for all identified files
-for file_path, _ in pairs(files_to_translate) do
-    local basename = file_path:match(".*/(.*)%.lua$") or file_path:match("(.*)%.lua$")
-    if not basename then
-        error("Invalid Lua file name for translation: " .. file_path)
-    end
-    
-    table.insert(generated_basenames, basename)
+for file_path, output_name in pairs(files_to_translate) do
+    table.insert(generated_basenames, output_name)
     
     local is_main_entry = (file_path == input_lua_file)
     
-    -- Use the file's basename for the C++ file name for both main and modules
-    translate_file(file_path, basename, is_main_entry)
+    translate_file(file_path, output_name, is_main_entry)
 end
 
 -- Generate the Makefile and run the compilation
-generate_and_run_makefile(path_to_out_file, generated_basenames, dep_graph)
+generate_and_run_makefile(path_to_out_file, generated_basenames, dep_graph, files_to_translate)
 
 print("Compilation complete. Executable at: " .. path_to_out_file)

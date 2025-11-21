@@ -60,11 +60,11 @@ function Node:GenerateIterator(complete_stack)
         end
     else
         local i = 0
-        local function getCurrentNodeChildren()
+        local function get_current_node_children()
             i = i + 1
             return self.ordered_children[i]
         end
-        return getCurrentNodeChildren
+        return get_current_node_children
     end
 end
 
@@ -77,7 +77,23 @@ function Parser:new(code)
     instance.code = code
     instance.position = 1
     instance.tokens = {}
+    
+    -- Label Scoping Initialization
+    math.randomseed(os.time() + (#code * 100)) -- Simple seed based on time and code length
+    instance.label_scope = {} -- Current map of raw_name -> unique_name
+    instance.label_scope_stack = {} -- Stack to handle nested functions
+
     return instance
+end
+
+-- Helper to handle unique label generation/retrieval within the current scope
+function Parser:get_unique_label(raw_name)
+    if not self.label_scope[raw_name] then
+        -- Generate a random suffix (e.g., label_name_827341)
+        local suffix = math.random(100000, 999999)
+        self.label_scope[raw_name] = raw_name .. "_" .. tostring(suffix)
+    end
+    return self.label_scope[raw_name]
 end
 
 local function is_digit(c)
@@ -95,17 +111,21 @@ end
 function Parser:tokenize()
     while self.position <= #self.code do
         local char = self.code:sub(self.position, self.position)
+        local token_processed = false 
 
         if is_whitespace(char) then
             self.position = self.position + 1
+            token_processed = true
         elseif is_digit(char) then
             local start_pos = self.position
             local is_float = false
             
             -- Check for hexadecimal literal
+            local is_hex = false
             if char == '0' and self.position + 1 <= #self.code then
                 local next_char = self.code:sub(self.position + 1, self.position + 1)
                 if next_char == 'x' or next_char == 'X' then
+                    is_hex = true
                     self.position = self.position + 2 -- Consume '0x'
                     local hex_start_pos = self.position
                     while self.position <= #self.code do
@@ -125,29 +145,32 @@ function Parser:tokenize()
                     -- Convert hex string to decimal number
                     local decimal_val = tonumber(hex_val_str, 16)
                     table.insert(self.tokens, { type = "integer", value = decimal_val })
-                    goto continue_tokenize_loop
+                    token_processed = true
                 end
             end
 
-            -- Original decimal number parsing
-            while self.position <= #self.code do
-                local current_char = self.code:sub(self.position, self.position)
-                if is_digit(current_char) then
-                    self.position = self.position + 1
-                elseif current_char == '.' and not is_float then
-                    is_float = true
-                    self.position = self.position + 1
-                else
-                    break
+            if not is_hex then
+                -- Original decimal number parsing
+                while self.position <= #self.code do
+                    local current_char = self.code:sub(self.position, self.position)
+                    if is_digit(current_char) then
+                        self.position = self.position + 1
+                    elseif current_char == '.' and not is_float then
+                        is_float = true
+                        self.position = self.position + 1
+                    else
+                        break
+                    end
                 end
+                local val = self.code:sub(start_pos, self.position - 1)
+                if is_float then
+                    table.insert(self.tokens, { type = "number", value = val })
+                else
+                    table.insert(self.tokens, { type = "integer", value = val })
+                end
+                token_processed = true
             end
-            local val = self.code:sub(start_pos, self.position - 1)
-            if is_float then
-                table.insert(self.tokens, { type = "number", value = val })
-            else
-                table.insert(self.tokens, { type = "integer", value = val })
-            end
-            ::continue_tokenize_loop::
+            
         elseif is_alpha(char) then
             local start_pos = self.position
             while self.position <= #self.code and (is_alpha(self.code:sub(self.position, self.position)) or is_digit(self.code:sub(self.position, self.position))) do
@@ -166,7 +189,12 @@ function Parser:tokenize()
             elseif value == "for" then table.insert(self.tokens, { type = "keyword", value = "for" })
             elseif value == "do" then table.insert(self.tokens, { type = "keyword", value = "do" })
             elseif value == "and" or value == "or" or value == "not" then table.insert(self.tokens, { type = "operator", value = value })
+            elseif value == "goto" then table.insert(self.tokens, { type = "keyword", value = "goto" })
+            elseif value == "break" then table.insert(self.tokens, { type = "keyword", value = "break" })
+            elseif value == "repeat" then table.insert(self.tokens, { type = "keyword", value = "repeat" })
+            elseif value == "until" then table.insert(self.tokens, { type = "keyword", value = "until" })
             else table.insert(self.tokens, { type = "identifier", value = value }) end
+            token_processed = true
 
 
         elseif char == '-' then
@@ -232,9 +260,11 @@ function Parser:tokenize()
                 table.insert(self.tokens, { type = "operator", value = char })
                 self.position = self.position + 1
             end
+            token_processed = true
         elseif char == '+' or char == '*' or char == '/' then
             table.insert(self.tokens, { type = "operator", value = char })
             self.position = self.position + 1
+            token_processed = true
         elseif char == '=' then
             if self.position < #self.code and self.code:sub(self.position + 1, self.position + 1) == '=' then
                 table.insert(self.tokens, { type = "operator", value = "==" })
@@ -243,6 +273,7 @@ function Parser:tokenize()
                 table.insert(self.tokens, { type = "operator", value = "=" })
                 self.position = self.position + 1
             end
+            token_processed = true
         elseif char == '>' then
             if self.position < #self.code and self.code:sub(self.position + 1, self.position + 1) == '=' then
                 table.insert(self.tokens, { type = "operator", value = ">=" })
@@ -251,6 +282,7 @@ function Parser:tokenize()
                 table.insert(self.tokens, { type = "operator", value = ">" })
                 self.position = self.position + 1
             end
+            token_processed = true
         elseif char == '<' then
             if self.position < #self.code and self.code:sub(self.position + 1, self.position + 1) == '=' then
                 table.insert(self.tokens, { type = "operator", value = "<=" })
@@ -259,6 +291,7 @@ function Parser:tokenize()
                 table.insert(self.tokens, { type = "operator", value = "<" })
                 self.position = self.position + 1
             end
+            token_processed = true
         elseif char == '~' then
             if self.position < #self.code and self.code:sub(self.position + 1, self.position + 1) == '=' then
                 table.insert(self.tokens, { type = "operator", value = "~=" })
@@ -267,14 +300,16 @@ function Parser:tokenize()
                 -- In Lua, '~' by itself is not a standard operator, so we just advance.
                 self.position = self.position + 1
             end
+            token_processed = true
         elseif char == '(' or char == ')' then
             table.insert(self.tokens, { type = "paren", value = char })
             self.position = self.position + 1
+            token_processed = true
         elseif char == '"' or char == "'" then
-            local start_pos = self.position
             local quote_char = char
             self.position = self.position + 1 -- consume the opening quote
             local buffer = {}
+            local start_pos = self.position
             while self.position <= #self.code do
                 local char_in_string = self.code:sub(self.position, self.position)
                 if char_in_string == '\\' then
@@ -303,30 +338,50 @@ function Parser:tokenize()
                 end
             end
             table.insert(self.tokens, { type = "string", value = table.concat(buffer) })
+            token_processed = true
         elseif char == '[' or char == ']' then
             table.insert(self.tokens, { type = "square_bracket", value = char })
             self.position = self.position + 1
+            token_processed = true
         elseif char == '{' or char == '}' then
             table.insert(self.tokens, { type = "brace", value = char })
             self.position = self.position + 1
+            token_processed = true
         elseif char == ':' then
-            table.insert(self.tokens, { type = "colon", value = char })
-            self.position = self.position + 1
+            -- Check for label delimiter (::)
+            if self.position + 1 <= #self.code and self.code:sub(self.position + 1, self.position + 1) == ':' then
+                table.insert(self.tokens, { type = "label_delimiter", value = "::" })
+                self.position = self.position + 2
+            else
+                table.insert(self.tokens, { type = "colon", value = char })
+                self.position = self.position + 1
+            end
+            token_processed = true
         elseif char == '.' then
-            if self.position + 1 <= #self.code and self.code:sub(self.position + 1, self.position + 1) == '.' then
+            if self.position + 2 <= #self.code and self.code:sub(self.position + 1, self.position + 2) == '..' then
+                table.insert(self.tokens, { type = "varargs", value = "..." })
+                self.position = self.position + 3
+            elseif self.position + 1 <= #self.code and self.code:sub(self.position + 1, self.position + 1) == '.' then
                 table.insert(self.tokens, { type = "operator", value = ".." })
                 self.position = self.position + 2
             else
                 table.insert(self.tokens, { type = "dot", value = char })
                 self.position = self.position + 1
             end
+            token_processed = true
         elseif char == ',' then
             table.insert(self.tokens, { type = "comma", value = char })
             self.position = self.position + 1
+            token_processed = true
         else
             -- For now, ignore other characters
             self.position = self.position + 1
+            token_processed = true
         end
+        
+        -- To avoid the 'goto' causing issues with C++ translation or duplicate labels,
+        -- we just use standard control flow. If a token was processed, the loop continues naturally.
+        -- If no token matched (shouldn't happen with the `else` block above), we'd just loop again.
     end
     return self.tokens
 end
@@ -410,7 +465,12 @@ function Parser:parse_function_call_or_member_access(base_node)
                     else error("Expected ')'") end
                 else error("Expected '(' after method identifier") end
                 current_node = method_call_node
-            else error("Expected identifier after ':'") end
+            else 
+                local val = method_token and method_token.value or "nil"
+                local typ = method_token and method_token.type or "nil"
+                print("DEBUG: Expected identifier after ':' but found: " .. val .. " (" .. typ .. ")")
+                error("Expected identifier after ':'") 
+            end
         elseif token.type == "square_bracket" and token.value == '[' then
             self.token_position = self.token_position + 1 -- consume '['
             local index_expr = self:parse_expression(0)
@@ -540,13 +600,19 @@ function Parser:parse_primary_expression()
     end
 
     local node = nil
-    if token.value == '-' then -- Handle unary minus
+    if token.type == "operator" and token.value == '-' then -- Handle unary minus
         self.token_position = self.token_position + 1 -- consume '-'
         local operand = self:parse_primary_expression() -- The operand of the unary minus
-        if not operand then error("Expected expression after unary minus") end
+        if not operand then 
+            local next_tok = self:peek()
+            local val = next_tok and next_tok.value or "nil"
+            local typ = next_tok and next_tok.type or "nil"
+            print("DEBUG: Failed to parse operand after unary minus. Next token: " .. val .. " (" .. typ .. ")")
+            error("Expected expression after unary minus") 
+        end
         node = Node:new("unary_expression", "-")
         node:AddChildren(operand)
-    elseif token.value == 'not' then -- Handle unary not
+    elseif token.type == "operator" and token.value == 'not' then -- Handle unary not
         self.token_position = self.token_position + 1 -- consume 'not'
         local operand = self:parse_primary_expression() -- The operand of the unary not
         if not operand then error("Expected expression after unary not") end
@@ -573,6 +639,9 @@ function Parser:parse_primary_expression()
     elseif token.type == "keyword" and token.value == "function" then
         self.token_position = self.token_position + 1 -- consume 'function'
         node = self:parse_function_body_content()
+    elseif token.type == "varargs" then
+        self.token_position = self.token_position + 1 -- consume ...
+        node = Node:new("varargs", "...", "...")
     else
         return nil
     end
@@ -670,6 +739,77 @@ function Parser:parse_statement()
             return_node:AddChildren(expr_list)
         end
         return return_node
+    elseif current_token.type == "label_delimiter" then
+        -- Label: ::label_name::
+        self.token_position = self.token_position + 1 -- consume first '::'
+        local label_name_token = self:peek()
+        if not label_name_token or label_name_token.type ~= "identifier" then
+            error("Expected label name after '::'")
+        end
+        self.token_position = self.token_position + 1 -- consume label name
+        local closing_delimiter = self:peek()
+        if not closing_delimiter or closing_delimiter.type ~= "label_delimiter" then
+            error("Expected '::' to close label")
+        end
+        self.token_position = self.token_position + 1 -- consume closing '::'
+        
+        -- Generate unique name for this scope
+        local unique_name = self:get_unique_label(label_name_token.value)
+        
+        -- For now, just create a label node (will be ignored in C++ translation)
+        local label_node = Node:new("label_statement", unique_name)
+        return label_node
+    elseif current_token.type == "keyword" and current_token.value == "break" then
+        -- Break statement
+        self.token_position = self.token_position + 1 -- consume 'break'
+        local break_node = Node:new("break_statement")
+        return break_node
+    elseif current_token.type == "keyword" and current_token.value == "repeat" then
+        -- Repeat-until loop: repeat <block> until <condition>
+        self.token_position = self.token_position + 1 -- consume 'repeat'
+        local repeat_node = Node:new("repeat_until_statement")
+        
+        -- Parse the block
+        local block_node = Node:new("block")
+        while self:peek() and not (self:peek().type == "keyword" and self:peek().value == "until") do
+            local stmt = self:parse_statement()
+            if stmt then
+                block_node:AddChildren(stmt)
+            else
+                break
+            end
+        end
+        
+        -- Expect 'until'
+        local until_token = self:peek()
+        if not until_token or until_token.value ~= "until" then
+            error("Expected 'until' to close repeat loop")
+        end
+        self.token_position = self.token_position + 1 -- consume 'until'
+        
+        -- Parse the condition
+        local condition_expr = self:parse_expression(0)
+        if not condition_expr then
+            error("Expected condition after 'until'")
+        end
+        
+        repeat_node:AddChildren(block_node, condition_expr)
+        return repeat_node
+    elseif current_token.type == "keyword" and current_token.value == "goto" then
+        -- Goto: goto label_name
+        self.token_position = self.token_position + 1 -- consume 'goto'
+        local goto_target_token = self:peek()
+        if not goto_target_token or goto_target_token.type ~= "identifier" then
+            error("Expected label name after 'goto'")
+        end
+        self.token_position = self.token_position + 1 -- consume label name
+        
+        -- Get/Generate unique name for this scope
+        local unique_name = self:get_unique_label(goto_target_token.value)
+
+        -- For now, just create a goto node (will be translated to C++)
+        local goto_node = Node:new("goto_statement", unique_name)
+        return goto_node
     elseif current_token.type == "keyword" and current_token.value == "end" then
         -- 'end' is a block terminator, not a statement itself. Handle it by returning nil
         -- The block parsing logic will consume it.
@@ -907,6 +1047,10 @@ end
 function Parser:parse_function_body_content()
     local function_node = Node:new("function_declaration")
 
+    -- ENTER NEW SCOPE: Push current label scope to stack and create fresh one
+    table.insert(self.label_scope_stack, self.label_scope)
+    self.label_scope = {}
+
     local open_paren = self:peek()
     if not open_paren or open_paren.value ~= '(' then
         error("Expected '(' after function keyword")
@@ -919,8 +1063,11 @@ function Parser:parse_function_body_content()
         if param_token and param_token.type == "identifier" then
             self.token_position = self.token_position + 1 -- consume parameter identifier
             params_node:AddChildren(Node:new("identifier", param_token.value, param_token.value))
+        elseif param_token and param_token.type == "varargs" then
+            self.token_position = self.token_position + 1 -- consume ...
+            params_node:AddChildren(Node:new("varargs", "...", "..."))
         else
-            error("Expected parameter identifier or ')'")
+            error("Expected parameter identifier, '...' or ')'")
         end
         if self:peek() and self:peek().value == ',' then
             self.token_position = self.token_position + 1 -- consume ','
@@ -952,6 +1099,9 @@ function Parser:parse_function_body_content()
     end
     self.token_position = self.token_position + 1 -- consume 'end'
     function_node:AddChildren(body_node)
+
+    -- EXIT SCOPE: Restore previous label scope
+    self.label_scope = table.remove(self.label_scope_stack)
 
     return function_node
 end
@@ -1017,7 +1167,7 @@ end
 
 
 -- Translator function
-function translate(code)
+local function translate(code)
     local parser = Parser:new(code)
     return parser:parse()
 end

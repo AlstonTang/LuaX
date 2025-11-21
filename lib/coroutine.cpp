@@ -60,11 +60,9 @@ void LuaCoroutine::run() {
         // Coroutine finished with error
         {
             std::lock_guard<std::mutex> lock(mtx);
-            results = {false, std::string(e.what())}; // Standard pcall-like error return? 
-            // Actually, Lua coroutines propagate errors to resume()
-            // So we should store the error and let resume() rethrow or return false, err
-            // For now, let's return false, err as the result of resume
+            results = {false, std::string(e.what())}; 
             status = Status::DEAD;
+            error_occurred = true;
         }
     } catch (...) {
         {
@@ -105,8 +103,12 @@ std::vector<LuaValue> LuaCoroutine::resume(std::vector<LuaValue> resume_args) {
 
     // Return results from yield/return
     std::vector<LuaValue> res;
-    res.push_back(true); // Success
-    res.insert(res.end(), results.begin(), results.end());
+    if (error_occurred) {
+        res = results;
+    } else {
+        res.push_back(true); // Success
+        res.insert(res.end(), results.begin(), results.end());
+    }
     return res;
 }
 
