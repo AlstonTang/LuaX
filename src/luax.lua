@@ -36,6 +36,8 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry)
     end
     local lua_code = file:read("*all")
     file:close()
+    print("DEBUG: src/luax.lua lua_code type:", type(lua_code))
+    if type(lua_code) == "string" then print("DEBUG: src/luax.lua lua_code length:", #lua_code) end
 
     local ast = translator.translate(lua_code)
     local cpp_code

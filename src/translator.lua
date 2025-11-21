@@ -261,7 +261,7 @@ function Parser:tokenize()
                 self.position = self.position + 1
             end
             token_processed = true
-        elseif char == '+' or char == '*' or char == '/' then
+        elseif char == '+' or char == '*' or char == '/' or char == '#' then
             table.insert(self.tokens, { type = "operator", value = char })
             self.position = self.position + 1
             token_processed = true
@@ -617,6 +617,14 @@ function Parser:parse_primary_expression()
         local operand = self:parse_primary_expression() -- The operand of the unary not
         if not operand then error("Expected expression after unary not") end
         node = Node:new("unary_expression", "not")
+        node:AddChildren(operand)
+        node = Node:new("unary_expression", "not")
+        node:AddChildren(operand)
+    elseif token.type == "operator" and token.value == '#' then -- Handle unary length
+        self.token_position = self.token_position + 1 -- consume '#'
+        local operand = self:parse_primary_expression()
+        if not operand then error("Expected expression after unary #") end
+        node = Node:new("unary_expression", "#")
         node:AddChildren(operand)
     elseif token.type == "number" or token.type == "string" or token.type == "integer" then
         self.token_position = self.token_position + 1

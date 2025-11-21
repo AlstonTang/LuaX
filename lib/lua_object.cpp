@@ -671,3 +671,40 @@ std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<L
     // Case 3: The value is not callable. Throw a runtime error.
     throw std::runtime_error("attempt to call a " + get_lua_type_name(callable) + " value");
 }
+
+LuaValue lua_get_member(const LuaValue& base, const LuaValue& key) {
+    if (std::holds_alternative<std::shared_ptr<LuaObject>>(base)) {
+        return std::get<std::shared_ptr<LuaObject>>(base)->get_item(key);
+    } else if (std::holds_alternative<std::string>(base)) {
+        // String library lookup
+        auto string_lib = _G->get_item("string");
+        if (std::holds_alternative<std::shared_ptr<LuaObject>>(string_lib)) {
+            return std::get<std::shared_ptr<LuaObject>>(string_lib)->get_item(key);
+        }
+    }
+    throw std::runtime_error("attempt to index a " + get_lua_type_name(base) + " value");
+}
+
+LuaValue lua_get_length(const LuaValue& val) {
+    if (std::holds_alternative<std::string>(val)) {
+        return static_cast<double>(std::get<std::string>(val).length());
+    } else if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) {
+        auto obj = std::get<std::shared_ptr<LuaObject>>(val);
+        // Check for __len metamethod
+        if (obj->metatable) {
+            auto len_meta = obj->metatable->get_item("__len");
+            if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(len_meta)) {
+                auto meta_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(len_meta);
+                auto args = std::make_shared<LuaObject>();
+                args->set_item("1", obj);
+                std::vector<LuaValue> res = meta_func->func(args);
+                if (!res.empty()) return res[0];
+                return std::monostate{};
+            }
+        }
+        // Default table length: largest integer key
+        if (obj->array_properties.empty()) return 0.0;
+        return static_cast<double>(obj->array_properties.rbegin()->first);
+    }
+    throw std::runtime_error("attempt to get length of a " + get_lua_type_name(val) + " value");
+}

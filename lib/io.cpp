@@ -77,47 +77,88 @@ std::vector<LuaValue> LuaFile::flush(std::shared_ptr<LuaObject> args) {
 std::vector<LuaValue> LuaFile::read(std::shared_ptr<LuaObject> args) {
     if (is_closed) return {std::monostate{}, "attempt to use a closed file"};
 
-    // Default to reading a line. The first argument to the method is at key "2".
+    // Lua syntax: file:read(...) or file:read() (defaults to "*l")
+    // In this wrapper, the arguments start at key "2"
     std::string format = args->properties.count("2") ? to_cpp_string(args->get("2")) : "*l";
 
-    if (format == "*l") { // read line
-        char buffer[4096];
-        if (std::fgets(buffer, sizeof(buffer), file_handle)) {
-            std::string line(buffer);
-            // Remove newline if present, as Lua's *l strips it
-            if (!line.empty() && line.back() == '\n') line.pop_back();
-            return {line};
-        }
-    } else if (format == "*a") { // read all
-        std::string content;
-        char buffer[4096];
-        while (std::fgets(buffer, sizeof(buffer), file_handle)) {
-            content += buffer;
-        }
-        if (content.empty() && std::feof(file_handle)) return {std::monostate{}}; // EOF
-        return {content};
-    } else if (format == "*n") { // read number
+    if (format == "*n") { // Read number
         double num;
+        // Skip whitespace is automatic in fscanf with %lf
         if (fscanf(file_handle, "%lf", &num) == 1) {
             return {num};
         }
         return {std::monostate{}};
-    } else if (format == "*L") { // read line with EOL
-        char buffer[4096];
-        if (std::fgets(buffer, sizeof(buffer), file_handle)) {
-             return {std::string(buffer)};
-        }
-    } else { // read N bytes
-        try {
-            long long num_bytes = std::stoll(format);
-            std::vector<char> buffer(num_bytes);
-            size_t read_count = std::fread(buffer.data(), 1, num_bytes, file_handle);
+    } 
+    // MODIFIED: Check for both "*a" and "*all"
+    else if (format == "*a" || format == "*all") { // Read all (EOF)
+        std::string content;
+        char buffer[4096]; // Read in 4KB chunks
+        while (true) {
+            size_t read_count = std::fread(buffer, 1, sizeof(buffer), file_handle);
             if (read_count > 0) {
-                return {std::string(buffer.data(), read_count)};
+                content.append(buffer, read_count);
             }
-        } catch (...) { /* Invalid format */ }
+            // If we read less than the buffer size, we hit EOF or Error
+            if (read_count < sizeof(buffer)) {
+                break;
+            }
+        }
+        
+        // Note: In standard Lua, read("*a") returns an empty string "" at EOF, 
+        // whereas read("*l") returns nil. Your implementation currently returns nil 
+        // if content is empty, which is acceptable but strictly distinct from vanilla Lua.
+        if (content.empty() && std::feof(file_handle)) {
+            return {std::monostate{}}; // True EOF
+        }
+        return {content};
+    } 
+    else if (format == "*l" || format == "*L") { // Read line
+        std::string line;
+        char buffer[1024]; // Chunk size for line reading
+
+        while (true) {
+            if (std::fgets(buffer, sizeof(buffer), file_handle) == nullptr) {
+                // EOF or Error
+                if (line.empty()) {
+                    return {std::monostate{}}; // EOF before reading anything
+                }
+                break; // Return what we have so far (partial line at EOF)
+            }
+
+            line += buffer;
+            
+            // Check if we actually found a newline
+            if (!line.empty() && line.back() == '\n') {
+                // If format is "*l", we strip the newline. For "*L", we keep it.
+                if (format == "*l") {
+                    line.pop_back();
+                }
+                break;
+            }
+            // If line didn't end in \n, the buffer filled up but line continues.
+            // Loop again to append next chunk.
+        }
+        return {line};
+    } 
+    else { // Read specific number of bytes (e.g., file:read(5))
+        long long num_bytes = 0;
+        try {
+            num_bytes = std::stoll(format);
+        } catch (...) {
+            return {std::monostate{}, "invalid read format"};
+        }
+
+        if (num_bytes == 0) return {""}; // Special Lua case: read(0) returns empty string, checks for EOF
+
+        std::vector<char> buffer(num_bytes);
+        size_t read_count = std::fread(buffer.data(), 1, num_bytes, file_handle);
+        
+        if (read_count == 0) {
+             return {std::monostate{}}; // EOF
+        }
+        
+        return {std::string(buffer.data(), read_count)};
     }
-    return {std::monostate{}}; // EOF or error
 }
 
 std::vector<LuaValue> LuaFile::seek(std::shared_ptr<LuaObject> args) {

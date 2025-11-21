@@ -53,9 +53,13 @@ end
 
 -- Main translation function
 function CppTranslator.translate(ast_root, file_name, is_main_script) -- ADDED is_main_script parameter
-    declared_variables = {}
-    required_modules = {}
-    module_global_vars = {} -- Reset for each translation run
+    -- FIX: Clear tables instead of reassigning them.
+    -- Reassigning (e.g., declared_variables = {}) breaks the C++ lambda capture sharing,
+    -- causing recursive functions to use stale/polluted tables from previous runs.
+    for k in pairs(declared_variables) do declared_variables[k] = nil end
+    for k in pairs(required_modules) do required_modules[k] = nil end
+    for k in pairs(module_global_vars) do module_global_vars[k] = nil end
+    
     -- Pass is_main_script down
     return CppTranslator.translate_recursive(ast_root, file_name, false, nil, is_main_script)
 end
@@ -99,8 +103,10 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 return "get_object(_G)->get_item(\"_VERSION\")"
             elseif node.identifier == "nil" then
                 return "std::monostate{}"
-            elseif node.identifier == "math" or node.identifier == "string" or node.identifier == "table" or node.identifier == "os" or node.identifier == "io" or node.identifier == "package" or node.identifier == "utf8" or node.identifier == "debug" or node.identifier == "arg" or node.identifier == "coroutine" or node.identifier == "type" or node.identifier == "self" then
+            elseif node.identifier == "math" or node.identifier == "string" or node.identifier == "table" or node.identifier == "os" or node.identifier == "io" or node.identifier == "package" or node.identifier == "utf8" or node.identifier == "debug" or node.identifier == "arg" or node.identifier == "coroutine" or node.identifier == "self" then
                 return "get_object(_G->get_item(\"" .. node.identifier .. "\"))"
+            elseif node.identifier == "type" then
+                 return "_G->get_item(\"type\")"
             else
                 -- FIX: Handle recursive local function identifiers
                 local decl_info = declared_variables[node.identifier]
@@ -109,9 +115,6 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 end
                 return sanitize_cpp_identifier(node.identifier)
             end
-        -- ... [Insert other node types like local_declaration, assignment etc here if you are pasting the whole file, otherwise keep existing] ...
-        -- For brevity, assuming the other simple nodes (boolean, number, string, etc) remain unchanged from the previous robust version.
-        -- Jumping to the next critical change: function_declaration
         
         elseif node.type == "function_declaration" or node.type == "method_declaration" then
             local func_name = node.identifier
@@ -120,11 +123,6 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             end
 
             -- FIX START: Recursion Support Logic
-            -- We need to support recursion for local functions. 
-            -- In C++, "LuaValue x = [=](){ x() }" fails because x is uninitialized during capture.
-            -- We solve this by creating a shared_ptr (upvalue slot), capturing the pointer, 
-            -- and populating it after lambda creation.
-            
             local ptr_name = nil
             local old_decl_info = nil
 
@@ -132,8 +130,6 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 local var_name = sanitize_cpp_identifier(node.identifier)
                 ptr_name = var_name .. "_ptr_" .. tostring(math.random(10000))
                 
-                -- Store pointer info in declared_variables so references inside the body 
-                -- (recursive calls) know to dereference the pointer (*ptr) instead of using the var name.
                 old_decl_info = declared_variables[var_name]
                 declared_variables[var_name] = { is_ptr = true, ptr_name = ptr_name }
             end
@@ -148,12 +144,22 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             current_function_fixed_params_count = 0
 
             local params_extraction = ""
+            local param_index_offset = 0
+            
+            -- FIX: For methods, 'self' is passed as the first argument (index "1")
+            if node.type == "method_declaration" then
+                params_extraction = params_extraction .. "    LuaValue self = args->get_item(\"1\");\n"
+                declared_variables["self"] = true
+                param_index_offset = 1
+            end
+
             for i, param_node in ipairs(params_node.ordered_children) do
                 if param_node.type == "identifier" then
                     current_function_fixed_params_count = current_function_fixed_params_count + 1
                     local param_name = param_node.identifier
                     -- Extract param from args object (keys are "1", "2", etc.)
-                    params_extraction = params_extraction .. "    LuaValue " .. param_name .. " = args->get_item(\"" .. i .. "\");\n"
+                    -- FIX: Shift index by offset for methods
+                    params_extraction = params_extraction .. "    LuaValue " .. param_name .. " = args->get_item(\"" .. (i + param_index_offset) .. "\");\n"
                     declared_variables[param_name] = true
                 end
                 -- Ignore varargs node in declaration for extraction, handled by logic above
@@ -173,7 +179,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             -- FIX: Restore declared variables state after body translation
             if node.is_local and node.identifier then
                 local var_name = sanitize_cpp_identifier(node.identifier)
-                declared_variables[var_name] = old_decl_info -- Restore (likely nil)
+                declared_variables[var_name] = old_decl_info 
             end
 
             -- CRITICAL FIX: Change capture from [&] (reference) to [=] (value) + mutable.
@@ -208,9 +214,8 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             else
                 return lambda_code
             end
-        -- ... [Rest of the functions like return_statement, etc. - Ensure these nodes are present in the context of the surrounding code] ...
+        
         elseif node.type == "local_declaration" then
-            -- ... [Keep existing logic] ...
             local var_list_node = node.ordered_children[1]
             local expr_list_node = node.ordered_children[2]
             local cpp_code = ""
@@ -258,10 +263,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 declared_variables[var_name] = true
             end
             return cpp_code
-        -- ... [Include other nodes: assignment, binary_expression, etc.] ...
         elseif node.type == "assignment" then
-             -- ... [Keep existing logic, ensuring [=] mutable is used in lambdas] ...
-             -- (Code omitted for brevity, use previous answer's logic)
              local var_list_node = node.ordered_children[1]
             local expr_list_node = node.ordered_children[2]
             local cpp_code = ""
@@ -335,10 +337,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 end
             end
             return cpp_code
-        -- ... [Ensure all other node types from previous answer are present] ...
-        -- For the purpose of this specific fix, I will provide the catch-all and end of function
         elseif node.type == "binary_expression" then
-             -- [Insert logic from previous answer using [=] mutable]
              local left_node = node.ordered_children[1]
             local right_node = node.ordered_children[2]
             local operator = node.value
@@ -367,9 +366,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             end
             return "(get_double(" .. translated_left .. ") " .. operator .. " get_double(" .. translated_right .. "))"
         
-        -- [Add if_statement, expression_statement, etc. here from previous context]
         elseif node.type == "if_statement" then
-             -- Standard logic
             local cpp_code = ""
             local first_clause = true
             for i, clause in ipairs(node.ordered_children) do
@@ -390,9 +387,6 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             return cpp_code .. "\n"
         elseif node.type == "expression_statement" then
             return translate_node_to_cpp(node.ordered_children[1], for_header, false, current_module_object_name) .. ";\n"
-        -- [Add the rest of the statement types: label, break, repeat, goto, loops, etc]
-        -- Assuming standard implementation for brevity as they don't affect this specific fix, 
-        -- but they MUST be included in the final file.
         
         elseif node.type == "call_expression" then
             local func_node = node.ordered_children[1]
@@ -454,7 +448,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 local metatable_node = node.ordered_children[3]
                 local translated_table = translate_node_to_cpp(table_node, for_header, false, current_module_object_name)
                 local translated_metatable = translate_node_to_cpp(metatable_node, for_header, false, current_module_object_name)
-                return "( [=]() mutable -> std::vector<LuaValue> { get_object(" .. translated_table .. ")->set_metatable(get_object(" .. translated_metatable .. ")); return {" .. translated_table .. "}; } )()"
+                return "( [=]() mutable -> std::vector<LuaValue> { auto tbl = " .. translated_table .. "; get_object(tbl)->set_metatable(get_object(" .. translated_metatable .. ")); return {tbl}; } )()"
             else
                 local translated_func_access = ""
                 if func_node.type == "identifier" and not declared_variables[func_node.identifier] then
@@ -465,8 +459,6 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 return "call_lua_value(" .. translated_func_access .. ", " .. args_code .. ")"
             end
         
-        -- [Ensure member_expression, string, boolean, number, integer are included here]
-        -- [Ensure varargs is included here with [=] mutable]
         elseif node.type == "varargs" then
             local start_index = current_function_fixed_params_count
             return "( [=]() mutable -> std::vector<LuaValue> { std::vector<LuaValue> v; int i = " .. start_index .. "; while(true) { auto val = args->get_item(std::to_string(i+1)); if(std::holds_alternative<std::monostate>(val)) break; v.push_back(val); i++; } return v; } )()"
@@ -501,7 +493,6 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             end
             return "( [=]() mutable { " .. construction_code .. " return " .. temp_table_var .. "; } )()"
         elseif node.type == "method_call_expression" then
-            -- ... [Keep method_call_expression logic, ensuring [=] mutable is used] ...
             local base_node = node.ordered_children[1]
             local method_node = node.ordered_children[2]
             local method_name = method_node.identifier
@@ -523,7 +514,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 local replacement_code = args_list[2]
                 return "std::vector<LuaValue>{LuaValue(std::regex_replace(to_cpp_string(" .. translated_base .. "), std::regex(to_cpp_string(" .. pattern_code .. ")), to_cpp_string(" .. replacement_code .. ")))}"
             else
-                local func_access = "get_object(" .. translated_base .. ")->get_item(\"" .. method_name .. "\")"
+                local func_access = "lua_get_member(" .. translated_base .. ", LuaValue(\"" .. method_name .. "\"))"
                 local temp_args_var = "temp_args_" .. tostring(math.random(10000))
                 local self_arg = temp_args_var .. "->set_item(\"1\", " .. translated_base .. "); "
                 local other_args_init_code = ""
@@ -541,9 +532,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 return "call_lua_value(" .. func_access .. ", " .. full_method_args_code .. ")"
             end
 
-        -- [Catch all cases below]
         elseif node.type == "return_statement" then
-             -- Standard
             local expr_list_node = node.ordered_children[1]
             if expr_list_node and #expr_list_node.ordered_children > 0 then
                 local return_values = {}
@@ -564,6 +553,8 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 return "LuaValue(-get_double(" .. translated_operand .. "))"
             elseif operator == "not" then
                 return "LuaValue(!is_lua_truthy(" .. translated_operand .. "))"
+            elseif operator == "#" then
+                return "lua_get_length(" .. translated_operand .. ")"
             else
                 return operator .. translated_operand
             end
@@ -589,16 +580,15 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                  if base_node.type == "identifier" and (base_node.identifier == "math" or base_node.identifier == "string" or base_node.identifier == "table" or base_node.identifier == "os" or base_node.identifier == "io" or base_node.identifier == "package" or base_node.identifier == "coroutine") then
                     return "get_object(_G->get_item(\"" .. base_node.identifier .. "\"))->get_item(\"" .. member_node.identifier .. "\")"
                  else
-                    return "get_object(" .. base_code .. ")->get_item(\"" .. member_node.identifier .. "\")"
+                    return "lua_get_member(" .. base_code .. ", LuaValue(\"" .. member_node.identifier .. "\"))"
                  end
             elseif node.type == "table_index_expression" then
                  local base_node = node.ordered_children[1]
                  local index_node = node.ordered_children[2]
                  local translated_base = get_single_lua_value_cpp_code(base_node, for_header, false, current_module_object_name)
                  local translated_index = get_single_lua_value_cpp_code(index_node, for_header, false, current_module_object_name)
-                 return "get_object(" .. translated_base .. ")->get_item(" .. translated_index .. ")"
+                 return "lua_get_member(" .. translated_base .. ", " .. translated_index .. ")"
             elseif node.type == "string" then
-                 -- Keep existing string escaping logic
                  local s = node.value
                  s = s:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\t', '\\t'):gsub('\r', '\\r')
                  return "\"" .. s .. "\""
@@ -625,7 +615,6 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             elseif node.type == "label_statement" then return node.value .. ":;\n"
             elseif node.type == "goto_statement" then return "goto " .. node.value .. ";\n"
             elseif node.type == "for_numeric_statement" then
-                -- Logic from previous, ensuring get_single_lua_value_cpp_code is used
                 local var_name = sanitize_cpp_identifier(node.ordered_children[1].identifier)
                 local var_type = node.ordered_children[1].type
                 local start_expr_code = get_single_lua_value_cpp_code(node.ordered_children[2], for_header, false, current_module_object_name)
@@ -653,7 +642,6 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 declared_variables[var_name] = true
                 return "for (LuaValue " .. var_name .. " = " .. start_expr_code .. "; " .. loop_condition .. "; " .. var_name .. " = LuaValue(get_double(" .. var_name .. ") + get_double(" .. step_expr_code .. "))) {\n" .. translate_node_to_cpp(body_node, for_header, false, current_module_object_name) .. "}"
             elseif node.type == "for_generic_statement" then
-                -- Logic from previous
                 local var_list_node = node.ordered_children[1]
                 local expr_list_node = node.ordered_children[2]
                 local body_node = node.ordered_children[3]
@@ -703,7 +691,6 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
     -- Main Function Wrapper
     local generated_code = translate_node_to_cpp(ast_root, for_header, false, current_module_object_name)
     
-    -- [Keep existing header generation and Main/Module wrapping logic]
     local header = "#include <iostream>\n#include <vector>\n#include <string>\n#include <map>\n#include <memory>\n#include <variant>\n#include <regex>\n#include <functional>\n#include \"lua_object.hpp\"\n\n"
     
     for module_name, _ in pairs(required_modules) do
