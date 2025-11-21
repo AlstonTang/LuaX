@@ -12,10 +12,12 @@
 // LuaFile is now a specialized LuaObject
 class LuaFile : public LuaObject {
 public:
-    std::fstream file_stream;
+    FILE* file_handle;
     bool is_closed;
+    bool is_popen; // Track if opened via popen
 
     LuaFile(const std::string& filename, const std::string& mode);
+    LuaFile(FILE* f, bool is_popen_mode = false); // Constructor for existing FILE*
     ~LuaFile();
 
     // These are the internal implementations of the file methods
@@ -24,11 +26,25 @@ public:
     std::vector<LuaValue> lines(std::shared_ptr<LuaObject> args);
     std::vector<LuaValue> read(std::shared_ptr<LuaObject> args);
     std::vector<LuaValue> seek(std::shared_ptr<LuaObject> args);
+    std::vector<LuaValue> setvbuf(std::shared_ptr<LuaObject> args);
     std::vector<LuaValue> write(std::shared_ptr<LuaObject> args);
 };
 
 // Function to create the 'io' library table
 std::shared_ptr<LuaObject> create_io_library();
+
+// Global IO functions
+std::vector<LuaValue> io_close(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> io_flush(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> io_input(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> io_lines(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> io_open(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> io_output(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> io_popen(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> io_read(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> io_tmpfile(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> io_type(std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> io_write(std::shared_ptr<LuaObject> args);
 
 // Helper to safely get a LuaFile from a LuaValue. Throws on type error.
 inline std::shared_ptr<LuaFile> get_file(const LuaValue& value) {

@@ -3,9 +3,21 @@
 -- all required Lua files into C++, generates a Makefile, and then uses
 -- make to compile them into a single executable.
 
--- Use dofile to ensure latest versions are loaded, bypassing require's cache
-local cpp_translator = dofile("src/cpp_translator.lua")
-local translator = dofile("src/translator.lua")
+-- NEW: Make script's internal requires robust to the current working directory.
+-- We get the directory where this script is located and add the project root
+-- (which is one level up from `scripts/`) to Lua's search path.
+local script_path = arg[0]
+local script_dir = script_path:match("(.*/)") or ""
+package.path = package.path .. ";" .. script_dir .. "../?.lua;" .. script_dir .. "../?/init.lua"
+
+-- NEW: Clear package.loaded to ensure the latest versions of our own modules are loaded.
+-- This is good practice and implements the intention of the original comment.
+package.loaded["src.cpp_translator"] = nil
+package.loaded["src.translator"] = nil
+
+-- CHANGED: Use module-style require, which is more standard and works with our new package.path.
+local cpp_translator = require("src.cpp_translator")
+local translator = require("src.translator")
 
 local function run_command(command_str, error_message)
     print("Executing command: " .. command_str)
@@ -73,28 +85,24 @@ local function find_dependencies(lua_file_path)
     local current_dir = lua_file_path:match("(.*/)") or "" -- Extract directory of current file
 
     for line in file:lines() do
-        local req_start_idx = string.find(line, 'require("', 1, true)
-        if req_start_idx then
-            local module_name_start = req_start_idx + string.len('require("')
-            local req_end_idx = string.find(line, '")', module_name_start, true)
-            if req_end_idx then
-                local module_name = string.sub(line, module_name_start, req_end_idx - 1)
-                
-                local dep_path
-                if module_name:find("%.") then -- If module name contains a dot, assume it's a path like src.module
-                    dep_path = module_name:gsub("%.", "/") .. ".lua"
-                else -- Otherwise, assume it's relative to the current file's directory
-                    dep_path = current_dir .. module_name .. ".lua"
-                end
-                table.insert(dependencies, dep_path)
+        -- Match require("module.name") or require('module.name')
+        local module_name = line:match('require%s*%([\'"]([%w%._-]+)[\'"]%)')
+        if module_name then
+            local dep_path
+            -- This logic correctly handles both `src.utils` and `utils` style requires
+            if module_name:find("%.") then -- If module name contains a dot, assume it's a path like src.module
+                dep_path = module_name:gsub("%.", "/") .. ".lua"
+            else -- Otherwise, assume it's relative to the current file's directory
+                dep_path = current_dir .. module_name .. ".lua"
             end
+            table.insert(dependencies, dep_path)
         end
     end
     file:close()
     return dependencies
 end
 
--- NEW: Function to generate and execute a Makefile
+-- Function to generate and execute a Makefile
 local function generate_and_run_makefile(output_path, generated_basenames, dep_graph)
     local makefile_path = "build/Makefile"
     print("Generating " .. makefile_path .. "...")
@@ -173,23 +181,23 @@ local usage = "Usage: lua5.4 scripts/luax.lua <path_to_src_lua_file> <path_to_ou
 -- Main script logic
 local input_lua_file = arg[1]
 if not input_lua_file then
-    error(usage)
+    print(usage)
+    os.exit(1)
 end
 
 local path_to_out_file = arg[2]
 if not path_to_out_file then
-    error(usage)
+    print(usage)
+    os.exit(1)
 end
 
 --- Cleans and recreates the build directory
--- Note: We no longer remove the whole directory, to preserve .o files for faster recompilation.
--- We'll rely on `make clean` for a full rebuild.
 run_command("mkdir -p build", "Failed to create build directory.")
 
 local files_to_translate = {}
 local queue = {}
 local visited = {}
-local dep_graph = {} -- NEW: To store dependencies for the Makefile
+local dep_graph = {} -- To store dependencies for the Makefile
 
 -- Add initial file to queue and set
 table.insert(queue, input_lua_file)

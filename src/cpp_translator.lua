@@ -407,7 +407,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             local base_node = node.ordered_children[1]
             local member_node = node.ordered_children[2]
             local base_code = translate_node_to_cpp(base_node, for_header, false, current_module_object_name)
-            if base_node.type == "identifier" and (base_node.identifier == "math" or base_node.identifier == "string" or base_node.identifier == "table" or base_node.identifier == "os" or base_node.identifier == "io" or base_node.identifier == "package") then
+            if base_node.type == "identifier" and (base_node.identifier == "math" or base_node.identifier == "string" or base_node.identifier == "table" or base_node.identifier == "os" or base_node.identifier == "io" or base_node.identifier == "package" or base_node.identifier == "coroutine") then
                 return "get_object(_G->get_item(\"" .. base_node.identifier .. "\"))->get_item(\"" .. member_node.identifier .. "\")"
             else
                 return "get_object(" .. base_code .. ")->get_item(\"" .. member_node.identifier .. "\")"
@@ -436,7 +436,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 return "get_object(_G)->get_item(\"_VERSION\")"
             elseif node.identifier == "nil" then
                 return "std::monostate{}"
-            elseif node.identifier == "math" or node.identifier == "string" or node.identifier == "table" or node.identifier == "os" or node.identifier == "io" or node.identifier == "package" or node.identifier == "utf8" or node.identifier == "debug" or node.identifier == "arg" then
+            elseif node.identifier == "math" or node.identifier == "string" or node.identifier == "table" or node.identifier == "os" or node.identifier == "io" or node.identifier == "package" or node.identifier == "utf8" or node.identifier == "debug" or node.identifier == "arg" or node.identifier == "coroutine" then
                 return "get_object(_G->get_item(\"" .. node.identifier .. "\"))"
             else
                 return node.identifier

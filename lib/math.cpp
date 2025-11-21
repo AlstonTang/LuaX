@@ -201,8 +201,8 @@ std::shared_ptr<LuaObject> create_math_library() {
 
     math_lib->set("huge", std::numeric_limits<double>::infinity());
     math_lib->set("pi", 3.14159265358979323846);
-    math_lib->set("maxinteger", static_cast<double>(std::numeric_limits<long long>::max()));
-    math_lib->set("mininteger", static_cast<double>(std::numeric_limits<long long>::min()));
+    math_lib->set("maxinteger", std::numeric_limits<long long>::max());
+    math_lib->set("mininteger", std::numeric_limits<long long>::min());
 
     return math_lib;
 }

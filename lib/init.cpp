@@ -25,7 +25,7 @@ void init_G(int argc, char* argv[]) {
     _G->set("rawset", std::make_shared<LuaFunctionWrapper>(lua_rawset));
     _G->set("select", std::make_shared<LuaFunctionWrapper>(lua_select));
     _G->set("warn", std::make_shared<LuaFunctionWrapper>(lua_warn));
-    _G->set("warn", std::make_shared<LuaFunctionWrapper>(lua_warn));
+
     _G->set("xpcall", std::make_shared<LuaFunctionWrapper>(lua_xpcall));
     _G->set("math", create_math_library());
     _G->set("string", create_string_library());
@@ -34,6 +34,7 @@ void init_G(int argc, char* argv[]) {
     _G->set("io", create_io_library());
     _G->set("package", create_package_library());
     _G->set("utf8", create_utf8_library());
+    _G->set("coroutine", create_coroutine_library());
     _G->set("debug", create_debug_library());
     _G->set("_VERSION", LuaValue(std::string("Lua 5.4")));
     _G->set("tonumber", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {

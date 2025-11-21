@@ -564,25 +564,24 @@ std::vector<LuaValue> lua_pairs(std::shared_ptr<LuaObject> args) {
 // load (not supported in translated environment)
 std::vector<LuaValue> lua_load(std::shared_ptr<LuaObject> args) {
     throw std::runtime_error("load is not supported in the translated environment.");
-    return {}; // Should not be reached
+    return {std::monostate()}; // Should not be reached
 }
 
 // loadfile (not supported in translated environment)
 std::vector<LuaValue> lua_loadfile(std::shared_ptr<LuaObject> args) {
-    throw std::runtime_error("loadfile is not supported in the translated environment.");
-    return {}; // Should not be reached
+    throw std::runtime_error("loadfile is not supported in the translated environment. Tip: Use 'require' instead and ensure that dependencies are statically resolvable.");
+    return {std::monostate()}; // Should not be reached
 }
-
-
 
 // dofile (not supported in translated environment)
 std::vector<LuaValue> lua_dofile(std::shared_ptr<LuaObject> args) {
-    throw std::runtime_error("dofile is not supported in the translated environment.");
-    return {}; // Should not be reached
+    throw std::runtime_error("dofile is not supported in the translated environment. Tip: Use 'require' instead and ensure that dependencies are statically resolvable.");
+    return {std::monostate()}; // Should not be reached
 }
 
 // collectgarbage (no-op for now)
 std::vector<LuaValue> lua_collectgarbage(std::shared_ptr<LuaObject> args) {
+    throw std::runtime_error("Collect Garbage is not support in the translated environment. Since the IR is C++, there is no such thing as garbage collection here!");
     return {std::monostate{}};
 }
 
@@ -592,7 +591,7 @@ std::vector<LuaValue> lua_assert(std::shared_ptr<LuaObject> args) {
     if (!std::holds_alternative<bool>(condition) || !std::get<bool>(condition)) {
         LuaValue message = args->get_item("2");
         if (std::holds_alternative<std::monostate>(message)) {
-            throw std::runtime_error("assertion failed!");
+            throw std::runtime_error("ERROR: assertion failed!");
         } else {
             throw std::runtime_error(to_cpp_string(message));
         }
@@ -619,7 +618,6 @@ bool is_lua_truthy(const LuaValue& val) {
     return true;
 }
 
-// ADD THIS HELPER FUNCTION TO lua_object.cpp
 // Helper to get the string name of a LuaValue's type for error messages
 std::string get_lua_type_name(const LuaValue& val) {
     if (std::holds_alternative<std::monostate>(val)) return "nil";
@@ -633,7 +631,6 @@ std::string get_lua_type_name(const LuaValue& val) {
 }
 
 
-// ADD THIS FUNCTION IMPLEMENTATION TO lua_object.cpp
 // Safely calls a LuaValue, checking for callability and handling the __call metamethod.
 std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<LuaObject> args) {
     // Case 1: The value is a direct function.
