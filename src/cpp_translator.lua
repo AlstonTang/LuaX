@@ -103,7 +103,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
                 return "get_object(_G)->get_item(\"_VERSION\")"
             elseif node.identifier == "nil" then
                 return "std::monostate{}"
-            elseif node.identifier == "math" or node.identifier == "string" or node.identifier == "table" or node.identifier == "os" or node.identifier == "io" or node.identifier == "package" or node.identifier == "utf8" or node.identifier == "debug" or node.identifier == "arg" or node.identifier == "coroutine" or node.identifier == "self" then
+            elseif node.identifier == "math" or node.identifier == "string" or node.identifier == "table" or node.identifier == "os" or node.identifier == "io" or node.identifier == "package" or node.identifier == "utf8" or node.identifier == "debug" or node.identifier == "arg" or node.identifier == "coroutine" then
                 return "get_object(_G->get_item(\"" .. node.identifier .. "\"))"
             elseif node.identifier == "type" then
                  return "_G->get_item(\"type\")"

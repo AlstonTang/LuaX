@@ -27,14 +27,14 @@ LuaX is a robust transpiler that converts Lua 5.4 source code into C++17, allowi
 
 ### Building and Running a Lua Script
 
-To transpile and compile a Lua script (e.g., `examples/main.lua`):
+To transpile and compile a Lua script (e.g., `tests/main.lua`):
 
 ```bash
-lua5.4 src/luax.lua examples/main.lua build/my_program
+lua5.4 src/luax.lua tests/main.lua build/my_program
 ```
 
 This command will:
-1.  Transpile `examples/main.lua` (and its dependencies) to C++ in the `build/` directory.
+1.  Transpile `tests/main.lua` (and its dependencies) to C++ in the `build/` directory.
 2.  Compile the generated C++ code and the LuaX runtime library.
 3.  Produce an executable named `build/my_program`.
 
@@ -46,10 +46,10 @@ Run the executable:
 
 ### Examples
 
-Check out the `examples/` directory for sample scripts:
-*   `examples/main.lua`: General feature test.
-*   `examples/test_io_missing.lua`: Tests for IO functions (`popen`, `tmpfile`, etc.).
-*   `examples/test_coroutines.lua`: Tests for coroutine functionality.
+Check out the `tests/` directory for sample scripts:
+*   `tests/main.lua`: General feature test.
+*   `tests/test_io_missing.lua`: Tests for IO functions (`popen`, `tmpfile`, etc.).
+*   `tests/test_coroutines.lua`: Tests for coroutine functionality.
 
 ## Architecture
 

@@ -15,8 +15,8 @@ else
 fi
 
 echo "--- Step 3: Use the compiled LuaX to compile an example ---"
-# Now use the *compiled* luax to compile examples/main.lua
-./build/luax examples/main.lua build/main_self_compiled
+# Now use the *compiled* luax to compile tests/main.lua
+./build/luax tests/main.lua build/main_self_compiled
 
 echo "--- Step 4: Run the example compiled by the self-compiled LuaX ---"
 ./build/main_self_compiled
