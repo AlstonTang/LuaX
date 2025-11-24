@@ -10,11 +10,6 @@ local script_path = arg[0]
 local script_dir = script_path:match("(.*/)") or ""
 package.path = package.path .. ";" .. script_dir .. "../?.lua;" .. script_dir .. "../?/init.lua"
 
--- NEW: Clear package.loaded to ensure the latest versions of our own modules are loaded.
--- This is good practice and implements the intention of the original comment.
-package.loaded["src.cpp_translator"] = nil
-package.loaded["src.translator"] = nil
-
 -- CHANGED: Use module-style require, which is more standard and works with our new package.path.
 local cpp_translator = require("src.cpp_translator")
 local translator = require("src.translator")
@@ -36,21 +31,24 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry)
     end
     local lua_code = file:read("*all")
     file:close()
-    print("DEBUG: src/luax.lua lua_code type:", type(lua_code))
-    if type(lua_code) == "string" then print("DEBUG: src/luax.lua lua_code length:", #lua_code) end
-
     local ast = translator.translate(lua_code)
     local cpp_code
     local hpp_code
     
     -- Check the flag instead of the output_file_name string
     if is_main_entry then
-        -- Primary entry point: use global scope (nil for module name)
+        -- luax.lua
+print("DEBUG STARTING LUAX")
+-- Main entry point: use global scope (nil for module name)
+        cpp_translator.reset()
         cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false, nil, true) 
+        cpp_translator.reset()
         hpp_code = cpp_translator.translate_recursive(ast, output_file_name, true, nil, true)
     else
         -- Module: use module scope (output_file_name as module name)
+        cpp_translator.reset()
         cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false, output_file_name, false) 
+        cpp_translator.reset()
         hpp_code = cpp_translator.translate_recursive(ast, output_file_name, true, output_file_name, false) 
     end
 
@@ -147,7 +145,7 @@ local function generate_and_run_makefile(output_path, generated_basenames, dep_g
 
     local content = {
         "CXX = clang++",
-        "CXXFLAGS = -std=c++17 -I../include -g -O2",
+        "CXXFLAGS = -std=c++17 -I../include -g -O0",
         "LDFLAGS = -lstdc++fs",
         "TARGET = ../" .. output_path, -- The final executable will be in the root or specified path
         "",

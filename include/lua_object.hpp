@@ -39,7 +39,6 @@ public:
 extern std::shared_ptr<LuaObject> _G;
 
 // Global helper functions
-std::shared_ptr<LuaObject> get_object(const LuaValue& value);
 void print_value(const LuaValue& value);
 double get_double(const LuaValue& value);
 long long get_long_long(const LuaValue& value);
@@ -98,5 +97,12 @@ bool lua_equals(const LuaValue& a, const LuaValue& b);
 
 // Helper for Lua-style inequality comparison
 bool lua_not_equals(const LuaValue& a, const LuaValue& b);
+
+bool lua_less_than(const LuaValue& a, const LuaValue& b);
+bool lua_greater_than(const LuaValue& a, const LuaValue& b);
+bool lua_less_equals(const LuaValue& a, const LuaValue& b);
+bool lua_greater_equals(const LuaValue& a, const LuaValue& b);
+
+LuaValue lua_concat(const LuaValue& a, const LuaValue& b);
 
 #endif // LUA_OBJECT_HPP

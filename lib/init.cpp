@@ -7,7 +7,7 @@ void init_G(int argc, char* argv[]) {
         auto arg = std::make_shared<LuaObject>();
 
         for (int i = 0; i < argc; i++) {
-            arg->set_item(i, argv[i]);
+            arg->set_item(i, std::string(argv[i]));
         }
 
         return arg;

@@ -2,28 +2,31 @@
 #include "lua_object.hpp"
 #include <vector>
 #include <algorithm>
-#include <stdexcept> // Added for std::invalid_argument, std::out_of_range
-#include <string> // For std::stoll
-#include <map> // For std::map
+#include <stdexcept>
+#include <string>
+#include <map>
 
-// table.concat
+// table.unpack
 std::vector<LuaValue> table_unpack(std::shared_ptr<LuaObject> args) {
     auto table = get_object(args->get("1"));
     if (!table) return {std::monostate{}};
 
     double i_double = std::holds_alternative<double>(args->get("2")) ? std::get<double>(args->get("2")) : 1.0;
-    double j_double = std::holds_alternative<double>(args->get("3")) ? std::get<double>(args->get("3")) : static_cast<double>(table->properties.size());
+    // Default j is #table
+    double j_double;
+    if (args->properties.count("3")) {
+        j_double = std::get<double>(args->get("3"));
+    } else {
+        LuaValue len_val = lua_get_length(args->get("1"));
+        j_double = get_double(len_val);
+    }
 
     long long i = static_cast<long long>(i_double);
     long long j = static_cast<long long>(j_double);
 
     std::vector<LuaValue> unpacked_values_vec;
     for (long long k = i; k <= j; ++k) {
-        if (table->properties.count(std::to_string(k))) {
-            unpacked_values_vec.push_back(table->properties[std::to_string(k)]);
-        } else {
-            unpacked_values_vec.push_back(std::monostate{}); // nil for missing values
-        }
+        unpacked_values_vec.push_back(table->get_item(static_cast<double>(k)));
     }
     return unpacked_values_vec;
 }
@@ -33,48 +36,59 @@ std::vector<LuaValue> table_sort(std::shared_ptr<LuaObject> args) {
     auto table = get_object(args->get("1"));
     if (!table) return {std::monostate{}};
 
+    // Collect all integer keys from array_properties
     std::vector<std::pair<long long, LuaValue>> sortable_elements;
-    for (const auto& pair : table->properties) {
-        try {
-            long long key_num = std::stoll(pair.first);
-            sortable_elements.push_back({key_num, pair.second});
-        } catch (const std::invalid_argument& e) {
-            // Ignore non-numeric keys for sorting
-        } catch (const std::out_of_range& e) {
-            // Ignore out of range numeric keys
-        }
+    for (const auto& pair : table->array_properties) {
+        sortable_elements.push_back({pair.first, pair.second});
     }
 
     LuaValue comp_func_val = args->get("2");
-    if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val)) {
-        auto comp_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val);
-        std::sort(sortable_elements.begin(), sortable_elements.end(),
-            [&](const std::pair<long long, LuaValue>& a, const std::pair<long long, LuaValue>& b) {
+    bool has_comp = std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val);
+    std::shared_ptr<LuaFunctionWrapper> comp_func = has_comp ? std::get<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val) : nullptr;
+
+    std::sort(sortable_elements.begin(), sortable_elements.end(),
+        [&](const std::pair<long long, LuaValue>& a, const std::pair<long long, LuaValue>& b) {
+            if (has_comp) {
                 auto comp_args = std::make_shared<LuaObject>();
                 comp_args->set("1", a.second);
                 comp_args->set("2", b.second);
                 std::vector<LuaValue> result_vec = comp_func->func(comp_args);
-                return !result_vec.empty() && std::holds_alternative<bool>(result_vec[0]) && std::get<bool>(result_vec[0]);
-            });
-    } else {
-        std::sort(sortable_elements.begin(), sortable_elements.end(),
-            [](const std::pair<long long, LuaValue>& a, const std::pair<long long, LuaValue>& b) {
-                // Default comparison: less than
-                if (std::holds_alternative<double>(a.second) && std::holds_alternative<double>(b.second)) {
-                    return std::get<double>(a.second) < std::get<double>(b.second);
-                }
-                if (std::holds_alternative<std::string>(a.second) && std::holds_alternative<std::string>(b.second)) {
-                    return std::get<std::string>(a.second) < std::get<std::string>(b.second);
-                }
-                // Fallback for other types, might need more robust Lua-like comparison
-                return false;
-            });
+                return !result_vec.empty() && is_lua_truthy(result_vec[0]);
+            } else {
+                // Default comparison: a < b
+                return lua_less_than(a.second, b.second);
+            }
+        });
+
+    // Re-insert sorted elements into the table (array part only)
+    // Note: This implementation only sorts the existing integer keys. 
+    // Standard Lua sorts 1..n. Here we sort whatever integer keys exist, which might be sparse.
+    // For a proper implementation we should probably sort 1..n.
+    // Let's stick to 1..n for correctness with standard Lua.
+    
+    LuaValue len_val = lua_get_length(args->get("1"));
+    long long n = get_long_long(len_val);
+    
+    std::vector<LuaValue> elements;
+    for (long long i = 1; i <= n; ++i) {
+        elements.push_back(table->get_item(static_cast<double>(i)));
     }
 
-    // Re-insert sorted elements into the table
-    table->properties.clear(); // Clear existing numeric keys
-    for (size_t i = 0; i < sortable_elements.size(); ++i) {
-        table->set(std::to_string(i + 1), sortable_elements[i].second);
+    std::sort(elements.begin(), elements.end(),
+        [&](const LuaValue& a, const LuaValue& b) {
+            if (has_comp) {
+                auto comp_args = std::make_shared<LuaObject>();
+                comp_args->set("1", a);
+                comp_args->set("2", b);
+                std::vector<LuaValue> result_vec = comp_func->func(comp_args);
+                return !result_vec.empty() && is_lua_truthy(result_vec[0]);
+            } else {
+                return lua_less_than(a, b);
+            }
+        });
+
+    for (long long i = 0; i < n; ++i) {
+        table->set_item(static_cast<double>(i + 1), elements[i]);
     }
 
     return {std::monostate{}};
@@ -88,12 +102,19 @@ std::vector<LuaValue> table_pack(std::shared_ptr<LuaObject> args) {
         LuaValue val = args->get(std::to_string(i));
         if (std::holds_alternative<std::monostate>(val)) {
             // Check if the next argument is also nil, to handle actual nil values vs end of args
-            LuaValue next_val = args->get(std::to_string(i + 1));
-            if (std::holds_alternative<std::monostate>(next_val)) {
-                break;
+            // Actually args passed to this function are "1", "2", etc.
+            // We need to know how many args were passed. 
+            // The args object is a LuaObject, but it doesn't store 'n'.
+            // We'll iterate until we find a gap? No, nil is valid in pack.
+            // We rely on the fact that our translator passes all args.
+            // But we don't know the count. 
+            // Hack: check up to a reasonable limit or check if key exists in args->properties?
+            // args->properties keys are strings "1", "2"...
+            if (!args->properties.count(std::to_string(i)) && !args->array_properties.count(i)) {
+                 break;
             }
         }
-        new_table->set(std::to_string(i), val);
+        new_table->set_item(static_cast<double>(i), val);
         n++;
     }
     new_table->set("n", static_cast<double>(n));
@@ -110,22 +131,21 @@ std::vector<LuaValue> table_move(std::shared_ptr<LuaObject> args) {
     double t_double = get_double(args->get("4"));
     
     auto a2 = get_object(args->get("5"));
-    if (!a2) a2 = a1; // Default to a1 if a2 is not provided
+    if (!a2) a2 = a1; 
 
     long long f = static_cast<long long>(f_double);
     long long e = static_cast<long long>(e_double);
     long long t = static_cast<long long>(t_double);
 
-    if (f > e) return {a2}; // Nothing to move
+    if (f > e) return {a2}; 
 
-    // Handle overlapping moves correctly (iterate forwards or backwards)
-    if (t <= f || t > e) { // Non-overlapping or moving to the right
+    if (t <= f || t > e) { 
         for (long long idx = f; idx <= e; ++idx) {
-            a2->set(std::to_string(t + (idx - f)), a1->get(std::to_string(idx)));
+            a2->set_item(static_cast<double>(t + (idx - f)), a1->get_item(static_cast<double>(idx)));
         }
-    } else { // Overlapping and moving to the left
+    } else { 
         for (long long idx = e; idx >= f; --idx) {
-            a2->set(std::to_string(t + (idx - f)), a1->get(std::to_string(idx)));
+            a2->set_item(static_cast<double>(t + (idx - f)), a1->get_item(static_cast<double>(idx)));
         }
     }
     return {a2};
@@ -138,7 +158,14 @@ std::vector<LuaValue> table_concat(std::shared_ptr<LuaObject> args) {
 
     std::string sep = std::holds_alternative<std::string>(args->get("2")) ? std::get<std::string>(args->get("2")) : "";
     double i_double = std::holds_alternative<double>(args->get("3")) ? std::get<double>(args->get("3")) : 1.0;
-    double j_double = std::holds_alternative<double>(args->get("4")) ? std::get<double>(args->get("4")) : static_cast<double>(table->properties.size());
+    
+    double j_double;
+    if (args->properties.count("4") || args->array_properties.count(4)) {
+         j_double = get_double(args->get("4"));
+    } else {
+         LuaValue len_val = lua_get_length(args->get("1"));
+         j_double = get_double(len_val);
+    }
 
     long long i = static_cast<long long>(i_double);
     long long j = static_cast<long long>(j_double);
@@ -146,11 +173,12 @@ std::vector<LuaValue> table_concat(std::shared_ptr<LuaObject> args) {
     std::string result = "";
     bool first = true;
     for (long long k = i; k <= j; ++k) {
-        if (table->properties.count(std::to_string(k))) {
+        LuaValue val = table->get_item(static_cast<double>(k));
+        if (!std::holds_alternative<std::monostate>(val)) {
             if (!first) {
                 result += sep;
             }
-            result += to_cpp_string(table->properties[std::to_string(k)]);
+            result += to_cpp_string(val);
             first = false;
         }
     }
@@ -161,16 +189,32 @@ std::vector<LuaValue> table_concat(std::shared_ptr<LuaObject> args) {
 std::vector<LuaValue> table_insert(std::shared_ptr<LuaObject> args) {
     auto table = get_object(args->get("1"));
     if (table) {
-        if (args->properties.count("3")) {
-            // insert at position
-            int pos = static_cast<int>(get_double(args->get("2")));
+        // Check number of arguments to decide overload
+        // args has "1", "2", "3"...
+        bool has_pos = false;
+        if (args->properties.count("3") || args->array_properties.count(3)) {
+            has_pos = true;
+        }
+
+        if (has_pos) {
+            // insert(table, pos, value)
+            long long pos = get_long_long(args->get("2"));
             LuaValue val = args->get("3");
-            table->properties[std::to_string(pos)] = val;
+            
+            LuaValue len_val = lua_get_length(args->get("1"));
+            long long len = get_long_long(len_val);
+
+            // Shift elements up
+            for (long long i = len; i >= pos; --i) {
+                table->set_item(static_cast<double>(i + 1), table->get_item(static_cast<double>(i)));
+            }
+            table->set_item(static_cast<double>(pos), val);
         } else {
-            // insert at the end
+            // insert(table, value) -> append
             LuaValue val = args->get("2");
-            int next_index = table->properties.size() + 1;
-            table->properties[std::to_string(next_index)] = val;
+            LuaValue len_val = lua_get_length(args->get("1"));
+            long long len = get_long_long(len_val);
+            table->set_item(static_cast<double>(len + 1), val);
         }
     }
     return {std::monostate{}};
@@ -180,15 +224,24 @@ std::vector<LuaValue> table_insert(std::shared_ptr<LuaObject> args) {
 std::vector<LuaValue> table_remove(std::shared_ptr<LuaObject> args) {
     auto table = get_object(args->get("1"));
     if (table) {
-        int pos = table->properties.size();
-        if (args->properties.count("2")) {
-            pos = static_cast<int>(get_double(args->get("2")));
+        LuaValue len_val = lua_get_length(args->get("1"));
+        long long len = get_long_long(len_val);
+        
+        long long pos = len;
+        if (args->properties.count("2") || args->array_properties.count(2)) {
+            pos = get_long_long(args->get("2"));
         }
 
-        for (int i = pos; i < table->properties.size(); ++i) {
-            table->properties[std::to_string(i)] = table->properties[std::to_string(i + 1)];
+        if (pos > len || pos < 1) return {std::monostate{}};
+
+        LuaValue removed_val = table->get_item(static_cast<double>(pos));
+
+        for (long long i = pos; i < len; ++i) {
+            table->set_item(static_cast<double>(i), table->get_item(static_cast<double>(i + 1)));
         }
-        table->properties.erase(std::to_string(table->properties.size()));
+        table->set_item(static_cast<double>(len), std::monostate{}); // Remove last
+        
+        return {removed_val};
     }
     return {std::monostate{}};
 }
@@ -199,9 +252,10 @@ std::shared_ptr<LuaObject> create_table_library() {
     table_lib->set("concat", std::make_shared<LuaFunctionWrapper>(table_concat));
     table_lib->set("insert", std::make_shared<LuaFunctionWrapper>(table_insert));
     table_lib->set("move", std::make_shared<LuaFunctionWrapper>(table_move));
+    table_lib->set("pack", std::make_shared<LuaFunctionWrapper>(table_pack));
+    table_lib->set("remove", std::make_shared<LuaFunctionWrapper>(table_remove));
     table_lib->set("sort", std::make_shared<LuaFunctionWrapper>(table_sort));
     table_lib->set("unpack", std::make_shared<LuaFunctionWrapper>(table_unpack));
-    table_lib->set("remove", std::make_shared<LuaFunctionWrapper>(table_remove));
 
     return table_lib;
 }

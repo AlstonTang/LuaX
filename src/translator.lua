@@ -1,72 +1,5 @@
--- Node class implementation
-local Node = {}
-Node.__index = Node
-
-function Node:new(type, value, identifier)
-    local instance = setmetatable({}, Node)
-    instance.type = type
-    instance.value = value
-    instance.identifier = identifier
-    instance.parent = nil
-    instance.ordered_children = {}
-    return instance
-end
-
-function Node:SetParent(parent)
-    self.parent = parent
-end
-
-function Node:AddChildren(...)
-    for _, child in ipairs({...}) do
-        table.insert(self.ordered_children, child)
-        child:SetParent(self)
-    end
-end
-
-function Node:get_all_children_of_type(type_name)
-    local matching_children = {}
-    for _, child in ipairs(self.ordered_children) do
-        if child.type == type_name then
-            table.insert(matching_children, child)
-        end
-    end
-    return matching_children
-end
-
-function Node:find_child_by_type(type_name)
-    for _, child in ipairs(self.ordered_children) do
-        if child.type == type_name then
-            return child
-        end
-    end
-    return nil
-end
-
-function Node:GenerateIterator(complete_stack)
-    local stack = {}
-    local function traverse(node)
-        table.insert(stack, node)
-        for _, child in ipairs(node.ordered_children) do
-            traverse(child)
-        end
-    end
-
-    if complete_stack then
-        traverse(self)
-        local i = 0
-        return function()
-            i = i + 1
-            return stack[i]
-        end
-    else
-        local i = 0
-        local function get_current_node_children()
-            i = i + 1
-            return self.ordered_children[i]
-        end
-        return get_current_node_children
-    end
-end
+local Node = require("src.node")
+local Tokenizer = require("src.tokenizer")
 
 -- Parser implementation
 local Parser = {}
@@ -88,301 +21,34 @@ end
 
 -- Helper to handle unique label generation/retrieval within the current scope
 function Parser:get_unique_label(raw_name)
-    if not self.label_scope[raw_name] then
-        -- Generate a random suffix (e.g., label_name_827341)
-        local suffix = math.random(100000, 999999)
-        self.label_scope[raw_name] = raw_name .. "_" .. tostring(suffix)
+    if not (self.label_scope[raw_name]) then
+        local unique_name = raw_name .. "_" .. tostring(math.random(100000))
+        self.label_scope[raw_name] = unique_name
     end
     return self.label_scope[raw_name]
 end
 
-local function is_digit(c)
-    return c >= '0' and c <= '9'
+function Parser:push_label_scope()
+    -- Deep copy current scope to stack
+    local scope_copy = {}
+    for k, v in pairs(self.label_scope) do
+        scope_copy[k] = v
+    end
+    table.insert(self.label_scope_stack, scope_copy)
+    -- Reset current scope for new function/block
+    self.label_scope = {}
 end
 
-local function is_alpha(c)
-    return (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or c == '_'
-end
-
-local function is_whitespace(c)
-    return c == ' ' or c == '\t' or c == '\n' or c == '\r'
+function Parser:pop_label_scope()
+    if #self.label_scope_stack > 0 then
+        self.label_scope = table.remove(self.label_scope_stack)
+    else
+        self.label_scope = {}
+    end
 end
 
 function Parser:tokenize()
-    while self.position <= #self.code do
-        local char = self.code:sub(self.position, self.position)
-        local token_processed = false 
-
-        if is_whitespace(char) then
-            self.position = self.position + 1
-            token_processed = true
-        elseif is_digit(char) then
-            local start_pos = self.position
-            local is_float = false
-            
-            -- Check for hexadecimal literal
-            local is_hex = false
-            if char == '0' and self.position + 1 <= #self.code then
-                local next_char = self.code:sub(self.position + 1, self.position + 1)
-                if next_char == 'x' or next_char == 'X' then
-                    is_hex = true
-                    self.position = self.position + 2 -- Consume '0x'
-                    local hex_start_pos = self.position
-                    while self.position <= #self.code do
-                        local hex_char = self.code:sub(self.position, self.position)
-                        if (hex_char >= '0' and hex_char <= '9') or
-                           (hex_char >= 'a' and hex_char <= 'f') or
-                           (hex_char >= 'A' and hex_char <= 'F') then
-                            self.position = self.position + 1
-                        else
-                            break
-                        end
-                    end
-                    local hex_val_str = self.code:sub(hex_start_pos, self.position - 1)
-                    if #hex_val_str == 0 then
-                        error("Malformed hexadecimal number")
-                    end
-                    -- Convert hex string to decimal number
-                    local decimal_val = tonumber(hex_val_str, 16)
-                    table.insert(self.tokens, { type = "integer", value = decimal_val })
-                    token_processed = true
-                end
-            end
-
-            if not is_hex then
-                -- Original decimal number parsing
-                while self.position <= #self.code do
-                    local current_char = self.code:sub(self.position, self.position)
-                    if is_digit(current_char) then
-                        self.position = self.position + 1
-                    elseif current_char == '.' and not is_float then
-                        is_float = true
-                        self.position = self.position + 1
-                    else
-                        break
-                    end
-                end
-                local val = self.code:sub(start_pos, self.position - 1)
-                if is_float then
-                    table.insert(self.tokens, { type = "number", value = val })
-                else
-                    table.insert(self.tokens, { type = "integer", value = val })
-                end
-                token_processed = true
-            end
-            
-        elseif is_alpha(char) then
-            local start_pos = self.position
-            while self.position <= #self.code and (is_alpha(self.code:sub(self.position, self.position)) or is_digit(self.code:sub(self.position, self.position))) do
-                self.position = self.position + 1
-            end
-            local value = self.code:sub(start_pos, self.position - 1)
-            if value == "local" then table.insert(self.tokens, { type = "keyword", value = "local" })
-            elseif value == "function" then table.insert(self.tokens, { type = "keyword", value = "function" })
-            elseif value == "return" then table.insert(self.tokens, { type = "keyword", value = "return" })
-            elseif value == "end" then table.insert(self.tokens, { type = "keyword", value = "end" })
-            elseif value == "if" then table.insert(self.tokens, { type = "keyword", value = "if" })
-            elseif value == "then" then table.insert(self.tokens, { type = "keyword", value = "then" })
-            elseif value == "else" then table.insert(self.tokens, { type = "keyword", value = "else" })
-            elseif value == "elseif" then table.insert(self.tokens, { type = "keyword", value = "elseif" })
-            elseif value == "while" then table.insert(self.tokens, { type = "keyword", value = "while" })
-            elseif value == "for" then table.insert(self.tokens, { type = "keyword", value = "for" })
-            elseif value == "do" then table.insert(self.tokens, { type = "keyword", value = "do" })
-            elseif value == "and" or value == "or" or value == "not" then table.insert(self.tokens, { type = "operator", value = value })
-            elseif value == "goto" then table.insert(self.tokens, { type = "keyword", value = "goto" })
-            elseif value == "break" then table.insert(self.tokens, { type = "keyword", value = "break" })
-            elseif value == "repeat" then table.insert(self.tokens, { type = "keyword", value = "repeat" })
-            elseif value == "until" then table.insert(self.tokens, { type = "keyword", value = "until" })
-            else table.insert(self.tokens, { type = "identifier", value = value }) end
-            token_processed = true
-
-
-        elseif char == '-' then
-            if self.position + 1 <= #self.code and self.code:sub(self.position + 1, self.position + 1) == '-' then
-                -- Start of comment: consume '--'
-                self.position = self.position + 2 
-                
-                local next_char = self.code:sub(self.position, self.position)
-                
-                -- Check for long comment start: --[
-                if next_char == '[' then
-                    self.position = self.position + 1 -- consume first '['
-                    local num_equals = 0
-                    -- Count equals signs
-                    while self.position <= #self.code and self.code:sub(self.position, self.position) == '=' do
-                        num_equals = num_equals + 1
-                        self.position = self.position + 1
-                    end
-                    
-                    local second_bracket = self.code:sub(self.position, self.position)
-                    
-                    if second_bracket == '[' then
-                        -- Confirmed multi-line comment: --[=[...]=]
-                        self.position = self.position + 1 -- consume second '['
-                        
-                        -- Determine expected closing sequence
-                        local expected_end = ']'
-                        for i = 1, num_equals do
-                            expected_end = expected_end .. '='
-                        end
-                        expected_end = expected_end .. ']'
-                        local end_len = #expected_end
-                        
-                        local comment_end_found = false
-                        while self.position <= #self.code do
-                            -- Check for the closing sequence, ensuring we don't index past the end
-                            if self.position + end_len - 1 <= #self.code then
-                                if self.code:sub(self.position, self.position + end_len - 1) == expected_end then
-                                    self.position = self.position + end_len
-                                    comment_end_found = true
-                                    break
-                                end
-                            end
-                            self.position = self.position + 1
-                        end
-                        
-                        if not comment_end_found then
-                            error("Unclosed multi-line comment")
-                        end
-                    else
-                        -- Not a valid long comment start (e.g., --[a or --[=a). Treat as single line.
-                        while self.position <= #self.code and self.code:sub(self.position, self.position) ~= '\n' do
-                            self.position = self.position + 1
-                        end
-                    end
-                else
-                    -- Standard single-line comment: --
-                    while self.position <= #self.code and self.code:sub(self.position, self.position) ~= '\n' do
-                        self.position = self.position + 1
-                    end
-                end
-            else
-                table.insert(self.tokens, { type = "operator", value = char })
-                self.position = self.position + 1
-            end
-            token_processed = true
-        elseif char == '+' or char == '*' or char == '/' or char == '#' then
-            table.insert(self.tokens, { type = "operator", value = char })
-            self.position = self.position + 1
-            token_processed = true
-        elseif char == '=' then
-            if self.position < #self.code and self.code:sub(self.position + 1, self.position + 1) == '=' then
-                table.insert(self.tokens, { type = "operator", value = "==" })
-                self.position = self.position + 2
-            else
-                table.insert(self.tokens, { type = "operator", value = "=" })
-                self.position = self.position + 1
-            end
-            token_processed = true
-        elseif char == '>' then
-            if self.position < #self.code and self.code:sub(self.position + 1, self.position + 1) == '=' then
-                table.insert(self.tokens, { type = "operator", value = ">=" })
-                self.position = self.position + 2
-            else
-                table.insert(self.tokens, { type = "operator", value = ">" })
-                self.position = self.position + 1
-            end
-            token_processed = true
-        elseif char == '<' then
-            if self.position < #self.code and self.code:sub(self.position + 1, self.position + 1) == '=' then
-                table.insert(self.tokens, { type = "operator", value = "<=" })
-                self.position = self.position + 2
-            else
-                table.insert(self.tokens, { type = "operator", value = "<" })
-                self.position = self.position + 1
-            end
-            token_processed = true
-        elseif char == '~' then
-            if self.position < #self.code and self.code:sub(self.position + 1, self.position + 1) == '=' then
-                table.insert(self.tokens, { type = "operator", value = "~=" })
-                self.position = self.position + 2
-            else
-                -- In Lua, '~' by itself is not a standard operator, so we just advance.
-                self.position = self.position + 1
-            end
-            token_processed = true
-        elseif char == '(' or char == ')' then
-            table.insert(self.tokens, { type = "paren", value = char })
-            self.position = self.position + 1
-            token_processed = true
-        elseif char == '"' or char == "'" then
-            local quote_char = char
-            self.position = self.position + 1 -- consume the opening quote
-            local buffer = {}
-            local start_pos = self.position
-            while self.position <= #self.code do
-                local char_in_string = self.code:sub(self.position, self.position)
-                if char_in_string == '\\' then
-                    self.position = self.position + 1 -- consume '\'
-                    local escaped_char = self.code:sub(self.position, self.position)
-                    if escaped_char == 'n' then table.insert(buffer, '\n')
-                    elseif escaped_char == 't' then table.insert(buffer, '\t')
-                    elseif escaped_char == 'r' then table.insert(buffer, '\r')
-                    elseif escaped_char == 'b' then table.insert(buffer, '\b')
-                    elseif escaped_char == 'f' then table.insert(buffer, '\f')
-                    elseif escaped_char == 'a' then table.insert(buffer, '\a')
-                    elseif escaped_char == 'v' then table.insert(buffer, '\v')
-                    elseif escaped_char == '\\' then table.insert(buffer, '\\')
-                    elseif escaped_char == '"' then table.insert(buffer, '\"')
-                    elseif escaped_char == "'" then table.insert(buffer, "'" )
-                    -- Add other escape sequences as needed (e.g., \ddd, \xdd, \u{hhhh})
-                    else table.insert(buffer, escaped_char) -- For unknown escape sequences, just insert the char
-                    end
-                    self.position = self.position + 1
-                elseif char_in_string == quote_char then
-                    self.position = self.position + 1 -- consume the closing quote
-                    break
-                else
-                    table.insert(buffer, char_in_string)
-                    self.position = self.position + 1
-                end
-            end
-            table.insert(self.tokens, { type = "string", value = table.concat(buffer) })
-            token_processed = true
-        elseif char == '[' or char == ']' then
-            table.insert(self.tokens, { type = "square_bracket", value = char })
-            self.position = self.position + 1
-            token_processed = true
-        elseif char == '{' or char == '}' then
-            table.insert(self.tokens, { type = "brace", value = char })
-            self.position = self.position + 1
-            token_processed = true
-        elseif char == ':' then
-            -- Check for label delimiter (::)
-            if self.position + 1 <= #self.code and self.code:sub(self.position + 1, self.position + 1) == ':' then
-                table.insert(self.tokens, { type = "label_delimiter", value = "::" })
-                self.position = self.position + 2
-            else
-                table.insert(self.tokens, { type = "colon", value = char })
-                self.position = self.position + 1
-            end
-            token_processed = true
-        elseif char == '.' then
-            if self.position + 2 <= #self.code and self.code:sub(self.position + 1, self.position + 2) == '..' then
-                table.insert(self.tokens, { type = "varargs", value = "..." })
-                self.position = self.position + 3
-            elseif self.position + 1 <= #self.code and self.code:sub(self.position + 1, self.position + 1) == '.' then
-                table.insert(self.tokens, { type = "operator", value = ".." })
-                self.position = self.position + 2
-            else
-                table.insert(self.tokens, { type = "dot", value = char })
-                self.position = self.position + 1
-            end
-            token_processed = true
-        elseif char == ',' then
-            table.insert(self.tokens, { type = "comma", value = char })
-            self.position = self.position + 1
-            token_processed = true
-        else
-            -- For now, ignore other characters
-            self.position = self.position + 1
-            token_processed = true
-        end
-        
-        -- To avoid the 'goto' causing issues with C++ translation or duplicate labels,
-        -- we just use standard control flow. If a token was processed, the loop continues naturally.
-        -- If no token matched (shouldn't happen with the `else` block above), we'd just loop again.
-    end
+    self.tokens = Tokenizer.tokenize(self)
     return self.tokens
 end
 
@@ -468,7 +134,6 @@ function Parser:parse_function_call_or_member_access(base_node)
             else 
                 local val = method_token and method_token.value or "nil"
                 local typ = method_token and method_token.type or "nil"
-                print("DEBUG: Expected identifier after ':' but found: " .. val .. " (" .. typ .. ")")
                 error("Expected identifier after ':'") 
             end
         elseif token.type == "square_bracket" and token.value == '[' then
@@ -572,6 +237,7 @@ function Parser:parse_variable_list()
     end
 
     local var_list_node = Node:new("variable_list")
+
     var_list_node:AddChildren(table.unpack(variables))
     return var_list_node
 end
@@ -589,7 +255,9 @@ function Parser:parse_expression_list()
         end
     until false
     local expr_list_node = Node:new("expression_list")
-    expr_list_node:AddChildren(table.unpack(expressions))
+    for i = 1, #expressions do
+        expr_list_node:AddChildren(expressions[i])
+    end
     return expr_list_node
 end
 
@@ -602,19 +270,18 @@ function Parser:parse_primary_expression()
     local node = nil
     if token.type == "operator" and token.value == '-' then -- Handle unary minus
         self.token_position = self.token_position + 1 -- consume '-'
-        local operand = self:parse_primary_expression() -- The operand of the unary minus
+        local operand = self:parse_expression(8) -- The operand of the unary minus
         if not operand then 
             local next_tok = self:peek()
             local val = next_tok and next_tok.value or "nil"
             local typ = next_tok and next_tok.type or "nil"
-            print("DEBUG: Failed to parse operand after unary minus. Next token: " .. val .. " (" .. typ .. ")")
             error("Expected expression after unary minus") 
         end
         node = Node:new("unary_expression", "-")
         node:AddChildren(operand)
     elseif token.type == "operator" and token.value == 'not' then -- Handle unary not
         self.token_position = self.token_position + 1 -- consume 'not'
-        local operand = self:parse_primary_expression() -- The operand of the unary not
+        local operand = self:parse_expression(8) -- The operand of the unary not
         if not operand then error("Expected expression after unary not") end
         node = Node:new("unary_expression", "not")
         node:AddChildren(operand)
@@ -622,7 +289,7 @@ function Parser:parse_primary_expression()
         node:AddChildren(operand)
     elseif token.type == "operator" and token.value == '#' then -- Handle unary length
         self.token_position = self.token_position + 1 -- consume '#'
-        local operand = self:parse_primary_expression()
+        local operand = self:parse_expression(8)
         if not operand then error("Expected expression after unary #") end
         node = Node:new("unary_expression", "#")
         node:AddChildren(operand)
@@ -1157,6 +824,16 @@ function Parser:parse()
     while self.token_position <= #self.tokens do
         local statement_node = self:parse_statement()
         if statement_node then
+            if statement_node == root then
+                print("ERROR: parse_statement returned the SAME root object!")
+                print("  self.token_position = " .. self.token_position)
+                print("  Current token: " .. (self.tokens[self.token_position] and self.tokens[self.token_position].type or "nil"))
+                os.exit(1)
+            end
+            if statement_node.type == "Root" then
+                print("ERROR: Attempting to add Root node as child!")
+                os.exit(1)
+            end
             root:AddChildren(statement_node)
         else
             -- If parse_statement returns nil, it means either no statement was found
