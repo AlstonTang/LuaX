@@ -66,14 +66,16 @@ std::shared_ptr<LuaObject> package_searchers_table = std::make_shared<LuaObject>
 std::shared_ptr<LuaObject> create_package_library() {
     auto package_lib = std::make_shared<LuaObject>();
 
-    package_lib->set("config", LuaValue(std::string("/\n;\n?\n!\n-\n")));
-    package_lib->set("cpath", LuaValue(std::string("./?.so;")));
-    package_lib->set("loaded", package_loaded_table);
-    package_lib->set("loadlib", std::make_shared<LuaFunctionWrapper>(package_loadlib));
-    package_lib->set("path", LuaValue(std::string("./?.lua;")));
-    package_lib->set("preload", package_preload_table);
-    package_lib->set("searchers", package_searchers_table);
-    package_lib->set("searchpath", std::make_shared<LuaFunctionWrapper>(package_searchpath));
+    package_lib->properties = {
+        {"config", LuaValue(std::string("/\n;\n?\n!\n-\n"))},
+        {"cpath", LuaValue(std::string("./?.so;"))},
+        {"loaded", package_loaded_table},
+        {"loadlib", std::make_shared<LuaFunctionWrapper>(package_loadlib)},
+        {"path", LuaValue(std::string("./?.lua;"))},
+        {"preload", package_preload_table},
+        {"searchers", package_searchers_table},
+        {"searchpath", std::make_shared<LuaFunctionWrapper>(package_searchpath)}
+    };
 
     return package_lib;
 }

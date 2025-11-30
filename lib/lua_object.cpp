@@ -20,7 +20,7 @@ std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<L
 // Internal Helper Functions
 // ==========================================
 
-bool is_integer_key(double d, long long& out) {
+inline bool is_integer_key(double d, long long& out) {
     long long l = static_cast<long long>(d);
     if (d == static_cast<double>(l)) {
         out = l;
@@ -29,7 +29,7 @@ bool is_integer_key(double d, long long& out) {
     return false;
 }
 
-std::string value_to_key_string(const LuaValue& key) {
+inline std::string value_to_key_string(const LuaValue& key) {
     if (std::holds_alternative<std::string>(key)) {
         return std::get<std::string>(key);
     }
@@ -178,29 +178,7 @@ std::string to_cpp_string(std::vector<LuaValue> value) {
     return value.empty() ? "nil" : to_cpp_string(value[0]);
 }
 
-double get_double(const LuaValue& value) {
-    if (std::holds_alternative<double>(value)) return std::get<double>(value);
-    if (std::holds_alternative<long long>(value)) return static_cast<double>(std::get<long long>(value));
-    if (std::holds_alternative<std::string>(value)) {
-        try { return std::stod(std::get<std::string>(value)); } catch(...) {}
-    }
-    return 0.0;
-}
 
-long long get_long_long(const LuaValue& value) {
-    if (std::holds_alternative<long long>(value)) return std::get<long long>(value);
-    if (std::holds_alternative<double>(value)) return static_cast<long long>(std::get<double>(value));
-    if (std::holds_alternative<std::string>(value)) {
-        try { return std::stoll(std::get<std::string>(value)); } catch(...) {}
-    }
-    return 0;
-}
-
-bool is_lua_truthy(const LuaValue& val) {
-    if (std::holds_alternative<std::monostate>(val)) return false;
-    if (std::holds_alternative<bool>(val) && !std::get<bool>(val)) return false;
-    return true;
-}
 
 std::string get_lua_type_name(const LuaValue& val) {
     if (std::holds_alternative<std::monostate>(val)) return "nil";
@@ -222,10 +200,7 @@ void print_value(const LuaValue& value) {
 // ==========================================
 
 bool operator<=(const LuaValue& lhs, const LuaValue& rhs) {
-    // This C++ operator overload delegates to the Lua logic
-    // which handles mixed types (double/long long) correctly.
-    // If you need strict C++ sorting for a specific type, this might need adjustment,
-    // but for Lua emulation, this is correct.
+    // Delegates to Lua comparison logic
     extern bool lua_less_equals(const LuaValue&, const LuaValue&);
     return lua_less_equals(lhs, rhs);
 }
@@ -262,7 +237,7 @@ bool lua_less_than(const LuaValue& a, const LuaValue& b) {
             }
         }
     }
-    // Check 'b' metatable if 'a' didn't handle it (Lua 5.3+ behavior for mixed types with metatables)
+    // Check 'b' metatable if 'a' didn't handle it
     if (std::holds_alternative<std::shared_ptr<LuaObject>>(b)) {
         auto t = std::get<std::shared_ptr<LuaObject>>(b);
         if (t->metatable) {
@@ -327,12 +302,10 @@ bool lua_less_equals(const LuaValue& a, const LuaValue& b) {
             }
         }
         
-        // 4. Fallback to __lt: a <= b  <==>  not (b < a)
-        // Note: We use lua_less_than(b, a) which handles metamethods lookup for __lt
+        // Fallback to __lt: a <= b  <==> not (b < a)
         return !lua_less_than(b, a); 
     }
 
-    // If types were mismatched (e.g. number vs string) and no metatables, this throws error via lua_less_than
     return !lua_less_than(b, a);
 }
 

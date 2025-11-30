@@ -4,15 +4,35 @@
 -- make to compile them into a single executable.
 
 -- NEW: Make script's internal requires robust to the current working directory.
--- We get the directory where this script is located and add the project root
--- (which is one level up from `scripts/`) to Lua's search path.
 local script_path = arg[0]
 local script_dir = script_path:match("(.*/)") or ""
 package.path = package.path .. ";" .. script_dir .. "../?.lua;" .. script_dir .. "../?/init.lua"
 
--- CHANGED: Use module-style require, which is more standard and works with our new package.path.
 local cpp_translator = require("src.cpp_translator")
 local translator = require("src.translator")
+
+-- Argument Parsing
+local usage = "Usage: lua5.4 scripts/luax.lua [-k|--keep] <path_to_src_lua_file> <path_to_out_file>"
+local input_lua_file = nil
+local path_to_out_file = nil
+local keep_files = false
+
+for i = 1, #arg do
+    local a = arg[i]
+    if a == "-k" or a == "--keep" then
+        keep_files = true
+    elseif not input_lua_file then
+        input_lua_file = a
+    elseif not path_to_out_file then
+        path_to_out_file = a
+    end
+end
+
+if not input_lua_file or not path_to_out_file then
+    print(usage)
+    print("  -k, --keep   Preserve generated source and object files.")
+    os.exit(1)
+end
 
 local function run_command(command_str, error_message)
     print("Executing command: " .. command_str)
@@ -22,7 +42,6 @@ local function run_command(command_str, error_message)
     end
 end
 
--- Updated function signature to accept is_main_entry flag
 local function translate_file(lua_file_path, output_file_name, is_main_entry)
     print("Translating " .. lua_file_path .. "...")
     local file = io.open(lua_file_path, "r")
@@ -35,17 +54,12 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry)
     local cpp_code
     local hpp_code
     
-    -- Check the flag instead of the output_file_name string
     if is_main_entry then
-        -- luax.lua
-print("DEBUG STARTING LUAX")
--- Main entry point: use global scope (nil for module name)
         cpp_translator.reset()
         cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false, nil, true) 
         cpp_translator.reset()
         hpp_code = cpp_translator.translate_recursive(ast, output_file_name, true, nil, true)
     else
-        -- Module: use module scope (output_file_name as module name)
         cpp_translator.reset()
         cpp_code = cpp_translator.translate_recursive(ast, output_file_name, false, output_file_name, false) 
         cpp_translator.reset()
@@ -74,56 +88,47 @@ print("DEBUG STARTING LUAX")
     end
 end
 
--- Helper to check if file exists
 local function file_exists(path)
     local f = io.open(path, "r")
     if f then f:close() return true end
     return false
 end
 
--- Function to find dependencies (simple require pattern matching)
 local function find_dependencies(lua_file_path)
     local dependencies = {}
     local file = io.open(lua_file_path, "r")
-    if not file then
-        return dependencies -- No file, no dependencies
-    end
+    if not file then return dependencies end
 
-    local current_dir = lua_file_path:match("(.*/)") or "" -- Extract directory of current file
+    local current_dir = lua_file_path:match("(.*/)") or ""
 
     for line in file:lines() do
-        -- Ignore comments
         if not line:match("^%s*%-%-") then
-            -- Match require("module.name") or require('module.name')
-        local module_name = line:match('require%s*%([\'"]([%w%._-]+)[\'"]%)')
-        if module_name then
-            local dep_path
-            -- This logic correctly handles both `src.utils` and `utils` style requires
-            local rel_path = module_name:gsub("%.", "/") .. ".lua"
-            local path_from_current = current_dir .. rel_path
-            local path_from_root = rel_path
+            local module_name = line:match('require%s*%([\'"]([%w%._-]+)[\'"]%)')
+            if module_name then
+                local dep_path
+                local rel_path = module_name:gsub("%.", "/") .. ".lua"
+                local path_from_current = current_dir .. rel_path
+                local path_from_root = rel_path
 
-            if file_exists(path_from_current) then
-                dep_path = path_from_current
-            elseif file_exists(path_from_root) then
-                dep_path = path_from_root
-            else
-                -- Fallback to existing logic if neither found (or to produce a consistent error later)
-                if module_name:find("%.") then
+                if file_exists(path_from_current) then
+                    dep_path = path_from_current
+                elseif file_exists(path_from_root) then
                     dep_path = path_from_root
                 else
-                    dep_path = path_from_current
+                    if module_name:find("%.") then
+                        dep_path = path_from_root
+                    else
+                        dep_path = path_from_current
+                    end
                 end
+                table.insert(dependencies, {path = dep_path, name = module_name})
             end
-            table.insert(dependencies, {path = dep_path, name = module_name})
         end
-        end -- End if not comment
     end
     file:close()
     return dependencies
 end
 
--- Function to generate and execute a Makefile
 local function generate_and_run_makefile(output_path, generated_basenames, dep_graph, files_to_translate)
     local makefile_path = "build/Makefile"
     print("Generating " .. makefile_path .. "...")
@@ -134,7 +139,7 @@ local function generate_and_run_makefile(output_path, generated_basenames, dep_g
         "lib/init.cpp", "lib/debug.cpp", "lib/coroutine.cpp"
     }
 
-    -- Use ../ to reference files from the build directory
+    -- Point to lib files relative to the build directory
     local lib_srcs_str = table.concat(lib_cpp_files, " "):gsub("lib/", "../lib/")
 
     local gen_srcs = {}
@@ -143,29 +148,40 @@ local function generate_and_run_makefile(output_path, generated_basenames, dep_g
     end
     local gen_srcs_str = table.concat(gen_srcs, " ")
 
+    -- CHANGED: Makefile Logic
+    -- 1. LIB_OBJS are generated in ../lib/. Make handles timestamps automatically.
+    -- 2. clean_generated only removes the objects created from Lua translation.
     local content = {
         "CXX = clang++",
-        "CXXFLAGS = -std=c++17 -I../include -g -O0",
+        "CXXFLAGS = -std=c++17 -I../include -g -O1",
         "LDFLAGS = -lstdc++fs",
-        "TARGET = ../" .. output_path, -- The final executable will be in the root or specified path
+        "TARGET = ../" .. output_path,
         "",
         "LIB_SRCS = " .. lib_srcs_str,
         "GEN_SRCS = " .. gen_srcs_str,
         "",
-        "LIB_OBJS = $(LIB_SRCS:.cpp=.o)",
+        -- These will resolve to ../lib/xxx.o. Make will check if ../lib/xxx.o exists 
+        -- and is newer than ../lib/xxx.cpp. If so, it skips compilation.
+        "LIB_OBJS = $(LIB_SRCS:.cpp=.o)", 
         "GEN_OBJS = $(GEN_SRCS:.cpp=.o)",
         "",
-        ".PHONY: all clean",
+        ".PHONY: all clean clean_generated",
         "",
         "all: $(TARGET)",
         "",
         "$(TARGET): $(LIB_OBJS) $(GEN_OBJS)",
         "\t$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)",
         "",
-        -- Generic rule to compile any .cpp into a .o
         "%.o: %.cpp",
         "\t$(CXX) $(CXXFLAGS) -c -o $@ $<",
         "",
+        -- Clean everything (full reset)
+        "clean:",
+        "\trm -f $(TARGET) $(LIB_OBJS) $(GEN_OBJS)",
+        "",
+        -- Clean only the objects generated from Lua (keeping core lib objects)
+        "clean_generated:",
+        "\trm -f $(GEN_OBJS)"
     }
 
     for lua_path, deps in pairs(dep_graph) do
@@ -184,10 +200,6 @@ local function generate_and_run_makefile(output_path, generated_basenames, dep_g
         end
     end
 
-    table.insert(content, "")
-    table.insert(content, "clean:")
-    table.insert(content, "\trm -f $(TARGET) $(LIB_OBJS) $(GEN_OBJS)")
-
     local file = io.open(makefile_path, "w")
     if not file then
         error("Could not write to " .. makefile_path)
@@ -199,33 +211,15 @@ local function generate_and_run_makefile(output_path, generated_basenames, dep_g
     run_command("make -j -C build", "Compilation failed.")
 end
 
-
-local usage = "Usage: lua5.4 scripts/luax.lua <path_to_src_lua_file> <path_to_out_file>"
-
--- Main script logic
-local input_lua_file = arg[1]
-if not input_lua_file then
-    print(usage)
-    os.exit(1)
-end
-
-local path_to_out_file = arg[2]
-if not path_to_out_file then
-    print(usage)
-    os.exit(1)
-end
-
 --- Cleans and recreates the build directory
 run_command("mkdir -p build", "Failed to create build directory.")
 
 local files_to_translate = {}
 local queue = {}
 local visited = {}
-local dep_graph = {} -- To store dependencies for the Makefile
+local dep_graph = {}
 
--- Add initial file to queue and set
 table.insert(queue, input_lua_file)
--- For the main file, we use the output filename provided by the user (stripped of extension)
 local main_basename = path_to_out_file:match(".*/(.*)") or path_to_out_file
 files_to_translate[input_lua_file] = main_basename
 visited[input_lua_file] = true
@@ -236,14 +230,13 @@ while head <= #queue do
     head = head + 1
 
     local deps = find_dependencies(current_file)
-    dep_graph[current_file] = deps -- Store dependencies for this file
+    dep_graph[current_file] = deps
 
     for _, dep in ipairs(deps) do
         local dep_file = dep.path
         local module_name = dep.name
         if not visited[dep_file] then
             visited[dep_file] = true
-            -- Sanitize module name for filename (replace dots with underscores)
             local sanitized_name = module_name:gsub("%.", "_")
             files_to_translate[dep_file] = sanitized_name
             table.insert(queue, dep_file)
@@ -252,16 +245,29 @@ while head <= #queue do
 end
 
 local generated_basenames = {}
--- Perform translation for all identified files
 for file_path, output_name in pairs(files_to_translate) do
     table.insert(generated_basenames, output_name)
-    
     local is_main_entry = (file_path == input_lua_file)
-    
     translate_file(file_path, output_name, is_main_entry)
 end
 
--- Generate the Makefile and run the compilation
 generate_and_run_makefile(path_to_out_file, generated_basenames, dep_graph, files_to_translate)
+
+-- Cleanup Logic
+if not keep_files then
+    -- 1. Remove ONLY the objects generated from the Lua scripts. 
+    -- We do NOT remove the LIB_OBJS (in ../lib/), so they are cached for the next run.
+    run_command("make -C build clean_generated")
+    
+    -- 2. Remove the generated C++ source/headers and Makefile from build/
+    run_command("rm -f build/*.cpp build/*.hpp build/Makefile")
+    
+    -- 3. Attempt to remove the build directory if empty
+    os.execute("rmdir build 2>/dev/null")
+    
+    print("Cleaned up generated intermediate files (Core lib objects preserved).")
+else
+    print("Intermediate files preserved in 'build/' directory.")
+end
 
 print("Compilation complete. Executable at: " .. path_to_out_file)

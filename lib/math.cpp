@@ -3,14 +3,17 @@
 #include <cmath>
 #include <limits>
 #include <algorithm>
-#include <random> // Added for random number generation
-#include <chrono> // Added for seeding random number generator
+#include <random>
+#include <chrono>
+
+// Constants
+constexpr double PI = 3.14159265358979323846;
 
 // Global random number generator
 std::default_random_engine generator;
 
 // Helper function to get a number from a LuaValue
-double get_number(const LuaValue& v) {
+inline double get_number(const LuaValue& v) {
     if (std::holds_alternative<double>(v)) {
         return std::get<double>(v);
     }
@@ -21,7 +24,7 @@ double get_number(const LuaValue& v) {
 std::vector<LuaValue> math_randomseed(std::shared_ptr<LuaObject> args) {
     long long seed = static_cast<long long>(get_number(args->get("1")));
     generator.seed(seed);
-    return {std::monostate{}}; // Lua functions typically return nil if nothing else
+    return {std::monostate{}};
 }
 
 // math.random
@@ -79,7 +82,7 @@ std::vector<LuaValue> math_cos(std::shared_ptr<LuaObject> args) {
 
 // math.deg
 std::vector<LuaValue> math_deg(std::shared_ptr<LuaObject> args) {
-    return {get_number(args->get("1")) * 180.0 / 3.14159265358979323846};
+    return {get_number(args->get("1")) * 180.0 / PI};
 }
 
 // math.exp
@@ -133,7 +136,7 @@ std::vector<LuaValue> math_modf(std::shared_ptr<LuaObject> args) {
 
 // math.rad
 std::vector<LuaValue> math_rad(std::shared_ptr<LuaObject> args) {
-    return {get_number(args->get("1")) * 3.14159265358979323846 / 180.0};
+    return {get_number(args->get("1")) * PI / 180.0};
 }
 
 // math.sin
@@ -175,34 +178,35 @@ std::shared_ptr<LuaObject> create_math_library() {
     // Seed the random number generator with current time by default
     generator.seed(std::chrono::system_clock::now().time_since_epoch().count());
 
-    math_lib->set("abs", std::make_shared<LuaFunctionWrapper>(math_abs));
-    math_lib->set("acos", std::make_shared<LuaFunctionWrapper>(math_acos));
-    math_lib->set("asin", std::make_shared<LuaFunctionWrapper>(math_asin));
-    math_lib->set("atan", std::make_shared<LuaFunctionWrapper>(math_atan));
-    math_lib->set("ceil", std::make_shared<LuaFunctionWrapper>(math_ceil));
-    math_lib->set("cos", std::make_shared<LuaFunctionWrapper>(math_cos));
-    math_lib->set("deg", std::make_shared<LuaFunctionWrapper>(math_deg));
-    math_lib->set("exp", std::make_shared<LuaFunctionWrapper>(math_exp));
-    math_lib->set("floor", std::make_shared<LuaFunctionWrapper>(math_floor));
-    math_lib->set("fmod", std::make_shared<LuaFunctionWrapper>(math_fmod));
-    math_lib->set("log", std::make_shared<LuaFunctionWrapper>(math_log));
-    math_lib->set("max", std::make_shared<LuaFunctionWrapper>(math_max));
-    math_lib->set("min", std::make_shared<LuaFunctionWrapper>(math_min));
-    math_lib->set("modf", std::make_shared<LuaFunctionWrapper>(math_modf));
-    math_lib->set("rad", std::make_shared<LuaFunctionWrapper>(math_rad));
-    math_lib->set("random", std::make_shared<LuaFunctionWrapper>(math_random));
-    math_lib->set("randomseed", std::make_shared<LuaFunctionWrapper>(math_randomseed));
-    math_lib->set("sin", std::make_shared<LuaFunctionWrapper>(math_sin));
-    math_lib->set("sqrt", std::make_shared<LuaFunctionWrapper>(math_sqrt));
-    math_lib->set("tan", std::make_shared<LuaFunctionWrapper>(math_tan));
-    math_lib->set("tointeger", std::make_shared<LuaFunctionWrapper>(math_tointeger));
-    math_lib->set("type", std::make_shared<LuaFunctionWrapper>(math_type));
-    math_lib->set("ult", std::make_shared<LuaFunctionWrapper>(math_ult));
-
-    math_lib->set("huge", std::numeric_limits<double>::infinity());
-    math_lib->set("pi", 3.14159265358979323846);
-    math_lib->set("maxinteger", std::numeric_limits<long long>::max());
-    math_lib->set("mininteger", std::numeric_limits<long long>::min());
+    math_lib->properties = {
+        {"abs", std::make_shared<LuaFunctionWrapper>(math_abs)},
+        {"acos", std::make_shared<LuaFunctionWrapper>(math_acos)},
+        {"asin", std::make_shared<LuaFunctionWrapper>(math_asin)},
+        {"atan", std::make_shared<LuaFunctionWrapper>(math_atan)},
+        {"ceil", std::make_shared<LuaFunctionWrapper>(math_ceil)},
+        {"cos", std::make_shared<LuaFunctionWrapper>(math_cos)},
+        {"deg", std::make_shared<LuaFunctionWrapper>(math_deg)},
+        {"exp", std::make_shared<LuaFunctionWrapper>(math_exp)},
+        {"floor", std::make_shared<LuaFunctionWrapper>(math_floor)},
+        {"fmod", std::make_shared<LuaFunctionWrapper>(math_fmod)},
+        {"log", std::make_shared<LuaFunctionWrapper>(math_log)},
+        {"max", std::make_shared<LuaFunctionWrapper>(math_max)},
+        {"min", std::make_shared<LuaFunctionWrapper>(math_min)},
+        {"modf", std::make_shared<LuaFunctionWrapper>(math_modf)},
+        {"rad", std::make_shared<LuaFunctionWrapper>(math_rad)},
+        {"random", std::make_shared<LuaFunctionWrapper>(math_random)},
+        {"randomseed", std::make_shared<LuaFunctionWrapper>(math_randomseed)},
+        {"sin", std::make_shared<LuaFunctionWrapper>(math_sin)},
+        {"sqrt", std::make_shared<LuaFunctionWrapper>(math_sqrt)},
+        {"tan", std::make_shared<LuaFunctionWrapper>(math_tan)},
+        {"tointeger", std::make_shared<LuaFunctionWrapper>(math_tointeger)},
+        {"type", std::make_shared<LuaFunctionWrapper>(math_type)},
+        {"ult", std::make_shared<LuaFunctionWrapper>(math_ult)},
+        {"huge", std::numeric_limits<double>::infinity()},
+        {"pi", PI},
+        {"maxinteger", static_cast<double>(std::numeric_limits<long long>::max())},
+        {"mininteger", static_cast<double>(std::numeric_limits<long long>::min())}
+    };
 
     return math_lib;
 }

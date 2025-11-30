@@ -154,17 +154,19 @@ std::vector<LuaValue> os_time(std::shared_ptr<LuaObject> args) {
 std::shared_ptr<LuaObject> create_os_library() {
     auto os_lib = std::make_shared<LuaObject>();
 
-    os_lib->set("clock", std::make_shared<LuaFunctionWrapper>(os_clock));
-    os_lib->set("date", std::make_shared<LuaFunctionWrapper>(os_date));
-    os_lib->set("difftime", std::make_shared<LuaFunctionWrapper>(os_difftime));
-    os_lib->set("execute", std::make_shared<LuaFunctionWrapper>(os_execute));
-    os_lib->set("exit", std::make_shared<LuaFunctionWrapper>(os_exit));
-    os_lib->set("getenv", std::make_shared<LuaFunctionWrapper>(os_getenv));
-    os_lib->set("remove", std::make_shared<LuaFunctionWrapper>(os_remove));
-    os_lib->set("rename", std::make_shared<LuaFunctionWrapper>(os_rename));
-    os_lib->set("setlocale", std::make_shared<LuaFunctionWrapper>(os_setlocale));
-    os_lib->set("time", std::make_shared<LuaFunctionWrapper>(os_time));
-    os_lib->set("tmpname", std::make_shared<LuaFunctionWrapper>(os_tmpname));
+    os_lib->properties = {
+        {"clock", std::make_shared<LuaFunctionWrapper>(os_clock)},
+        {"date", std::make_shared<LuaFunctionWrapper>(os_date)},
+        {"difftime", std::make_shared<LuaFunctionWrapper>(os_difftime)},
+        {"execute", std::make_shared<LuaFunctionWrapper>(os_execute)},
+        {"exit", std::make_shared<LuaFunctionWrapper>(os_exit)},
+        {"getenv", std::make_shared<LuaFunctionWrapper>(os_getenv)},
+        {"remove", std::make_shared<LuaFunctionWrapper>(os_remove)},
+        {"rename", std::make_shared<LuaFunctionWrapper>(os_rename)},
+        {"setlocale", std::make_shared<LuaFunctionWrapper>(os_setlocale)},
+        {"time", std::make_shared<LuaFunctionWrapper>(os_time)},
+        {"tmpname", std::make_shared<LuaFunctionWrapper>(os_tmpname)}
+    };
 
     return os_lib;
 }

@@ -283,12 +283,14 @@ std::vector<LuaValue> utf8_offset(std::shared_ptr<LuaObject> args) {
 std::shared_ptr<LuaObject> create_utf8_library() {
     auto utf8_lib = std::make_shared<LuaObject>();
 
-    utf8_lib->set("char", std::make_shared<LuaFunctionWrapper>(utf8_char));
-    utf8_lib->set("charpattern", std::make_shared<LuaFunctionWrapper>(utf8_charpattern));
-    utf8_lib->set("codepoint", std::make_shared<LuaFunctionWrapper>(utf8_codepoint));
-    utf8_lib->set("codes", std::make_shared<LuaFunctionWrapper>(utf8_codes));
-    utf8_lib->set("len", std::make_shared<LuaFunctionWrapper>(utf8_len));
-    utf8_lib->set("offset", std::make_shared<LuaFunctionWrapper>(utf8_offset));
+    utf8_lib->properties = {
+        {"char", std::make_shared<LuaFunctionWrapper>(utf8_char)},
+        {"charpattern", std::make_shared<LuaFunctionWrapper>(utf8_charpattern)},
+        {"codepoint", std::make_shared<LuaFunctionWrapper>(utf8_codepoint)},
+        {"codes", std::make_shared<LuaFunctionWrapper>(utf8_codes)},
+        {"len", std::make_shared<LuaFunctionWrapper>(utf8_len)},
+        {"offset", std::make_shared<LuaFunctionWrapper>(utf8_offset)}
+    };
 
     return utf8_lib;
 }

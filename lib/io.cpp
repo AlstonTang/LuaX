@@ -104,11 +104,8 @@ std::vector<LuaValue> LuaFile::read(std::shared_ptr<LuaObject> args) {
             }
         }
         
-        // Note: In standard Lua, read("*a") returns an empty string "" at EOF, 
-        // whereas read("*l") returns nil. Your implementation currently returns nil 
-        // if content is empty, which is acceptable but strictly distinct from vanilla Lua.
         if (content.empty() && std::feof(file_handle)) {
-            return {std::monostate{}}; // True EOF
+            return {std::monostate{}};
         }
         return {content};
     } 
@@ -435,26 +432,16 @@ std::vector<LuaValue> io_lines(std::shared_ptr<LuaObject> args) {
 std::shared_ptr<LuaObject> create_io_library() {
     auto io_lib = std::make_shared<LuaObject>();
 
-    file_metatable->set("close", make_file_method(&LuaFile::close));
-    file_metatable->set("flush", make_file_method(&LuaFile::flush));
-    file_metatable->set("read",  make_file_method(&LuaFile::read));
-    file_metatable->set("seek",  make_file_method(&LuaFile::seek));
-    file_metatable->set("setvbuf", make_file_method(&LuaFile::setvbuf));
-    file_metatable->set("write", make_file_method(&LuaFile::write));
-    file_metatable->set("lines", make_file_method(&LuaFile::lines));
-    file_metatable->set("__index", file_metatable); // Set __index to itself for method lookup
-
-    io_lib->set("close", std::make_shared<LuaFunctionWrapper>(io_close));
-    io_lib->set("flush", std::make_shared<LuaFunctionWrapper>(io_flush));
-    io_lib->set("input", std::make_shared<LuaFunctionWrapper>(io_input));
-    io_lib->set("lines", std::make_shared<LuaFunctionWrapper>(io_lines));
-    io_lib->set("open", std::make_shared<LuaFunctionWrapper>(io_open));
-    io_lib->set("output", std::make_shared<LuaFunctionWrapper>(io_output));
-    io_lib->set("popen", std::make_shared<LuaFunctionWrapper>(io_popen));
-    io_lib->set("read", std::make_shared<LuaFunctionWrapper>(io_read));
-    io_lib->set("tmpfile", std::make_shared<LuaFunctionWrapper>(io_tmpfile));
-    io_lib->set("type", std::make_shared<LuaFunctionWrapper>(io_type));
-    io_lib->set("write", std::make_shared<LuaFunctionWrapper>(io_write));
+    file_metatable->properties = {
+        {"close", make_file_method(&LuaFile::close)},
+        {"flush", make_file_method(&LuaFile::flush)},
+        {"read",  make_file_method(&LuaFile::read)},
+        {"seek",  make_file_method(&LuaFile::seek)},
+        {"setvbuf", make_file_method(&LuaFile::setvbuf)},
+        {"write", make_file_method(&LuaFile::write)},
+        {"lines", make_file_method(&LuaFile::lines)},
+        {"__index", file_metatable}
+    };
 
     // Set up standard file handles
     io_stdin_handle = std::make_shared<LuaFile>(stdin, false);
@@ -466,12 +453,25 @@ std::shared_ptr<LuaObject> create_io_library() {
     io_stderr_handle = std::make_shared<LuaFile>(stderr, false);
     io_stderr_handle->set_metatable(file_metatable);
 
-    io_lib->set("stdin", io_stdin_handle);
-    io_lib->set("stdout", io_stdout_handle);
-    io_lib->set("stderr", io_stderr_handle);
-
     current_input_file = io_stdin_handle;
     current_output_file = io_stdout_handle;
+
+    io_lib->properties = {
+        {"close", std::make_shared<LuaFunctionWrapper>(io_close)},
+        {"flush", std::make_shared<LuaFunctionWrapper>(io_flush)},
+        {"input", std::make_shared<LuaFunctionWrapper>(io_input)},
+        {"lines", std::make_shared<LuaFunctionWrapper>(io_lines)},
+        {"open", std::make_shared<LuaFunctionWrapper>(io_open)},
+        {"output", std::make_shared<LuaFunctionWrapper>(io_output)},
+        {"popen", std::make_shared<LuaFunctionWrapper>(io_popen)},
+        {"read", std::make_shared<LuaFunctionWrapper>(io_read)},
+        {"tmpfile", std::make_shared<LuaFunctionWrapper>(io_tmpfile)},
+        {"type", std::make_shared<LuaFunctionWrapper>(io_type)},
+        {"write", std::make_shared<LuaFunctionWrapper>(io_write)},
+        {"stdin", io_stdin_handle},
+        {"stdout", io_stdout_handle},
+        {"stderr", io_stderr_handle}
+    };
 
     return io_lib;
 }

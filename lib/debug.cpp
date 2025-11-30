@@ -69,22 +69,24 @@ std::vector<LuaValue> debug_upvaluejoin(std::shared_ptr<LuaObject> args) {
 std::shared_ptr<LuaObject> create_debug_library() {
     auto debug_lib = std::make_shared<LuaObject>();
 
-    debug_lib->set("debug", std::make_shared<LuaFunctionWrapper>(debug_debug));
-    debug_lib->set("gethook", std::make_shared<LuaFunctionWrapper>(debug_gethook));
-    debug_lib->set("getinfo", std::make_shared<LuaFunctionWrapper>(debug_getinfo));
-    debug_lib->set("getlocal", std::make_shared<LuaFunctionWrapper>(debug_getlocal));
-    debug_lib->set("getmetatable", std::make_shared<LuaFunctionWrapper>(debug_getmetatable));
-    debug_lib->set("getregistry", std::make_shared<LuaFunctionWrapper>(debug_getregistry));
-    debug_lib->set("getupvalue", std::make_shared<LuaFunctionWrapper>(debug_getupvalue));
-    debug_lib->set("getuservalue", std::make_shared<LuaFunctionWrapper>(debug_getuservalue));
-    debug_lib->set("sethook", std::make_shared<LuaFunctionWrapper>(debug_sethook));
-    debug_lib->set("setlocal", std::make_shared<LuaFunctionWrapper>(debug_setlocal));
-    debug_lib->set("setmetatable", std::make_shared<LuaFunctionWrapper>(debug_setmetatable));
-    debug_lib->set("setupvalue", std::make_shared<LuaFunctionWrapper>(debug_setupvalue));
-    debug_lib->set("setuservalue", std::make_shared<LuaFunctionWrapper>(debug_setuservalue));
-    debug_lib->set("traceback", std::make_shared<LuaFunctionWrapper>(debug_traceback));
-    debug_lib->set("upvalueid", std::make_shared<LuaFunctionWrapper>(debug_upvalueid));
-    debug_lib->set("upvaluejoin", std::make_shared<LuaFunctionWrapper>(debug_upvaluejoin));
+    debug_lib->properties = {
+        {"debug", std::make_shared<LuaFunctionWrapper>(debug_debug)},
+        {"gethook", std::make_shared<LuaFunctionWrapper>(debug_gethook)},
+        {"getinfo", std::make_shared<LuaFunctionWrapper>(debug_getinfo)},
+        {"getlocal", std::make_shared<LuaFunctionWrapper>(debug_getlocal)},
+        {"getmetatable", std::make_shared<LuaFunctionWrapper>(debug_getmetatable)},
+        {"getregistry", std::make_shared<LuaFunctionWrapper>(debug_getregistry)},
+        {"getupvalue", std::make_shared<LuaFunctionWrapper>(debug_getupvalue)},
+        {"getuservalue", std::make_shared<LuaFunctionWrapper>(debug_getuservalue)},
+        {"sethook", std::make_shared<LuaFunctionWrapper>(debug_sethook)},
+        {"setlocal", std::make_shared<LuaFunctionWrapper>(debug_setlocal)},
+        {"setmetatable", std::make_shared<LuaFunctionWrapper>(debug_setmetatable)},
+        {"setupvalue", std::make_shared<LuaFunctionWrapper>(debug_setupvalue)},
+        {"setuservalue", std::make_shared<LuaFunctionWrapper>(debug_setuservalue)},
+        {"traceback", std::make_shared<LuaFunctionWrapper>(debug_traceback)},
+        {"upvalueid", std::make_shared<LuaFunctionWrapper>(debug_upvalueid)},
+        {"upvaluejoin", std::make_shared<LuaFunctionWrapper>(debug_upvaluejoin)}
+    };
 
     return debug_lib;
 }

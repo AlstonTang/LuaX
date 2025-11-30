@@ -14,7 +14,7 @@
 
 // --- Helper Functions ---
 
-std::string get_string(const LuaValue& v) {
+inline std::string get_string(const LuaValue& v) {
     if (std::holds_alternative<std::string>(v)) {
         return std::get<std::string>(v);
     } else if (std::holds_alternative<double>(v)) {
@@ -70,9 +70,8 @@ std::string lua_pattern_to_regex(const std::string& lua_pat) {
                     if (!isalnum(next)) {
                         ss << "\\" << next;
                     } else {
-                         // Unknown class, treat as literal? Lua throws error usually, 
-                         // but for this simple wrapper we might just treat as literal char
-                         ss << next;
+                        // Unknown class, treat as literal
+                        ss << next;
                     }
                     break;
             }
@@ -88,14 +87,12 @@ std::string lua_pattern_to_regex(const std::string& lua_pat) {
             in_bracket = (c == '[');
             ss << c;
         } else if (strchr("\\|{}?+*", c)) { 
-            // These are Regex magic chars but Lua literals (mostly). 
-            // Lua uses + and ? and * same as regex. 
-            // But Lua treats | { } \ as literals.
-            if (strchr("|{}\\^$", c)) { // regex specials that are literals in Lua (except ^$ which are anchors)
+            // Escape regex special chars that are literals in Lua
+            if (strchr("|{}\\^$", c)) {
                 if (in_bracket) ss << c;
                 else ss << "\\" << c;
             } else {
-                // * + ? are same in Lua
+                // * + ? are same in Lua and regex
                 ss << c;
             }
         } else {
@@ -371,9 +368,7 @@ std::vector<LuaValue> string_gsub(std::shared_ptr<LuaObject> args) {
         if (std::holds_alternative<std::string>(repl_val)) {
             // String replacement with % capture support
             std::string raw_repl = std::get<std::string>(repl_val);
-            // We need to perform our own substitution because regex_replace expects $ not %
             std::string cpp_repl = lua_repl_to_regex(raw_repl);
-            // Use match.format to handle the $ substitution
             result.append(match.format(cpp_repl)); 
         } 
         else if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(repl_val)) {
@@ -410,7 +405,7 @@ std::vector<LuaValue> string_gsub(std::shared_ptr<LuaObject> args) {
         last_pos = match.position(0) + match.length(0);
         matches++;
         
-        // Handle empty match infinite loop prevention (Lua semantics)
+        // Prevent infinite loop on empty matches
         if (match.length(0) == 0) {
             if (last_pos < s.length()) {
                 result += s[last_pos];
@@ -595,22 +590,24 @@ std::vector<LuaValue> string_upper(std::shared_ptr<LuaObject> args) {
 
 std::shared_ptr<LuaObject> create_string_library() {
     auto lib = std::make_shared<LuaObject>();
-    lib->set("byte", std::make_shared<LuaFunctionWrapper>(string_byte));
-    lib->set("char", std::make_shared<LuaFunctionWrapper>(string_char));
-    lib->set("dump", std::make_shared<LuaFunctionWrapper>(string_dump));
-    lib->set("find", std::make_shared<LuaFunctionWrapper>(string_find));
-    lib->set("format", std::make_shared<LuaFunctionWrapper>(string_format));
-    lib->set("gmatch", std::make_shared<LuaFunctionWrapper>(string_gmatch));
-    lib->set("gsub", std::make_shared<LuaFunctionWrapper>(string_gsub));
-    lib->set("len", std::make_shared<LuaFunctionWrapper>(string_len));
-    lib->set("lower", std::make_shared<LuaFunctionWrapper>(string_lower));
-    lib->set("match", std::make_shared<LuaFunctionWrapper>(string_match));
-    lib->set("pack", std::make_shared<LuaFunctionWrapper>(string_pack));
-    lib->set("packsize", std::make_shared<LuaFunctionWrapper>(string_packsize));
-    lib->set("rep", std::make_shared<LuaFunctionWrapper>(string_rep));
-    lib->set("reverse", std::make_shared<LuaFunctionWrapper>(string_reverse));
-    lib->set("sub", std::make_shared<LuaFunctionWrapper>(string_sub));
-    lib->set("unpack", std::make_shared<LuaFunctionWrapper>(string_unpack));
-    lib->set("upper", std::make_shared<LuaFunctionWrapper>(string_upper));
+    lib->properties = {
+        {"byte", std::make_shared<LuaFunctionWrapper>(string_byte)},
+        {"char", std::make_shared<LuaFunctionWrapper>(string_char)},
+        {"dump", std::make_shared<LuaFunctionWrapper>(string_dump)},
+        {"find", std::make_shared<LuaFunctionWrapper>(string_find)},
+        {"format", std::make_shared<LuaFunctionWrapper>(string_format)},
+        {"gmatch", std::make_shared<LuaFunctionWrapper>(string_gmatch)},
+        {"gsub", std::make_shared<LuaFunctionWrapper>(string_gsub)},
+        {"len", std::make_shared<LuaFunctionWrapper>(string_len)},
+        {"lower", std::make_shared<LuaFunctionWrapper>(string_lower)},
+        {"match", std::make_shared<LuaFunctionWrapper>(string_match)},
+        {"pack", std::make_shared<LuaFunctionWrapper>(string_pack)},
+        {"packsize", std::make_shared<LuaFunctionWrapper>(string_packsize)},
+        {"rep", std::make_shared<LuaFunctionWrapper>(string_rep)},
+        {"reverse", std::make_shared<LuaFunctionWrapper>(string_reverse)},
+        {"sub", std::make_shared<LuaFunctionWrapper>(string_sub)},
+        {"unpack", std::make_shared<LuaFunctionWrapper>(string_unpack)},
+        {"upper", std::make_shared<LuaFunctionWrapper>(string_upper)}
+    };
     return lib;
 }

@@ -19,9 +19,6 @@ LuaCoroutine::~LuaCoroutine() {
     {
         std::unique_lock<std::mutex> lock(mtx);
         if (status != Status::DEAD) {
-            // If destroyed while running or suspended, we might need to detach or join
-            // For simplicity, if it's not dead, we detach.
-            // In a real implementation, we might want to signal it to exit.
             worker.detach();
         } else {
             if (worker.joinable()) {
@@ -193,15 +190,7 @@ std::vector<LuaValue> coroutine_status(std::shared_ptr<LuaObject> args) {
 
 std::vector<LuaValue> coroutine_running(std::shared_ptr<LuaObject> args) {
     if (current_coroutine) {
-        // We need a shared_ptr to the current coroutine.
-        // Since LuaCoroutine inherits from enable_shared_from_this, we can get it.
-        // However, current_coroutine is a raw pointer.
-        // We should probably pass shared_ptr around or use shared_from_this if we have it.
-        // But we don't have easy access to the shared_ptr from the raw pointer unless we store it.
-        // For now, let's return nil and true (is_main) if null, or the coroutine object.
-        // To do this safely, we might need to store the shared_ptr in the thread local storage or similar.
-        // Or just accept that we can't easily return the shared_ptr from the raw pointer here without more infrastructure.
-        // Let's return nil for now if we can't get the shared_ptr.
+        // Cannot easily return shared_ptr from raw pointer without more infrastructure
         return {std::monostate{}, false}; 
     }
     return {std::monostate{}, true}; // Main thread
@@ -239,11 +228,9 @@ std::vector<LuaValue> coroutine_isyieldable(std::shared_ptr<LuaObject> args) {
 }
 
 std::vector<LuaValue> coroutine_close(std::shared_ptr<LuaObject> args) {
-     LuaValue val = args->get("1");
+    LuaValue val = args->get("1");
     if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {
-        // In our simple model, we can't easily force-close a thread blocked on CV.
-        // But if it's suspended, we can maybe signal it to exit?
-        // For now, stub it.
+        // Cannot force-close a thread blocked on CV in this implementation
         return {true};
     }
     return {false, "invalid thread"};
@@ -252,14 +239,16 @@ std::vector<LuaValue> coroutine_close(std::shared_ptr<LuaObject> args) {
 std::shared_ptr<LuaObject> create_coroutine_library() {
     auto coroutine_lib = std::make_shared<LuaObject>();
 
-    coroutine_lib->set("create", std::make_shared<LuaFunctionWrapper>(coroutine_create));
-    coroutine_lib->set("resume", std::make_shared<LuaFunctionWrapper>(coroutine_resume));
-    coroutine_lib->set("yield", std::make_shared<LuaFunctionWrapper>(coroutine_yield));
-    coroutine_lib->set("status", std::make_shared<LuaFunctionWrapper>(coroutine_status));
-    coroutine_lib->set("running", std::make_shared<LuaFunctionWrapper>(coroutine_running));
-    coroutine_lib->set("wrap", std::make_shared<LuaFunctionWrapper>(coroutine_wrap));
-    coroutine_lib->set("isyieldable", std::make_shared<LuaFunctionWrapper>(coroutine_isyieldable));
-    coroutine_lib->set("close", std::make_shared<LuaFunctionWrapper>(coroutine_close));
+    coroutine_lib->properties = {
+        {"create", std::make_shared<LuaFunctionWrapper>(coroutine_create)},
+        {"resume", std::make_shared<LuaFunctionWrapper>(coroutine_resume)},
+        {"yield", std::make_shared<LuaFunctionWrapper>(coroutine_yield)},
+        {"status", std::make_shared<LuaFunctionWrapper>(coroutine_status)},
+        {"running", std::make_shared<LuaFunctionWrapper>(coroutine_running)},
+        {"wrap", std::make_shared<LuaFunctionWrapper>(coroutine_wrap)},
+        {"isyieldable", std::make_shared<LuaFunctionWrapper>(coroutine_isyieldable)},
+        {"close", std::make_shared<LuaFunctionWrapper>(coroutine_close)}
+    };
 
     return coroutine_lib;
 }

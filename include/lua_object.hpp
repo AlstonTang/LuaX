@@ -40,18 +40,40 @@ extern std::shared_ptr<LuaObject> _G;
 
 // Global helper functions
 void print_value(const LuaValue& value);
-double get_double(const LuaValue& value);
-long long get_long_long(const LuaValue& value);
+inline double get_double(const LuaValue& value) {
+    if (std::holds_alternative<double>(value)) {
+        return std::get<double>(value);
+    } else if (std::holds_alternative<long long>(value)) {
+        return static_cast<double>(std::get<long long>(value));
+    } else if (std::holds_alternative<std::string>(value)) {
+        try {
+            return std::stod(std::get<std::string>(value));
+        } catch (...) {
+            // Fall through to error
+        }
+    }
+    throw std::runtime_error("Type error: expected number.");
+}
+
+inline long long get_long_long(const LuaValue& value) {
+    if (std::holds_alternative<long long>(value)) {
+        return std::get<long long>(value);
+    } else if (std::holds_alternative<double>(value)) {
+        return static_cast<long long>(std::get<double>(value));
+    } else if (std::holds_alternative<std::string>(value)) {
+        try {
+            return std::stoll(std::get<std::string>(value));
+        } catch (...) {
+            // Fall through to error
+        }
+    }
+    throw std::runtime_error("Type error: expected integer.");
+}
+
 inline std::shared_ptr<LuaObject> get_object(const LuaValue& value) {
     if (std::holds_alternative<std::shared_ptr<LuaObject>>(value)) {
         return std::get<std::shared_ptr<LuaObject>>(value);
     }
-    // Helper to get type name (needs to be available here or forward declared)
-    // For now, just throw a generic message but try to include type info if possible, 
-    // or we can move get_lua_type_name to header or make it inline.
-    // Since we can't easily move get_lua_type_name here without circular deps or code duplication,
-    // let's just print to stderr for debugging.
-    // actually, let's just throw a slightly different message for each type to identify it.
     if (std::holds_alternative<std::monostate>(value)) throw std::runtime_error("Type error: expected table or userdata, got nil.");
     if (std::holds_alternative<double>(value)) throw std::runtime_error("Type error: expected table or userdata, got number.");
     if (std::holds_alternative<long long>(value)) throw std::runtime_error("Type error: expected table or userdata, got integer.");
@@ -88,7 +110,11 @@ std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<L
 LuaValue lua_get_member(const LuaValue& base, const LuaValue& key);
 LuaValue lua_get_length(const LuaValue& val);
 
-bool is_lua_truthy(const LuaValue& val);
+inline bool is_lua_truthy(const LuaValue& val) {
+    if (std::holds_alternative<std::monostate>(val)) return false;
+    if (std::holds_alternative<bool>(val)) return std::get<bool>(val);
+    return true;
+}
 
 bool operator<=(const LuaValue& lhs, const LuaValue& rhs);
 

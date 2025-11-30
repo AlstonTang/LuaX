@@ -55,17 +55,11 @@ std::vector<LuaValue> table_sort(std::shared_ptr<LuaObject> args) {
                 std::vector<LuaValue> result_vec = comp_func->func(comp_args);
                 return !result_vec.empty() && is_lua_truthy(result_vec[0]);
             } else {
-                // Default comparison: a < b
                 return lua_less_than(a.second, b.second);
             }
         });
 
-    // Re-insert sorted elements into the table (array part only)
-    // Note: This implementation only sorts the existing integer keys. 
-    // Standard Lua sorts 1..n. Here we sort whatever integer keys exist, which might be sparse.
-    // For a proper implementation we should probably sort 1..n.
-    // Let's stick to 1..n for correctness with standard Lua.
-    
+    // Sort 1..n for correctness with standard Lua
     LuaValue len_val = lua_get_length(args->get("1"));
     long long n = get_long_long(len_val);
     
@@ -100,16 +94,8 @@ std::vector<LuaValue> table_pack(std::shared_ptr<LuaObject> args) {
     long long n = 0;
     for (int i = 1; ; ++i) {
         LuaValue val = args->get(std::to_string(i));
+        // Check if argument exists (handles nil values within args)
         if (std::holds_alternative<std::monostate>(val)) {
-            // Check if the next argument is also nil, to handle actual nil values vs end of args
-            // Actually args passed to this function are "1", "2", etc.
-            // We need to know how many args were passed. 
-            // The args object is a LuaObject, but it doesn't store 'n'.
-            // We'll iterate until we find a gap? No, nil is valid in pack.
-            // We rely on the fact that our translator passes all args.
-            // But we don't know the count. 
-            // Hack: check up to a reasonable limit or check if key exists in args->properties?
-            // args->properties keys are strings "1", "2"...
             if (!args->properties.count(std::to_string(i)) && !args->array_properties.count(i)) {
                  break;
             }
@@ -249,13 +235,15 @@ std::vector<LuaValue> table_remove(std::shared_ptr<LuaObject> args) {
 std::shared_ptr<LuaObject> create_table_library() {
     auto table_lib = std::make_shared<LuaObject>();
 
-    table_lib->set("concat", std::make_shared<LuaFunctionWrapper>(table_concat));
-    table_lib->set("insert", std::make_shared<LuaFunctionWrapper>(table_insert));
-    table_lib->set("move", std::make_shared<LuaFunctionWrapper>(table_move));
-    table_lib->set("pack", std::make_shared<LuaFunctionWrapper>(table_pack));
-    table_lib->set("remove", std::make_shared<LuaFunctionWrapper>(table_remove));
-    table_lib->set("sort", std::make_shared<LuaFunctionWrapper>(table_sort));
-    table_lib->set("unpack", std::make_shared<LuaFunctionWrapper>(table_unpack));
+    table_lib->properties = {
+        {"concat", std::make_shared<LuaFunctionWrapper>(table_concat)},
+        {"insert", std::make_shared<LuaFunctionWrapper>(table_insert)},
+        {"move", std::make_shared<LuaFunctionWrapper>(table_move)},
+        {"pack", std::make_shared<LuaFunctionWrapper>(table_pack)},
+        {"remove", std::make_shared<LuaFunctionWrapper>(table_remove)},
+        {"sort", std::make_shared<LuaFunctionWrapper>(table_sort)},
+        {"unpack", std::make_shared<LuaFunctionWrapper>(table_unpack)}
+    };
 
     return table_lib;
 }
