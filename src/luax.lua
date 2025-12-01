@@ -153,7 +153,7 @@ local function generate_and_run_makefile(output_path, generated_basenames, dep_g
     -- 2. clean_generated only removes the objects created from Lua translation.
     local content = {
         "CXX = clang++",
-        "CXXFLAGS = -std=c++17 -I../include -g -O1",
+        "CXXFLAGS = -std=c++17 -I../include -O2",
         "LDFLAGS = -lstdc++fs",
         "TARGET = ../" .. output_path,
         "",
