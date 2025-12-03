@@ -131,4 +131,10 @@ bool lua_greater_equals(const LuaValue& a, const LuaValue& b);
 
 LuaValue lua_concat(const LuaValue& a, const LuaValue& b);
 
+
+inline LuaValue get_return_value(std::vector<LuaValue> results, size_t index) {
+    if (index < results.size()) return results[index];
+    return std::monostate{};
+}
+
 #endif // LUA_OBJECT_HPP

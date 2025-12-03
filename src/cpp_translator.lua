@@ -278,6 +278,20 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
             local num_vars = #var_list_node.ordered_children
             local num_exprs = expr_list_node and #expr_list_node.ordered_children or 0
 
+            -- Optimization: Single variable, single function call
+            if num_vars == 1 and num_exprs == 1 then
+                local expr_node = expr_list_node.ordered_children[1]
+                if expr_node.type == "call_expression" or expr_node.type == "method_call_expression" then
+                    local var_node = var_list_node.ordered_children[1]
+                    local var_name = sanitize_cpp_identifier(var_node.identifier)
+                    local call_code = translate_node_to_cpp(expr_node, for_header, false, current_module_object_name, depth + 1)
+                    
+                    cpp_code = cpp_code .. "LuaValue " .. var_name .. " = get_return_value(" .. call_code .. ", 0);\n"
+                    declared_variables[var_name] = true
+                    return cpp_code
+                end
+            end
+
             local function_call_results_var = "func_results_" .. get_unique_id()
             local has_function_call_expr = false
             local first_call_expr_node = nil
@@ -325,6 +339,43 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 
             local num_vars = #var_list_node.ordered_children
             local num_exprs = #expr_list_node.ordered_children
+
+            -- Optimization: Single variable, single function call
+            if num_vars == 1 and num_exprs == 1 then
+                local expr_node = expr_list_node.ordered_children[1]
+                if expr_node.type == "call_expression" or expr_node.type == "method_call_expression" then
+                    local var_node = var_list_node.ordered_children[1]
+                    local call_code = translate_node_to_cpp(expr_node, for_header, false, current_module_object_name, depth + 1)
+                    local value_code = "get_return_value(" .. call_code .. ", 0)"
+
+                    if var_node.type == "member_expression" then
+                        local base_node = var_node.ordered_children[1]
+                        local member_node = var_node.ordered_children[2]
+                        local translated_base = get_single_lua_value_cpp_code(base_node, for_header, false, current_module_object_name)
+                        local member_name = member_node.identifier
+                        cpp_code = cpp_code .. "get_object(" .. translated_base .. ")->set(\"" .. member_name .. "\", " .. value_code .. ");\n"
+                    elseif var_node.type == "table_index_expression" then
+                        local base_node = var_node.ordered_children[1]
+                        local index_node = var_node.ordered_children[2]
+                        local translated_base = get_single_lua_value_cpp_code(base_node, for_header, false, current_module_object_name)
+                        local translated_index = get_single_lua_value_cpp_code(index_node, for_header, false, current_module_object_name)
+                        cpp_code = cpp_code .. "get_object(" .. translated_base .. ")->set_item(" .. translated_index .. ", " .. value_code .. ");\n"
+                    else
+                        local var_code = translate_node_to_cpp(var_node, for_header, false, current_module_object_name, depth + 1)
+                        local declaration_prefix = ""
+                        if var_node.type == "identifier" and not declared_variables[var_node.identifier] then
+                            if is_main_script then 
+                                declaration_prefix = "LuaValue "
+                            else
+                                module_global_vars[var_node.identifier] = true
+                            end
+                            declared_variables[var_node.identifier] = true
+                        end
+                        cpp_code = cpp_code .. declaration_prefix .. var_code .. " = " .. value_code .. ";\n"
+                    end
+                    return cpp_code
+                end
+            end
 
             local function_call_results_var = "func_results_" .. tostring(os.time()) .. "_" .. get_unique_id()
             local has_function_call_expr = false
@@ -859,10 +910,14 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
     header = header .. "#include \"init.hpp\"\n"
     
     if is_main_script then
-        local main_function_start = "int main(int argc, char* argv[]) {\n" ..
-                                    "init_G(argc, argv);\n"
-        local main_function_end = "\n    return 0;\n}"
-        return header .. main_function_start .. generated_code .. main_function_end
+        if for_header then
+            return header .. "\n// Main script header\n"
+        else
+            local main_function_start = "int main(int argc, char* argv[]) {\n" ..
+                                        "init_G(argc, argv);\n"
+            local main_function_end = "\n    return 0;\n}"
+            return header .. main_function_start .. generated_code .. main_function_end
+        end
     else 
         local namespace_start = "namespace " .. file_name .. " {\n"
         local namespace_end = "\n} // namespace " .. file_name .. "\n"

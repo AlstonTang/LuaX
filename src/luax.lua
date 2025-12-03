@@ -10,9 +10,10 @@ package.path = package.path .. ";" .. script_dir .. "../?.lua;" .. script_dir ..
 
 local cpp_translator = require("src.cpp_translator")
 local translator = require("src.translator")
+local formatter = require("src.formatter")
 
 -- Argument Parsing
-local usage = "Usage: lua5.4 scripts/luax.lua [-k|--keep] <path_to_src_lua_file> <path_to_out_file>"
+local usage = "Usage: lua5.4 src/luax.lua [-k|--keep] <path_to_src_lua_file> <path_to_out_file>"
 local input_lua_file = nil
 local path_to_out_file = nil
 local keep_files = false
@@ -42,7 +43,7 @@ local function run_command(command_str, error_message)
     end
 end
 
-local function translate_file(lua_file_path, output_file_name, is_main_entry)
+local function translate_file(lua_file_path, output_file_name, is_main_entry, should_format)
     print("Translating " .. lua_file_path .. "...")
     local file = io.open(lua_file_path, "r")
     if not file then
@@ -68,6 +69,12 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry)
 
     local cpp_output_path = "build/" .. output_file_name .. ".cpp"
     local hpp_output_path = "build/" .. output_file_name .. ".hpp"
+
+    -- Optionally format the code if keep_files is enabled
+    if should_format then
+        cpp_code = formatter.format_cpp_code(cpp_code)
+        hpp_code = formatter.format_cpp_code(hpp_code)
+    end
 
     local cpp_file = io.open(cpp_output_path, "w")
     if cpp_file then
@@ -153,8 +160,8 @@ local function generate_and_run_makefile(output_path, generated_basenames, dep_g
     -- 2. clean_generated only removes the objects created from Lua translation.
     local content = {
         "CXX = clang++",
-        "CXXFLAGS = -std=c++17 -I../include -O2",
-        "LDFLAGS = -lstdc++fs",
+        "CXXFLAGS = -std=c++17 -I../include -Os",
+        "LDFLAGS = -lstdc++fs -s",
         "TARGET = ../" .. output_path,
         "",
         "LIB_SRCS = " .. lib_srcs_str,
@@ -248,7 +255,7 @@ local generated_basenames = {}
 for file_path, output_name in pairs(files_to_translate) do
     table.insert(generated_basenames, output_name)
     local is_main_entry = (file_path == input_lua_file)
-    translate_file(file_path, output_name, is_main_entry)
+    translate_file(file_path, output_name, is_main_entry, keep_files)
 end
 
 generate_and_run_makefile(path_to_out_file, generated_basenames, dep_graph, files_to_translate)
