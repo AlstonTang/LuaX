@@ -480,10 +480,10 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 				return "lua_greater_equals(" .. left .. ", " .. right .. ")"
 			elseif operator == "and" then
 				local id = get_unique_id()
-				return "( [=]() mutable -> LuaValue { const auto left_and_val_" .. id .. " = " .. left .. "; return is_lua_truthy(left_and_val_" .. id .. ") ? (" .. right .. ") : left_and_val_" .. id .. "; } )()"
+				return "( [=]() mutable -> LuaValue { const auto left_and_val_" .. id .. " = " .. left .. "; return is_lua_truthy(left_and_val_" .. id .. ") ? LuaValue(" .. right .. ") : LuaValue(left_and_val_" .. id .. "); } )()"
 			elseif operator == "or" then
 				local id = get_unique_id()
-				return "( [=]() mutable -> LuaValue { const auto left_or_val_" .. id .. " = " .. left .. "; return is_lua_truthy(left_or_val_" .. id .. ") ? left_or_val_" .. id .. " : (" .. right .. "); } )()"
+				return "( [=]() mutable -> LuaValue { const auto left_or_val_" .. id .. " = " .. left .. "; return is_lua_truthy(left_or_val_" .. id .. ") ? LuaValue(left_or_val_" .. id .. ") : LuaValue(" .. right .. "); } )()"
 			elseif operator == ".." then
 				return "lua_concat(" .. left .. ", " .. right .. ")"
 			else
