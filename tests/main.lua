@@ -167,3 +167,14 @@ print("getmetatable(my_table_with_mt):", getmetatable(my_table_with_mt))
 
 -- error tests
 pcall(function() error("This is an error message") end)
+
+-- Lua 5.4 floor division and bitwise operator tests
+print("Floor division: 7 // 3 =", 7 // 3)  -- Expected: 2
+print("Floor division: -7 // 3 =", -7 // 3)  -- Expected: -3
+print("Bitwise AND: 7 & 3 =", 7 & 3)  -- Expected: 3
+print("Bitwise OR: 7 | 8 =", 7 | 8)  -- Expected: 15
+print("Bitwise XOR: 7 ~ 3 =", 7 ~ 3)  -- Expected: 4
+print("Unary NOT: ~0 =", ~0)  -- Expected: -1
+print("Unary NOT: ~(-1) =", ~(-1))  -- Expected: 0
+print("Left shift: 7 << 2 =", 7 << 2)  -- Expected: 28
+print("Right shift: 28 >> 2 =", 28 >> 2)  -- Expected: 7

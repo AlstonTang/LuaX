@@ -20,7 +20,7 @@ std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<L
 // Internal Helper Functions
 // ==========================================
 
-inline bool is_integer_key(double d, long long& out) {
+bool is_integer_key(double d, long long& out) {
     long long l = static_cast<long long>(d);
     if (d == static_cast<double>(l)) {
         out = l;
@@ -29,7 +29,7 @@ inline bool is_integer_key(double d, long long& out) {
     return false;
 }
 
-inline std::string value_to_key_string(const LuaValue& key) {
+std::string value_to_key_string(const LuaValue& key) {
     if (std::holds_alternative<std::string>(key)) {
         return std::get<std::string>(key);
     }

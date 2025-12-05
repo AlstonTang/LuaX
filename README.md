@@ -30,15 +30,16 @@ LuaX is a robust transpiler that converts Lua 5.4 source code into C++17, allowi
 To transpile and compile a Lua script (e.g., `tests/main.lua`):
 
 ```bash
-lua5.4 src/luax.lua tests/main.lua build/my_program
+lua5.4 src/luax.lua -k tests/main.lua build/my_program
 ```
 
 This command will:
 1.  Transpile `tests/main.lua` (and its dependencies) to C++ in the `build/` directory.
 2.  Compile the generated C++ code and the LuaX runtime library.
 3.  Produce an executable named `build/my_program`.
+*   Note that the `-k` flag means we preserve the transpiled code. In the future, we may make the compiler emit clean, thread-safe, memory-safe C++. You can substitute `-k` with `--keep`, or you can omit it entirely if you do not want to see the transpiled code.
 
-Run the executable:
+Then, simply run the executable:
 
 ```bash
 ./build/my_program
@@ -65,6 +66,7 @@ LuaX works by traversing the Lua AST (Abstract Syntax Tree) and generating equiv
 *   **Dynamic Loading**: `load`, `loadfile`, and `dofile` are not supported because the C++ code is compiled ahead-of-time. Use `require` for static dependencies.
 *   **Garbage Collection**: The runtime uses C++ smart pointers (`std::shared_ptr`) for memory management, which differs from Lua's garbage collector (e.g., reference counting vs. mark-and-sweep). Cycle detection is not currently implemented.
 *   **Coroutines**: Implemented using C++ `std::thread`. While functional, this is a heavier implementation than Lua's native coroutines and maps 1:1 to system threads.
+*   **Speed**: Currently not very fast (yet). The intent is to ensure feature-compatability before we go in and actually make it faster.
 
 ## License
 

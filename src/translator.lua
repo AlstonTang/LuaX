@@ -60,11 +60,18 @@ local precedence = {
     ['or'] = 1,
     ['and'] = 2,
     ['<'] = 3, ['>'] = 3, ['<='] = 3, ['>='] = 3, ['~='] = 3, ['=='] = 3,
-    ['..'] = 4,
-    ['+'] = 5,
-    ['-'] = 5,
-    ['*'] = 6,
-    ['/'] = 6,
+    ['|'] = 4,   -- bitwise OR
+    ['~'] = 5,   -- bitwise XOR (binary)
+    ['&'] = 6,   -- bitwise AND
+    ['<<'] = 7, ['>>'] = 7,  -- bitwise shifts
+    ['..'] = 8,
+    ['+'] = 9,
+    ['-'] = 9,
+    ['*'] = 10,
+    ['/'] = 10,
+    ['//'] = 10,  -- floor division
+    ['%'] = 10,   -- modulo
+    ['^'] = 12,   -- exponentiation (right associative, highest)
 }
 
 function Parser:parse_function_call_or_member_access(base_node)
@@ -270,7 +277,7 @@ function Parser:parse_primary_expression()
     local node = nil
     if token.type == "operator" and token.value == '-' then -- Handle unary minus
         self.token_position = self.token_position + 1 -- consume '-'
-        local operand = self:parse_expression(8) -- The operand of the unary minus
+        local operand = self:parse_expression(11) -- Unary ops have high precedence
         if not operand then 
             local next_tok = self:peek()
             local val = next_tok and next_tok.value or "nil"
@@ -281,15 +288,19 @@ function Parser:parse_primary_expression()
         node:AddChildren(operand)
     elseif token.type == "operator" and token.value == 'not' then -- Handle unary not
         self.token_position = self.token_position + 1 -- consume 'not'
-        local operand = self:parse_expression(8) -- The operand of the unary not
+        local operand = self:parse_expression(11) -- Unary ops have high precedence
         if not operand then error("Expected expression after unary not") end
         node = Node:new("unary_expression", "not")
         node:AddChildren(operand)
-        node = Node:new("unary_expression", "not")
+    elseif token.type == "operator" and token.value == '~' then -- Handle unary bitwise NOT
+        self.token_position = self.token_position + 1 -- consume '~'
+        local operand = self:parse_expression(11) -- Unary ops have high precedence
+        if not operand then error("Expected expression after unary ~") end
+        node = Node:new("unary_expression", "~")
         node:AddChildren(operand)
     elseif token.type == "operator" and token.value == '#' then -- Handle unary length
         self.token_position = self.token_position + 1 -- consume '#'
-        local operand = self:parse_expression(8)
+        local operand = self:parse_expression(11)
         if not operand then error("Expected expression after unary #") end
         node = Node:new("unary_expression", "#")
         node:AddChildren(operand)

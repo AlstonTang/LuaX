@@ -13,9 +13,12 @@ constexpr double PI = 3.14159265358979323846;
 std::default_random_engine generator;
 
 // Helper function to get a number from a LuaValue
-inline double get_number(const LuaValue& v) {
+double get_number(const LuaValue& v) {
     if (std::holds_alternative<double>(v)) {
         return std::get<double>(v);
+    }
+    if (std::holds_alternative<long long>(v)) {
+        return static_cast<double>(std::get<long long>(v));
     }
     return 0.0;
 }

@@ -14,7 +14,7 @@
 
 // --- Helper Functions ---
 
-inline std::string get_string(const LuaValue& v) {
+std::string get_string(const LuaValue& v) {
     if (std::holds_alternative<std::string>(v)) {
         return std::get<std::string>(v);
     } else if (std::holds_alternative<double>(v)) {
@@ -319,14 +319,18 @@ std::vector<LuaValue> string_gmatch(std::shared_ptr<LuaObject> args) {
         throw std::runtime_error("bad pattern: " + std::string(e.what()));
     }
 
-    auto it_ptr = std::make_shared<std::sregex_iterator>(s.begin(), s.end(), *re);
+    // Capture s in a shared_ptr to keep it alive
+    auto s_ptr = std::make_shared<std::string>(s);
+    auto it_ptr = std::make_shared<std::sregex_iterator>(s_ptr->begin(), s_ptr->end(), *re);
     auto end_ptr = std::make_shared<std::sregex_iterator>();
 
-    auto func = [it_ptr, end_ptr](std::shared_ptr<LuaObject> _) -> std::vector<LuaValue> {
+    auto func = [s_ptr, re, it_ptr, end_ptr](std::shared_ptr<LuaObject> _) -> std::vector<LuaValue> {
         if (*it_ptr == *end_ptr) return {}; // nil
 
+        // Make a proper copy of the match BEFORE incrementing
         std::smatch match = **it_ptr;
         (*it_ptr)++;
+
 
         std::vector<LuaValue> res;
         if (match.size() > 1) {
@@ -337,7 +341,8 @@ std::vector<LuaValue> string_gmatch(std::shared_ptr<LuaObject> args) {
         return res;
     };
 
-    return {std::make_shared<LuaFunctionWrapper>(func)};
+    // Lua's gmatch returns the iterator function, invariant state (nil), and control variable (nil)
+    return {std::make_shared<LuaFunctionWrapper>(func), std::monostate{}, std::monostate{}};
 }
 
 // string.gsub
