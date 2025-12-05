@@ -5,9 +5,7 @@
 
 // Global pointer to the currently running coroutine
 // nullptr means the main thread is running
-static LuaCoroutine* current_coroutine = nullptr;
-
-// --- LuaCoroutine Implementation ---
+thread_local LuaCoroutine* current_coroutine = nullptr;
 
 LuaCoroutine::LuaCoroutine(std::shared_ptr<LuaFunctionWrapper> f) 
     : func(f), status(Status::SUSPENDED), started(false) {

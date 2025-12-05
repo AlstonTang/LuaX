@@ -45,10 +45,10 @@ std::vector<LuaValue> package_searchpath(std::shared_ptr<LuaObject> args) {
 
     // If not found, return nil and a message with tried paths
     std::string error_msg = "no file '" + name + "' in path:\n\t" +
-                            std::accumulate(tried_paths.begin(), tried_paths.end(), std::string(),
-                                            [](const std::string& a, const std::string& b) {
-                                                return a + "\t" + b + "\n";
-                                            });
+        std::accumulate(tried_paths.begin(), tried_paths.end(), std::string(),
+                        [](const std::string& a, const std::string& b) {
+                            return a + "\t" + b + "\n";
+                        });
     return {std::monostate{}, error_msg}; // Return nil, error message would be second return value in Lua
 }
 

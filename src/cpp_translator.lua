@@ -64,14 +64,13 @@ function CppTranslator.reset()
 	for k in pairs(module_global_vars) do module_global_vars[k] = nil end
 end
 
-function CppTranslator.translate(ast_root, file_name, is_main_script) -- ADDED is_main_script parameter
+function CppTranslator.translate(ast_root, file_name, is_main_script)
 	CppTranslator.reset()
 	
 	-- Pass is_main_script down
 	return CppTranslator.translate_recursive(ast_root, file_name, false, nil, is_main_script)
 end
 
--- Modified Signature to include is_main_script
 -- Modified Signature to include is_main_script
 function CppTranslator.translate_recursive(ast_root, file_name, for_header, current_module_object_name, is_main_script)
 	local function translate_node_to_cpp(node, for_header, is_lambda, current_module_object_name, depth)

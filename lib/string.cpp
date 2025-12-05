@@ -129,8 +129,6 @@ std::string lua_repl_to_regex(const std::string& lua_repl) {
     return ss.str();
 }
 
-// --- String Library Functions ---
-
 // string.byte
 std::vector<LuaValue> string_byte(std::shared_ptr<LuaObject> args) {
     std::string s = get_string(args->get("1"));

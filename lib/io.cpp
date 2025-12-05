@@ -30,8 +30,6 @@ auto make_file_method = [](auto method_ptr) {
     });
 };
 
-// --- LuaFile Implementation ---
-
 // LuaFile constructor: Opens the file and registers all methods on itself.
 LuaFile::LuaFile(const std::string& filename, const std::string& mode) : is_popen(false) {
     file_handle = std::fopen(filename.c_str(), mode.c_str());
