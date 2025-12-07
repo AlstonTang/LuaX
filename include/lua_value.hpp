@@ -13,14 +13,14 @@ class LuaCoroutine;
 
 // Define LuaValue using forward declarations for recursive types
 using LuaValue = std::variant<
-    std::monostate, // for nil
-    bool,
-    double,
-    long long,
-    std::string,
-    std::shared_ptr<LuaObject>,
-    std::shared_ptr<LuaFunctionWrapper>,
-    std::shared_ptr<LuaCoroutine>
+	std::monostate, // for nil
+	bool,
+	double,
+	long long,
+	std::string,
+	std::shared_ptr<LuaObject>,
+	std::shared_ptr<LuaFunctionWrapper>,
+	std::shared_ptr<LuaCoroutine>
 >;
 
 #endif // LUA_VALUE_HPP
