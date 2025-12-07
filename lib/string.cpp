@@ -791,7 +791,10 @@ std::vector<LuaValue> lua_string_gsub(const LuaValue& str, const LuaValue& patte
 // --- Library Creation ---
 
 std::shared_ptr<LuaObject> create_string_library() {
-	auto lib = std::make_shared<LuaObject>();
+	static std::shared_ptr<LuaObject> lib;
+	if (lib) return lib;
+	
+	lib = std::make_shared<LuaObject>();
 	lib->properties = {
 		{"byte", std::make_shared<LuaFunctionWrapper>(string_byte)},
 		{"char", std::make_shared<LuaFunctionWrapper>(string_char)},
@@ -811,5 +814,11 @@ std::shared_ptr<LuaObject> create_string_library() {
 		{"unpack", std::make_shared<LuaFunctionWrapper>(string_unpack)},
 		{"upper", std::make_shared<LuaFunctionWrapper>(string_upper)}
 	};
+
+	// Metatable to allow string methods on string values (handled in LuaObject::get_item or global logic usually,
+	// but here we just return the library table. The metatable for string primitives is set globally or handled via special case logic.)
+	// Actually, Lua 5.4 sets the string metatable to this library table itself usually, or the __index of the string metatable points here.
+	// For now, we just return the library.
+
 	return lib;
 }

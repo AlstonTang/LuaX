@@ -428,7 +428,10 @@ std::vector<LuaValue> io_lines(std::shared_ptr<LuaObject> args) {
 // --- Library Creation ---
 
 std::shared_ptr<LuaObject> create_io_library() {
-	auto io_lib = std::make_shared<LuaObject>();
+	static std::shared_ptr<LuaObject> io_lib;
+	if (io_lib) return io_lib;
+
+	io_lib = std::make_shared<LuaObject>();
 
 	file_metatable->properties = {
 		{"close", make_file_method(&LuaFile::close)},

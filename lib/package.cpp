@@ -64,7 +64,10 @@ std::shared_ptr<LuaObject> package_preload_table = std::make_shared<LuaObject>()
 std::shared_ptr<LuaObject> package_searchers_table = std::make_shared<LuaObject>();
 
 std::shared_ptr<LuaObject> create_package_library() {
-	auto package_lib = std::make_shared<LuaObject>();
+	static std::shared_ptr<LuaObject> package_lib;
+	if (package_lib) return package_lib;
+
+	package_lib = std::make_shared<LuaObject>();
 
 	package_lib->properties = {
 		{"config", LuaValue(std::string("/\n;\n?\n!\n-\n"))},

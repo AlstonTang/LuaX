@@ -67,7 +67,10 @@ std::vector<LuaValue> debug_upvaluejoin(std::shared_ptr<LuaObject> args) {
 }
 
 std::shared_ptr<LuaObject> create_debug_library() {
-	auto debug_lib = std::make_shared<LuaObject>();
+	static std::shared_ptr<LuaObject> debug_lib;
+	if (debug_lib) return debug_lib;
+
+	debug_lib = std::make_shared<LuaObject>();
 
 	debug_lib->properties = {
 		{"debug", std::make_shared<LuaFunctionWrapper>(debug_debug)},

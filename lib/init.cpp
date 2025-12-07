@@ -2,14 +2,10 @@
 #include "debug.hpp"
 #include "coroutine.hpp"
 
-void init_G(int argc, char* argv[]) {
-	auto arg = std::make_shared<LuaObject>();
-	for (int i = 0; i < argc; i++) {
-		arg->set_item(i, std::string(argv[i]));
-	}
-
-	_G->properties = {
-		{"arg", arg},
+// Helper to create the initial global environment
+static std::shared_ptr<LuaObject> create_initial_global() {
+	auto globals = std::make_shared<LuaObject>();
+	globals->properties = {
 		{"assert", std::make_shared<LuaFunctionWrapper>(lua_assert)},
 		{"collectgarbage", std::make_shared<LuaFunctionWrapper>(lua_collectgarbage)},
 		{"dofile", std::make_shared<LuaFunctionWrapper>(lua_dofile)},
@@ -35,7 +31,7 @@ void init_G(int argc, char* argv[]) {
 		{"coroutine", create_coroutine_library()},
 		{"debug", create_debug_library()},
 		{"_VERSION", LuaValue(std::string("Lua 5.4"))},
-		{"tonumber", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
+		{"tonumber", std::make_shared<LuaFunctionWrapper>([](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
 			// tonumber implementation
 			LuaValue val = args->get("1");
 			if (std::holds_alternative<double>(val)) {
@@ -55,10 +51,10 @@ void init_G(int argc, char* argv[]) {
 			}
 			return {std::monostate{}}; // nil
 		})},
-		{"tostring", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
+		{"tostring", std::make_shared<LuaFunctionWrapper>([](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
 			return {to_cpp_string(args->get("1"))};
 		})},
-		{"type", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
+		{"type", std::make_shared<LuaFunctionWrapper>([](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
 			LuaValue val = args->get("1");
 			if (std::holds_alternative<std::monostate>(val)) return {"nil"};
 			if (std::holds_alternative<bool>(val)) return {"boolean"};
@@ -69,7 +65,7 @@ void init_G(int argc, char* argv[]) {
 			if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) return {"thread"};
 			return {"unknown"};
 		})},
-		{"getmetatable", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
+		{"getmetatable", std::make_shared<LuaFunctionWrapper>([](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
 			LuaValue val = args->get("1");
 			if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) {
 				auto obj = std::get<std::shared_ptr<LuaObject>>(val);
@@ -79,12 +75,12 @@ void init_G(int argc, char* argv[]) {
 			}
 			return {std::monostate{}}; // nil
 		})},
-		{"error", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
+		{"error", std::make_shared<LuaFunctionWrapper>([](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
 			LuaValue message = args->get("1");
 			throw std::runtime_error(to_cpp_string(message));
 			return {std::monostate{}}; // Should not be reached
 		})},
-		{"pcall", std::make_shared<LuaFunctionWrapper>([=](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
+		{"pcall", std::make_shared<LuaFunctionWrapper>([](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
 			LuaValue func_to_call = args->get("1");
 			if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(func_to_call)) {
 				auto callable_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(func_to_call);
@@ -115,4 +111,19 @@ void init_G(int argc, char* argv[]) {
 			return {false}; // Not a callable function
 		})}
 	};
+	// Define _G inside _G
+	globals->properties["_G"] = globals;
+	return globals;
+}
+
+// Global variable definition, initialized at load time
+std::shared_ptr<LuaObject> _G = create_initial_global();
+
+void init_G(int argc, char* argv[]) {
+	// Only handling dynamic arguments now
+	auto arg = std::make_shared<LuaObject>();
+	for (int i = 0; i < argc; i++) {
+		arg->set_item(i, std::string(argv[i]));
+	}
+	_G->properties["arg"] = arg;
 }

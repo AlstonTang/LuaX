@@ -226,7 +226,10 @@ std::vector<LuaValue> coroutine_close(std::shared_ptr<LuaObject> args) {
 }
 
 std::shared_ptr<LuaObject> create_coroutine_library() {
-	auto coroutine_lib = std::make_shared<LuaObject>();
+	static std::shared_ptr<LuaObject> coroutine_lib;
+	if (coroutine_lib) return coroutine_lib;
+
+	coroutine_lib = std::make_shared<LuaObject>();
 
 	coroutine_lib->properties = {
 		{"create", std::make_shared<LuaFunctionWrapper>(coroutine_create)},

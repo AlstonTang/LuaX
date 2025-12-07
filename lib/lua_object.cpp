@@ -7,7 +7,9 @@
 #include <iomanip>
 
 // Global environment instance
-std::shared_ptr<LuaObject> _G = std::make_shared<LuaObject>();
+// Global environment instance
+// _G is defined in init.cpp to ensure libraries are available during static init
+
 
 // Forward declarations
 std::string get_lua_type_name(const LuaValue& val);

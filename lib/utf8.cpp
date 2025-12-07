@@ -281,7 +281,10 @@ std::vector<LuaValue> utf8_offset(std::shared_ptr<LuaObject> args) {
 
 
 std::shared_ptr<LuaObject> create_utf8_library() {
-	auto utf8_lib = std::make_shared<LuaObject>();
+	static std::shared_ptr<LuaObject> utf8_lib;
+	if (utf8_lib) return utf8_lib;
+
+	utf8_lib = std::make_shared<LuaObject>();
 
 	utf8_lib->properties = {
 		{"char", std::make_shared<LuaFunctionWrapper>(utf8_char)},

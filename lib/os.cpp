@@ -152,7 +152,10 @@ std::vector<LuaValue> os_time(std::shared_ptr<LuaObject> args) {
 }
 
 std::shared_ptr<LuaObject> create_os_library() {
-	auto os_lib = std::make_shared<LuaObject>();
+	static std::shared_ptr<LuaObject> os_lib;
+	if (os_lib) return os_lib;
+
+	os_lib = std::make_shared<LuaObject>();
 
 	os_lib->properties = {
 		{"clock", std::make_shared<LuaFunctionWrapper>(os_clock)},

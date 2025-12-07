@@ -233,7 +233,10 @@ std::vector<LuaValue> table_remove(std::shared_ptr<LuaObject> args) {
 }
 
 std::shared_ptr<LuaObject> create_table_library() {
-	auto table_lib = std::make_shared<LuaObject>();
+	static std::shared_ptr<LuaObject> table_lib;
+	if (table_lib) return table_lib;
+
+	table_lib = std::make_shared<LuaObject>();
 
 	table_lib->properties = {
 		{"concat", std::make_shared<LuaFunctionWrapper>(table_concat)},

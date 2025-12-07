@@ -176,7 +176,10 @@ std::vector<LuaValue> math_ult(std::shared_ptr<LuaObject> args) {
 }
 
 std::shared_ptr<LuaObject> create_math_library() {
-	auto math_lib = std::make_shared<LuaObject>();
+	static std::shared_ptr<LuaObject> math_lib;
+	if (math_lib) return math_lib;
+
+	math_lib = std::make_shared<LuaObject>();
 
 	// Seed the random number generator with current time by default
 	generator.seed(std::chrono::system_clock::now().time_since_epoch().count());
