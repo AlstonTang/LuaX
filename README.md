@@ -6,14 +6,14 @@ LuaX is a robust transpiler that converts Lua 5.4 source code into C++17, allowi
 
 *   **Lua 5.4 Support**: Supports a wide range of Lua 5.4 syntax and semantics.
 *   **Standard Library**: Includes implementations for most Lua standard libraries:
-    *   `math`: Full support (trigonometry, random, etc.).
-    *   `string`: Pattern matching (regex-based), formatting, and manipulation.
-    *   `table`: Sorting, packing/unpacking, and manipulation.
-    *   `io`: File I/O, `popen`, `tmpfile`, `lines`, and more.
-    *   `os`: System interaction, date/time, and execution.
-    *   `utf8`: UTF-8 string support.
-    *   `coroutine`: **Thread-based implementation** supporting `create`, `resume`, `yield`, and `wrap`.
-    *   `package`: Basic module loading support.
+	*   `math`: Full support (trigonometry, random, etc.).
+	*   `string`: Pattern matching, formatting, and manipulation.
+	*   `table`: Sorting, packing/unpacking, and manipulation.
+	*   `io`: File I/O, `popen`, `tmpfile`, `lines`, and more.
+	*   `os`: System interaction, date/time, and execution.
+	*   `utf8`: UTF-8 string support.
+	*   `coroutine`: **Thread-based implementation** supporting `create`, `resume`, `yield`, and `wrap`.
+	*   `package`: Basic module loading support.
 *   **C++ Integration**: Generates readable C++ code that uses a custom runtime library (`LuaValue`, `LuaObject`) to emulate Lua's dynamic typing.
 *   **Standalone Executables**: Compiles your Lua scripts directly into native binaries.
 
@@ -30,13 +30,14 @@ LuaX is a robust transpiler that converts Lua 5.4 source code into C++17, allowi
 To transpile and compile a Lua script (e.g., `tests/main.lua`):
 
 ```bash
-lua5.4 src/luax.lua -k tests/main.lua build/my_program
+lua5.4 src/luax.lua -k tests/main.lua build/my_program build
 ```
 
 This command will:
 1.  Transpile `tests/main.lua` (and its dependencies) to C++ in the `build/` directory.
 2.  Compile the generated C++ code and the LuaX runtime library.
 3.  Produce an executable named `build/my_program`.
+4.  Build within the build directory 
 *   Note that the `-k` flag means we preserve the transpiled code. In the future, we may make the compiler emit clean, thread-safe, memory-safe C++. You can substitute `-k` with `--keep`, or you can omit it entirely if you do not want to see the transpiled code.
 
 Then, simply run the executable:

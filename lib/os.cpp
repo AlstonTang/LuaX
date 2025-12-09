@@ -2,13 +2,15 @@
 #include "lua_object.hpp"
 #include <chrono>
 #include <ctime>
-#include <iomanip> // For std::put_time
-#include <sstream> // For std::stringstream
-#include <cstdlib> // For system, getenv, exit
-#include <cstdio> // For remove, rename
-#include <locale> // For setlocale
-#include <unistd.h> // For mkstemp, close
-#include <vector> // For std::vector
+#include <iomanip>
+#include <sstream>
+#include <cstdlib>
+#include <cstdio>
+#include <locale>
+#include <unistd.h>
+#include <vector>
+#include <thread>
+#include <chrono>
 
 // os.execute
 std::vector<LuaValue> os_execute(std::shared_ptr<LuaObject> args) {
@@ -149,6 +151,13 @@ std::vector<LuaValue> os_clock(std::shared_ptr<LuaObject> args) {
 // os.time
 std::vector<LuaValue> os_time(std::shared_ptr<LuaObject> args) {
 	return {static_cast<double>(std::time(nullptr))};
+}
+
+// os.sleep
+std::vector<LuaValue> os_sleep(std::shared_ptr<LuaObject> args) {
+	auto duration = std::chrono::duration<double>(get_double(args->get("1")));
+    std::this_thread::sleep_for(duration);
+	return {std::monostate{}};
 }
 
 std::shared_ptr<LuaObject> create_os_library() {

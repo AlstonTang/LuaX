@@ -4,7 +4,6 @@
 #include "lua_value.hpp" // Include the new LuaValue header
 #include "lua_object.hpp" // Include LuaObject after LuaValue
 
-#include <fstream>
 #include <string>
 #include <vector>
 #include <memory>

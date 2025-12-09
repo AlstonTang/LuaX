@@ -3,7 +3,7 @@
 #include <vector>
 #include <stdexcept>
 #include <algorithm>
-#include <cmath> // For std::abs
+#include <cmath>
 
 // Helper function to encode a single Unicode codepoint to UTF-8
 std::string encode_utf8(int codepoint) {

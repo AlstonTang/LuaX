@@ -1,10 +1,10 @@
 #include "package.hpp"
 #include "lua_object.hpp"
 #include <string>
-#include <sstream> // Added for std::stringstream
-#include <fstream> // Added for std::ifstream
-#include <numeric> // Added for std::accumulate
-#include <vector> // Added for std::vector
+#include <sstream>
+#include <fstream>
+#include <numeric>
+#include <vector>
 #include <stdexcept>
 
 // package.searchpath

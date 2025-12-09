@@ -3,7 +3,7 @@ set -e
 
 # We use the existing src/luax.lua (running on lua5.4) to compile src/luax.lua itself into a C++ binary.
 # Output binary will be build/luax
-lua5.4 src/luax.lua src/luax.lua build/luax
+lua5.4 src/luax.lua src/luax.lua build/luax build
 
 if [ -f build/luax ]; then
     echo "LuaX binary created successfully."

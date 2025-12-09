@@ -14,9 +14,9 @@
 
 namespace LuaPattern {
 
-	constexpr int LUA_MAXCAPTURES = 32;
-	constexpr int CAP_UNFINISHED = -1;
-	constexpr int CAP_POSITION = -2;
+	const int LUA_MAXCAPTURES = 32;
+	const int CAP_UNFINISHED = -1;
+	const int CAP_POSITION = -2;
 
 	struct MatchState {
 		const char* src_init;
@@ -814,11 +814,6 @@ std::shared_ptr<LuaObject> create_string_library() {
 		{"unpack", std::make_shared<LuaFunctionWrapper>(string_unpack)},
 		{"upper", std::make_shared<LuaFunctionWrapper>(string_upper)}
 	};
-
-	// Metatable to allow string methods on string values (handled in LuaObject::get_item or global logic usually,
-	// but here we just return the library table. The metatable for string primitives is set globally or handled via special case logic.)
-	// Actually, Lua 5.4 sets the string metatable to this library table itself usually, or the __index of the string metatable points here.
-	// For now, we just return the library.
 
 	return lib;
 }

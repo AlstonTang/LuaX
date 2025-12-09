@@ -1,16 +1,6 @@
 -- C++ Translator Module
 local CppTranslator = {}
--- Set to keep track of declared variables to handle global assignments
-local declared_variables = {}
-local required_modules = {}
-local module_global_vars = {} -- New table to store global variables declared in the current module
-local current_function_fixed_params_count = 0 -- Track fixed parameters for varargs
-local unique_id_counter = 0
-
-local function get_unique_id()
-	unique_id_counter = unique_id_counter + 1
-	return tostring(unique_id_counter)
-end
+CppTranslator.__index = CppTranslator
 
 -- C++ reserved keywords that need to be sanitized
 local cpp_keywords = {
@@ -57,22 +47,23 @@ local function map_lua_type_to_cpp(value)
 end
 
 
--- Main translation function
-function CppTranslator.reset()
-	for k in pairs(declared_variables) do declared_variables[k] = nil end
-	for k in pairs(required_modules) do required_modules[k] = nil end
-	for k in pairs(module_global_vars) do module_global_vars[k] = nil end
+function CppTranslator:new()
+	local instance = setmetatable({}, CppTranslator)
+	instance.unique_id_counter = 0
+	return instance
 end
 
-function CppTranslator.translate(ast_root, file_name, is_main_script)
-	CppTranslator.reset()
-	
-	-- Pass is_main_script down
-	return CppTranslator.translate_recursive(ast_root, file_name, false, nil, is_main_script)
+function CppTranslator:get_unique_id()
+	self.unique_id_counter = self.unique_id_counter + 1
+	return tostring(self.unique_id_counter)
 end
 
 -- Modified Signature to include is_main_script
-function CppTranslator.translate_recursive(ast_root, file_name, for_header, current_module_object_name, is_main_script)
+function CppTranslator:translate_recursive(ast_root, file_name, for_header, current_module_object_name, is_main_script)
+	local declared_variables = {}
+	local required_modules = {}
+	local module_global_vars = {}
+	local current_function_fixed_params_count = 0
 	local function translate_node_to_cpp(node, for_header, is_lambda, current_module_object_name, depth)
 		depth = depth or 0
 		if depth > 50 then
@@ -165,7 +156,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 			
 			if node.is_local and node.identifier then
 				local var_name = node.identifier
-				ptr_name = var_name .. "_ptr_" .. get_unique_id() -- Ensure unique ptr_name
+				ptr_name = var_name .. "_ptr_" .. self:get_unique_id() -- Ensure unique ptr_name
 				
 				local sanitized_var_name = sanitize_cpp_identifier(node.identifier)
 				
@@ -281,7 +272,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 				end
 			end
 
-			local function_call_results_var = "func_results_" .. get_unique_id()
+			local function_call_results_var = "func_results_" .. self:get_unique_id()
 			local has_function_call_expr = false
 			local first_call_expr_node = nil
 
@@ -366,7 +357,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 				end
 			end
 
-			local function_call_results_var = "func_results_" .. tostring(os.time()) .. "_" .. get_unique_id()
+			local function_call_results_var = "func_results_" .. tostring(os.time()) .. "_" .. self:get_unique_id()
 			local has_function_call_expr = false
 			local first_call_expr_node = nil
 
@@ -478,10 +469,10 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 			elseif operator == ">=" then
 				return "lua_greater_equals(" .. left .. ", " .. right .. ")"
 			elseif operator == "and" then
-				local id = get_unique_id()
+				local id = self:get_unique_id()
 				return "( [=]() mutable -> LuaValue { const auto left_and_val_" .. id .. " = " .. left .. "; return is_lua_truthy(left_and_val_" .. id .. ") ? LuaValue(" .. right .. ") : LuaValue(left_and_val_" .. id .. "); } )()"
 			elseif operator == "or" then
-				local id = get_unique_id()
+				local id = self:get_unique_id()
 				return "( [=]() mutable -> LuaValue { const auto left_or_val_" .. id .. " = " .. left .. "; return is_lua_truthy(left_or_val_" .. id .. ") ? LuaValue(left_or_val_" .. id .. ") : LuaValue(" .. right .. "); } )()"
 			elseif operator == ".." then
 				return "lua_concat(" .. left .. ", " .. right .. ")"
@@ -513,7 +504,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 		
 		elseif node.type == "call_expression" then
 			local func_node = node.ordered_children[1]
-			local temp_args_var = "temp_args_" .. get_unique_id()
+			local temp_args_var = "temp_args_" .. self:get_unique_id()
 			local args_code_builder = "std::make_shared<LuaObject>()"
 			local args_init_code = ""
 			local arg_index = 1
@@ -538,7 +529,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 					if is_table_unpack_call(arg_node) then
 						-- Special handling for table.unpack()
 						local unpack_table_arg = arg_node.ordered_children[2]
-						local unpack_vec_var = "unpack_vec_" .. get_unique_id()
+						local unpack_vec_var = "unpack_vec_" .. self:get_unique_id()
 						local translated_table = translate_node_to_cpp(unpack_table_arg, for_header, false, current_module_object_name, depth + 1)
 						
 						-- Generate code to unpack into individual arguments
@@ -636,7 +627,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 			local cpp_code = "std::make_shared<LuaObject>()"
 			local fields = node:get_all_children_of_type("table_field")
 			local list_index = 1
-			local temp_table_var = "temp_table_" .. get_unique_id()
+			local temp_table_var = "temp_table_" .. self:get_unique_id()
 			local construction_code = "auto " .. temp_table_var .. " = " .. cpp_code .. ";\n"
 			for i, field_node in ipairs(fields) do
 				local key_part
@@ -655,7 +646,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 					value_child = key_child 
 					-- Special handling for varargs: unpack the vector into individual table elements
 					if value_child.type == "varargs" then
-						local varargs_vec = "varargs_vec_" .. get_unique_id()
+						local varargs_vec = "varargs_vec_" .. self:get_unique_id()
 						local varargs_code = translate_node_to_cpp(value_child, for_header, false, current_module_object_name, depth + 1)
 						construction_code = construction_code .. "auto " .. varargs_vec .. " = " .. varargs_code .. ";\n"
 						construction_code = construction_code .. "for (size_t i = 0; i < " .. varargs_vec .. ".size(); ++i) {\n"
@@ -705,7 +696,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 				return "lua_string_gsub(" .. translated_base .. ", " .. pattern_code .. ", " .. replacement_code .. ")"
 			else
 				local func_access = "lua_get_member(" .. translated_base .. ", LuaValue(\"" .. method_name .. "\"))"
-				local temp_args_var = "temp_args_" .. get_unique_id()
+				local temp_args_var = "temp_args_" .. self:get_unique_id()
 				local self_arg = temp_args_var .. "->set_item(\"1\", " .. translated_base .. "); "
 				local other_args_init_code = ""
 				local arg_index = 2  -- Start from 2 since 1 is self
@@ -715,7 +706,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 					if is_table_unpack_call(arg_node) then
 						-- Special handling for table.unpack()
 						local unpack_table_arg = arg_node.ordered_children[2]
-						local unpack_vec_var = "unpack_vec_" .. get_unique_id()
+						local unpack_vec_var = "unpack_vec_" .. self:get_unique_id()
 						local translated_table = translate_node_to_cpp(unpack_table_arg, for_header, false, current_module_object_name, depth + 1)
 						
 						-- Generate code to unpack into individual arguments
@@ -893,10 +884,10 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 					table.insert(loop_vars, sanitized_var)
 					declared_variables[sanitized_var] = true
 				end
-				local iter_func_var = "iter_func_" .. get_unique_id()
-				local iter_state_var = "iter_state_" .. get_unique_id()
-				local iter_value_var = "iter_value_" .. get_unique_id()
-				local results_var = "iter_results_" .. get_unique_id()
+				local iter_func_var = "iter_func_" .. self:get_unique_id()
+				local iter_state_var = "iter_state_" .. self:get_unique_id()
+				local iter_value_var = "iter_value_" .. self:get_unique_id()
+				local results_var = "iter_results_" .. self:get_unique_id()
 				local cpp_code = ""
 				if #expr_list_node.ordered_children == 1 and (expr_list_node.ordered_children[1].type == "call_expression" or expr_list_node.ordered_children[1].type == "method_call_expression") then
 					local iterator_call_code = translate_node_to_cpp(expr_list_node.ordered_children[1], for_header, false, current_module_object_name, depth + 1)
@@ -933,7 +924,7 @@ function CppTranslator.translate_recursive(ast_root, file_name, for_header, curr
 	-- Main Function Wrapper
 	local generated_code = translate_node_to_cpp(ast_root, for_header, false, current_module_object_name)
 	
-	local header = "#include <iostream>\n#include <vector>\n#include <string>\n#include <map>\n#include <memory>\n#include <variant>\n#include <regex>\n#include <functional>\n#include <cmath>\n#include \"lua_object.hpp\"\n\n"
+	local header = "#include <iostream>\n#include <vector>\n#include <string>\n#include <map>\n#include <memory>\n#include <variant>\n#include <functional>\n#include <cmath>\n#include \"lua_object.hpp\"\n\n"
 	
 	for module_name, _ in pairs(required_modules) do
 		local sanitized_module_name = module_name:gsub("%.", "_")

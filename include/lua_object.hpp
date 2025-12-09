@@ -6,8 +6,8 @@
 #include <map>
 #include <memory>
 #include <functional>
-#include <stdexcept> // Required for std::runtime_error
-#include "lua_value.hpp" // Include the new LuaValue header
+#include <stdexcept>
+#include "lua_value.hpp"
 
 // Now define LuaFunctionWrapper, which can now use LuaValue
 struct LuaFunctionWrapper {

@@ -1,107 +1,131 @@
-#include "lua_coroutine.hpp"
-#include "lua_object.hpp"
-#include <stdexcept>
+#include "coroutine.hpp"
 #include <iostream>
 
 // Global pointer to the currently running coroutine
-// nullptr means the main thread is running
 thread_local LuaCoroutine* current_coroutine = nullptr;
 
-LuaCoroutine::LuaCoroutine(std::shared_ptr<LuaFunctionWrapper> f) 
-	: func(f), status(Status::SUSPENDED), started(false) {
-	// The thread is spawned in the constructor but waits for the first resume
+LuaCoroutine::LuaCoroutine(std::shared_ptr<LuaFunctionWrapper> f, bool parallel) 
+	: func(f), status(Status::SUSPENDED), started(false), is_parallel(parallel) {
 	worker = std::thread(&LuaCoroutine::run, this);
 }
 
 LuaCoroutine::~LuaCoroutine() {
 	{
 		std::unique_lock<std::mutex> lock(mtx);
+		// If parallel and still running, we might need to detach or cancel
 		if (status != Status::DEAD) {
+			// For this implementation, we detach to avoid terminating the program,
+			// though in production we should signal a stop.
 			worker.detach();
-		} else {
-			if (worker.joinable()) {
-				worker.join();
-			}
+			return; 
 		}
+	}
+	if (worker.joinable()) {
+		worker.join();
 	}
 }
 
 void LuaCoroutine::run() {
-	// Wait for the first resume
+	std::shared_ptr<LuaObject> args_ptr;
+	
+	// Phase 1: Wait for start and capture arguments safely
 	{
 		std::unique_lock<std::mutex> lock(mtx);
 		cv_resume.wait(lock, [this] { return started; });
-	}
-
-	// Execute the function
-	try {
-		auto args_ptr = std::make_shared<LuaObject>();
+		
+		// COPY args to a local/shared pointer while we hold the lock.
+		// This ensures we don't read 'args' while another thread might be writing (in a different design)
+		// and ensures memory visibility.
+		args_ptr = std::make_shared<LuaObject>();
 		for (size_t i = 0; i < args.size(); ++i) {
 			args_ptr->set(std::to_string(i + 1), args[i]);
 		}
-		
+	} // Lock released here, allowing main thread to call await()
+
+	// Phase 2: Execute
+	try {
 		current_coroutine = this;
-		status = Status::RUNNING;
 		
+		// Execute the Lua function (NO LOCK HELD, allowing concurrency)
 		std::vector<LuaValue> res = func->func(args_ptr);
 		
-		// Coroutine finished naturally
+		// Phase 3: Store results
 		{
 			std::lock_guard<std::mutex> lock(mtx);
 			results = res;
 			status = Status::DEAD;
 		}
 	} catch (const std::exception& e) {
-		// Coroutine finished with error
-		{
-			std::lock_guard<std::mutex> lock(mtx);
-			results = {false, std::string(e.what())}; 
-			status = Status::DEAD;
-			error_occurred = true;
-		}
+		std::lock_guard<std::mutex> lock(mtx);
+		results = {false, std::string(e.what())}; 
+		status = Status::DEAD;
+		error_occurred = true;
 	} catch (...) {
-		{
-			std::lock_guard<std::mutex> lock(mtx);
-			results = {false, "unknown error"};
-			status = Status::DEAD;
-		}
+		std::lock_guard<std::mutex> lock(mtx);
+		results = {false, "unknown error"};
+		status = Status::DEAD;
+		error_occurred = true;
 	}
 
-	current_coroutine = nullptr; // Back to main thread (conceptually)
-	cv_yield.notify_one();
+	current_coroutine = nullptr;
+	
+	// Notify all waiters (await or resume) that we are finished
+	cv_yield.notify_all(); 
 }
 
 std::vector<LuaValue> LuaCoroutine::resume(std::vector<LuaValue> resume_args) {
 	std::unique_lock<std::mutex> lock(mtx);
 
-	if (status == Status::DEAD) {
-		return {false, "cannot resume dead coroutine"};
-	}
-	if (status == Status::RUNNING) {
-		return {false, "cannot resume running coroutine"};
-	}
+	if (status == Status::DEAD) return {false, "cannot resume dead coroutine"};
+	if (status == Status::RUNNING) return {false, "cannot resume running coroutine"};
 
-	// Pass arguments to the coroutine
 	args = resume_args;
 	
-	if (!started) {
-		started = true;
-	}
-	
+	// State transition
+	if (!started) started = true;
 	status = Status::RUNNING;
 	
-	// Signal worker to run
+	// Wake up the worker
 	cv_resume.notify_one();
-	
-	// Wait for worker to yield or finish
-	cv_yield.wait(lock, [this] { return status == Status::SUSPENDED || status == Status::DEAD; });
 
-	// Return results from yield/return
+	// PARALLEL: Return immediately. 
+	// The main thread will continue and eventually call await().
+	if (is_parallel) {
+		return {true, "async_running"}; 
+	}
+
+	// SYNCHRONOUS: Wait for result.
+	cv_yield.wait(lock, [this] { return status != Status::RUNNING; });
+
 	std::vector<LuaValue> res;
 	if (error_occurred) {
 		res = results;
 	} else {
-		res.push_back(true); // Success
+		res.push_back(true);
+		res.insert(res.end(), results.begin(), results.end());
+	}
+	return res;
+}
+
+std::vector<LuaValue> LuaCoroutine::await() {
+	std::unique_lock<std::mutex> lock(mtx);
+	
+	if (!started) {
+		return {false, "coroutine has not been started"};
+	}
+
+	cv_yield.wait(lock, [this] { 
+		return status != Status::RUNNING; 
+	});
+
+	// 3. Return results
+	std::vector<LuaValue> res;
+	if (error_occurred) {
+		// results contains {false, "error message"}
+		res = results;
+	} else {
+		// Standard Lua success format: {true, val1, val2...}
+		res.push_back(true);
 		res.insert(res.end(), results.begin(), results.end());
 	}
 	return res;
@@ -115,44 +139,69 @@ std::vector<LuaValue> LuaCoroutine::yield(std::vector<LuaValue> yield_args) {
 	LuaCoroutine* self = current_coroutine;
 	std::unique_lock<std::mutex> lock(self->mtx);
 
-	// Set results to be returned to resume()
 	self->results = yield_args;
 	self->status = Status::SUSPENDED;
 
-	// Signal resumer
-	self->cv_yield.notify_one();
+	self->cv_yield.notify_all(); // Notify main thread (await or resume)
+
+	// Wait until resumed again
 	self->cv_resume.wait(lock, [self] { return self->status == Status::RUNNING; });
+	
 	current_coroutine = self;
 	return self->args;
 }
+
+// --- Lua Bindings ---
 
 std::vector<LuaValue> coroutine_create(std::shared_ptr<LuaObject> args) {
 	LuaValue val = args->get("1");
 	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(val)) {
 		auto func = std::get<std::shared_ptr<LuaFunctionWrapper>>(val);
-		auto co = std::make_shared<LuaCoroutine>(func);
+		// Default: Standard Synchronous Coroutine
+		auto co = std::make_shared<LuaCoroutine>(func, false);
 		return {co};
 	}
-	throw std::runtime_error("bad argument #1 to 'create' (function expected)");
+	throw std::runtime_error("bad argument #1 to 'create'");
+}
+
+// EXTENSION: Create Parallel
+std::vector<LuaValue> coroutine_create_parallel(std::shared_ptr<LuaObject> args) {
+	LuaValue val = args->get("1");
+	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(val)) {
+		auto func = std::get<std::shared_ptr<LuaFunctionWrapper>>(val);
+		// Parallel Mode
+		auto co = std::make_shared<LuaCoroutine>(func, true);
+		return {co};
+	}
+	throw std::runtime_error("bad argument #1 to 'create_parallel'");
 }
 
 std::vector<LuaValue> coroutine_resume(std::shared_ptr<LuaObject> args) {
 	LuaValue val = args->get("1");
 	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {
 		auto co = std::get<std::shared_ptr<LuaCoroutine>>(val);
-		
 		std::vector<LuaValue> resume_args;
 		for (int i = 2; ; ++i) {
 			auto key = std::to_string(i);
 			if (!args->properties.count(key)) break;
 			resume_args.push_back(args->get(key));
 		}
-		
 		return co->resume(resume_args);
 	}
-	throw std::runtime_error("bad argument #1 to 'resume' (thread expected)");
+	throw std::runtime_error("bad argument #1 to 'resume'");
 }
 
+// EXTENSION: Await Binding
+std::vector<LuaValue> coroutine_await(std::shared_ptr<LuaObject> args) {
+	LuaValue val = args->get("1");
+	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {
+		auto co = std::get<std::shared_ptr<LuaCoroutine>>(val);
+		return co->await();
+	}
+	throw std::runtime_error("bad argument #1 to 'await' (thread expected)");
+}
+
+// Existing yield, status, running implementations remain mostly unchanged...
 std::vector<LuaValue> coroutine_yield(std::shared_ptr<LuaObject> args) {
 	std::vector<LuaValue> yield_args;
 	for (int i = 1; ; ++i) {
@@ -168,21 +217,36 @@ std::vector<LuaValue> coroutine_status(std::shared_ptr<LuaObject> args) {
 	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {
 		auto co = std::get<std::shared_ptr<LuaCoroutine>>(val);
 		switch (co->status) {
-			case LuaCoroutine::Status::SUSPENDED: return {std::string(co->started ? "suspended" : "suspended")}; // Lua distinguishes "suspended" vs "normal" but our model is simpler
+			case LuaCoroutine::Status::SUSPENDED: return {"suspended"};
 			case LuaCoroutine::Status::RUNNING: return {"running"};
 			case LuaCoroutine::Status::DEAD: return {"dead"};
-			case LuaCoroutine::Status::NORMAL: return {"normal"};
 		}
 	}
 	return {std::monostate{}, "invalid thread"};
 }
 
 std::vector<LuaValue> coroutine_running(std::shared_ptr<LuaObject> args) {
+	// Note: With parallelism, checking current_coroutine is still valid 
+	// because it is thread_local.
 	if (current_coroutine) {
-		// Cannot easily return shared_ptr from raw pointer without more infrastructure
+		// We can't return the shared_ptr easily from the raw pointer here
+		// without an enabling_shared_from_this refactor, returning dummy.
 		return {std::monostate{}, false}; 
 	}
-	return {std::monostate{}, true}; // Main thread
+	return {std::monostate{}, true};
+}
+
+std::vector<LuaValue> coroutine_close(std::shared_ptr<LuaObject> args) {
+	LuaValue val = args->get("1");
+	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {
+		// Cannot force-close a thread blocked on CV in this implementation
+		return {true};
+	}
+	return {false, "invalid thread"};
+}
+
+std::vector<LuaValue> coroutine_isyieldable(std::shared_ptr<LuaObject> args) {
+	return {current_coroutine != nullptr};
 }
 
 std::vector<LuaValue> coroutine_wrap(std::shared_ptr<LuaObject> args) {
@@ -212,19 +276,6 @@ std::vector<LuaValue> coroutine_wrap(std::shared_ptr<LuaObject> args) {
 	throw std::runtime_error("coroutine.wrap failed");
 }
 
-std::vector<LuaValue> coroutine_isyieldable(std::shared_ptr<LuaObject> args) {
-	return {current_coroutine != nullptr};
-}
-
-std::vector<LuaValue> coroutine_close(std::shared_ptr<LuaObject> args) {
-	LuaValue val = args->get("1");
-	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {
-		// Cannot force-close a thread blocked on CV in this implementation
-		return {true};
-	}
-	return {false, "invalid thread"};
-}
-
 std::shared_ptr<LuaObject> create_coroutine_library() {
 	static std::shared_ptr<LuaObject> coroutine_lib;
 	if (coroutine_lib) return coroutine_lib;
@@ -232,14 +283,16 @@ std::shared_ptr<LuaObject> create_coroutine_library() {
 	coroutine_lib = std::make_shared<LuaObject>();
 
 	coroutine_lib->properties = {
+		{"await", std::make_shared<LuaFunctionWrapper>(coroutine_await)},
+		{"close", std::make_shared<LuaFunctionWrapper>(coroutine_close)},
 		{"create", std::make_shared<LuaFunctionWrapper>(coroutine_create)},
-		{"resume", std::make_shared<LuaFunctionWrapper>(coroutine_resume)},
-		{"yield", std::make_shared<LuaFunctionWrapper>(coroutine_yield)},
-		{"status", std::make_shared<LuaFunctionWrapper>(coroutine_status)},
-		{"running", std::make_shared<LuaFunctionWrapper>(coroutine_running)},
-		{"wrap", std::make_shared<LuaFunctionWrapper>(coroutine_wrap)},
+		{"create_parallel", std::make_shared<LuaFunctionWrapper>(coroutine_create_parallel)},
 		{"isyieldable", std::make_shared<LuaFunctionWrapper>(coroutine_isyieldable)},
-		{"close", std::make_shared<LuaFunctionWrapper>(coroutine_close)}
+		{"resume", std::make_shared<LuaFunctionWrapper>(coroutine_resume)},
+		{"running", std::make_shared<LuaFunctionWrapper>(coroutine_running)},
+		{"status", std::make_shared<LuaFunctionWrapper>(coroutine_status)},
+		{"wrap", std::make_shared<LuaFunctionWrapper>(coroutine_wrap)},
+		{"yield", std::make_shared<LuaFunctionWrapper>(coroutine_yield)},
 	};
 
 	return coroutine_lib;

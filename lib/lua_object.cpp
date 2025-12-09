@@ -6,11 +6,6 @@
 #include <algorithm>
 #include <iomanip>
 
-// Global environment instance
-// Global environment instance
-// _G is defined in init.cpp to ensure libraries are available during static init
-
-
 // Forward declarations
 std::string get_lua_type_name(const LuaValue& val);
 std::string to_cpp_string(const LuaValue& value);

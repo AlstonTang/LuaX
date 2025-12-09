@@ -1,8 +1,5 @@
 #include "init.hpp"
-#include "debug.hpp"
-#include "coroutine.hpp"
 
-// Helper to create the initial global environment
 static std::shared_ptr<LuaObject> create_initial_global() {
 	auto globals = std::make_shared<LuaObject>();
 	globals->properties = {
@@ -30,7 +27,7 @@ static std::shared_ptr<LuaObject> create_initial_global() {
 		{"utf8", create_utf8_library()},
 		{"coroutine", create_coroutine_library()},
 		{"debug", create_debug_library()},
-		{"_VERSION", LuaValue(std::string("Lua 5.4"))},
+		{"_VERSION", LuaValue(std::string("LuaX (Lua 5.4)"))},
 		{"tonumber", std::make_shared<LuaFunctionWrapper>([](std::shared_ptr<LuaObject> args) -> std::vector<LuaValue> {
 			// tonumber implementation
 			LuaValue val = args->get("1");
