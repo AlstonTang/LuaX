@@ -206,7 +206,7 @@ local function generate_and_run_makefile(output_path, generated_basenames, dep_g
 	local content = {
 		"CXX = " .. CXX,
 		-- Include path is absolute to LUAX_HOME
-		"CXXFLAGS = -std=c++17 -I" .. luax_root .. "include -g",
+		"CXXFLAGS = -std=c++17 -I" .. luax_root .. "include -O2",
 		"LDFLAGS = -lstdc++fs",
 		"TARGET = " .. abs_target,
 		"",
