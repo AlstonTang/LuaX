@@ -8,11 +8,11 @@
 #include <stdexcept>
 
 // package.searchpath
-std::vector<LuaValue> package_searchpath(std::shared_ptr<LuaObject> args) {
-	std::string name = to_cpp_string(args->get("1"));
-	std::string path = to_cpp_string(args->get("2"));
-	std::string sep = std::holds_alternative<std::string>(args->get("3")) ? std::get<std::string>(args->get("3")) : ".";
-	std::string rep = std::holds_alternative<std::string>(args->get("4")) ? std::get<std::string>(args->get("4")) : "/";
+std::vector<LuaValue> package_searchpath(std::vector<LuaValue> args) {
+	std::string name = to_cpp_string(args.at(0));
+	std::string path = to_cpp_string(args.at(1));
+	std::string sep = args.size() >= 3 && std::holds_alternative<std::string>(args.at(2)) ? std::get<std::string>(args.at(2)) : ".";
+	std::string rep = args.size() >= 4 && std::holds_alternative<std::string>(args.at(3)) ? std::get<std::string>(args.at(3)) : "/";
 
 	// Replace dots in name with replacement string
 	std::string filename = name;
@@ -53,7 +53,7 @@ std::vector<LuaValue> package_searchpath(std::shared_ptr<LuaObject> args) {
 }
 
 // package.loadlib
-std::vector<LuaValue> package_loadlib(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> package_loadlib(std::vector<LuaValue> args) {
 	throw std::runtime_error("package.loadlib is not supported in the translated environment.");
 	return {}; // Should not be reached
 }

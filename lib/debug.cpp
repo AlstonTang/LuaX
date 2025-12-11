@@ -2,67 +2,67 @@
 #include "lua_object.hpp"
 #include <stdexcept>
 
-std::vector<LuaValue> debug_debug(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_debug(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.debug is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_gethook(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_gethook(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.gethook is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getinfo(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_getinfo(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.getinfo is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getlocal(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_getlocal(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.getlocal is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getmetatable(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_getmetatable(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.getmetatable is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getregistry(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_getregistry(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.getregistry is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getupvalue(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_getupvalue(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.getupvalue is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getuservalue(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_getuservalue(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.getuservalue is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_sethook(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_sethook(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.sethook is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_setlocal(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_setlocal(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.setlocal is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_setmetatable(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_setmetatable(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.setmetatable is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_setupvalue(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_setupvalue(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.setupvalue is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_setuservalue(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_setuservalue(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.setuservalue is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_traceback(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_traceback(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.traceback is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_upvalueid(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_upvalueid(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.upvalueid is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_upvaluejoin(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> debug_upvaluejoin(std::vector<LuaValue> args) {
 	throw std::runtime_error("debug.upvaluejoin is not supported in the translated environment.");
 }
 

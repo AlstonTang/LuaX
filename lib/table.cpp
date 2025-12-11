@@ -7,17 +7,17 @@
 #include <map>
 
 // table.unpack
-std::vector<LuaValue> table_unpack(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get("1"));
+std::vector<LuaValue> table_unpack(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
 	if (!table) return {std::monostate{}};
 
-	double i_double = std::holds_alternative<double>(args->get("2")) ? std::get<double>(args->get("2")) : 1.0;
+	double i_double = args.size() >= 2 && std::holds_alternative<double>(args.at(1)) ? std::get<double>(args.at(1)) : 1.0;
 	// Default j is #table
 	double j_double;
-	if (args->properties.count("3")) {
-		j_double = std::get<double>(args->get("3"));
+	if (args.size() >= 3) {
+		j_double = std::get<double>(args.at(2));
 	} else {
-		LuaValue len_val = lua_get_length(args->get("1"));
+		LuaValue len_val = lua_get_length(args.at(0));
 		j_double = get_double(len_val);
 	}
 
@@ -32,8 +32,8 @@ std::vector<LuaValue> table_unpack(std::shared_ptr<LuaObject> args) {
 }
 
 // table.sort
-std::vector<LuaValue> table_sort(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get("1"));
+std::vector<LuaValue> table_sort(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
 	if (!table) return {std::monostate{}};
 
 	// Collect all integer keys from array_properties
@@ -42,17 +42,14 @@ std::vector<LuaValue> table_sort(std::shared_ptr<LuaObject> args) {
 		sortable_elements.push_back({pair.first, pair.second});
 	}
 
-	LuaValue comp_func_val = args->get("2");
+	LuaValue comp_func_val = args.at(1);
 	bool has_comp = std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val);
 	std::shared_ptr<LuaFunctionWrapper> comp_func = has_comp ? std::get<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val) : nullptr;
 
 	std::sort(sortable_elements.begin(), sortable_elements.end(),
 		[&](const std::pair<long long, LuaValue>& a, const std::pair<long long, LuaValue>& b) {
 			if (has_comp) {
-				auto comp_args = std::make_shared<LuaObject>();
-				comp_args->set("1", a.second);
-				comp_args->set("2", b.second);
-				std::vector<LuaValue> result_vec = comp_func->func(comp_args);
+				std::vector<LuaValue> result_vec = comp_func->func({a.second, b.second});
 				return !result_vec.empty() && is_lua_truthy(result_vec[0]);
 			} else {
 				return lua_less_than(a.second, b.second);
@@ -60,7 +57,7 @@ std::vector<LuaValue> table_sort(std::shared_ptr<LuaObject> args) {
 		});
 
 	// Sort 1..n for correctness with standard Lua
-	LuaValue len_val = lua_get_length(args->get("1"));
+	LuaValue len_val = lua_get_length(args.at(0));
 	long long n = get_long_long(len_val);
 	
 	std::vector<LuaValue> elements;
@@ -71,10 +68,7 @@ std::vector<LuaValue> table_sort(std::shared_ptr<LuaObject> args) {
 	std::sort(elements.begin(), elements.end(),
 		[&](const LuaValue& a, const LuaValue& b) {
 			if (has_comp) {
-				auto comp_args = std::make_shared<LuaObject>();
-				comp_args->set("1", a);
-				comp_args->set("2", b);
-				std::vector<LuaValue> result_vec = comp_func->func(comp_args);
+				std::vector<LuaValue> result_vec = comp_func->func({a, b});
 				return !result_vec.empty() && is_lua_truthy(result_vec[0]);
 			} else {
 				return lua_less_than(a, b);
@@ -89,34 +83,32 @@ std::vector<LuaValue> table_sort(std::shared_ptr<LuaObject> args) {
 }
 
 // table.pack
-std::vector<LuaValue> table_pack(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> table_pack(std::vector<LuaValue> args) {
 	auto new_table = std::make_shared<LuaObject>();
 	long long n = 0;
-	for (int i = 1; ; ++i) {
-		LuaValue val = args->get(std::to_string(i));
+	for (int i = 0; i < args.size(); ++i) {
+		LuaValue val = args.at(i);
 		// Check if argument exists (handles nil values within args)
 		if (std::holds_alternative<std::monostate>(val)) {
-			if (!args->properties.count(std::to_string(i)) && !args->array_properties.count(i)) {
-				 break;
-			}
+			continue;
 		}
 		new_table->set_item(static_cast<double>(i), val);
-		n++;
+		++n;
 	}
-	new_table->set("n", static_cast<double>(n));
+	new_table->set("n", n);
 	return {new_table};
 }
 
 // table.move
-std::vector<LuaValue> table_move(std::shared_ptr<LuaObject> args) {
-	auto a1 = get_object(args->get("1"));
+std::vector<LuaValue> table_move(std::vector<LuaValue> args) {
+	auto a1 = get_object(args.at(0));
 	if (!a1) return {std::monostate{}};
 
-	double f_double = get_double(args->get("2"));
-	double e_double = get_double(args->get("3"));
-	double t_double = get_double(args->get("4"));
+	double f_double = get_double(args.at(1));
+	double e_double = get_double(args.at(2));
+	double t_double = get_double(args.at(3));
 	
-	auto a2 = get_object(args->get("5"));
+	auto a2 = get_object(args.at(4));
 	if (!a2) a2 = a1; 
 
 	long long f = static_cast<long long>(f_double);
@@ -138,18 +130,18 @@ std::vector<LuaValue> table_move(std::shared_ptr<LuaObject> args) {
 }
 
 // table.concat
-std::vector<LuaValue> table_concat(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get("1"));
+std::vector<LuaValue> table_concat(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
 	if (!table) return {""};
 
-	std::string sep = std::holds_alternative<std::string>(args->get("2")) ? std::get<std::string>(args->get("2")) : "";
-	double i_double = std::holds_alternative<double>(args->get("3")) ? std::get<double>(args->get("3")) : 1.0;
+	std::string sep = args.size() >= 2 && std::holds_alternative<std::string>(args.at(1)) ? std::get<std::string>(args.at(1)) : "";
+	double i_double = args.size() >= 3 && std::holds_alternative<double>(args.at(2)) ? std::get<double>(args.at(2)) : 1.0;
 	
 	double j_double;
-	if (args->properties.count("4") || args->array_properties.count(4)) {
-		 j_double = get_double(args->get("4"));
+	if (args.size() >= 4) {
+		 j_double = get_double(args.at(3));
 	} else {
-		 LuaValue len_val = lua_get_length(args->get("1"));
+		 LuaValue len_val = lua_get_length(args.at(0));
 		 j_double = get_double(len_val);
 	}
 
@@ -172,22 +164,22 @@ std::vector<LuaValue> table_concat(std::shared_ptr<LuaObject> args) {
 }
 
 // table.insert
-std::vector<LuaValue> table_insert(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get("1"));
+std::vector<LuaValue> table_insert(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
 	if (table) {
 		// Check number of arguments to decide overload
 		// args has "1", "2", "3"...
 		bool has_pos = false;
-		if (args->properties.count("3") || args->array_properties.count(3)) {
+		if (args.size() >= 3) {
 			has_pos = true;
 		}
 
 		if (has_pos) {
 			// insert(table, pos, value)
-			long long pos = get_long_long(args->get("2"));
-			LuaValue val = args->get("3");
+			long long pos = get_long_long(args.at(1));
+			LuaValue val = args.at(2);
 			
-			LuaValue len_val = lua_get_length(args->get("1"));
+			LuaValue len_val = lua_get_length(args.at(0));
 			long long len = get_long_long(len_val);
 
 			// Shift elements up
@@ -197,8 +189,8 @@ std::vector<LuaValue> table_insert(std::shared_ptr<LuaObject> args) {
 			table->set_item(static_cast<double>(pos), val);
 		} else {
 			// insert(table, value) -> append
-			LuaValue val = args->get("2");
-			LuaValue len_val = lua_get_length(args->get("1"));
+			LuaValue val = args.at(1);
+			LuaValue len_val = lua_get_length(args.at(0));
 			long long len = get_long_long(len_val);
 			table->set_item(static_cast<double>(len + 1), val);
 		}
@@ -207,15 +199,15 @@ std::vector<LuaValue> table_insert(std::shared_ptr<LuaObject> args) {
 }
 
 // table.remove
-std::vector<LuaValue> table_remove(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get("1"));
+std::vector<LuaValue> table_remove(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
 	if (table) {
-		LuaValue len_val = lua_get_length(args->get("1"));
+		LuaValue len_val = lua_get_length(args.at(0));
 		long long len = get_long_long(len_val);
 		
 		long long pos = len;
-		if (args->properties.count("2") || args->array_properties.count(2)) {
-			pos = get_long_long(args->get("2"));
+		if (args.size() >= 2) {
+			pos = get_long_long(args.at(1));
 		}
 
 		if (pos > len || pos < 1) return {std::monostate{}};

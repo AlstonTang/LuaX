@@ -11,8 +11,8 @@
 
 // Now define LuaFunctionWrapper, which can now use LuaValue
 struct LuaFunctionWrapper {
-	std::function<std::vector<LuaValue>(std::shared_ptr<LuaObject>)> func;
-	LuaFunctionWrapper(std::function<std::vector<LuaValue>(std::shared_ptr<LuaObject>)> f) : func(f) {}
+	std::function<std::vector<LuaValue>(std::vector<LuaValue>)> func;
+	LuaFunctionWrapper(std::function<std::vector<LuaValue>(std::vector<LuaValue>)> f) : func(f) {}
 };
 
 // Now define LuaObject, which can now use LuaValue
@@ -84,24 +84,24 @@ LuaValue rawget(std::shared_ptr<LuaObject> table, const LuaValue& key);
 void rawset(std::shared_ptr<LuaObject> table, const LuaValue& key, const LuaValue& value); // Declaration for rawset
 
 // Declarations for global Lua functions
-std::vector<LuaValue> lua_assert(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_collectgarbage(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_dofile(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_ipairs(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_load(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_loadfile(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_next(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_pairs(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_rawequal(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_rawlen(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_rawget(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_rawset(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_select(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_warn(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> lua_xpcall(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> pairs_iterator(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> ipairs_iterator(std::shared_ptr<LuaObject> args);
-std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> lua_assert(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_collectgarbage(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_dofile(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_ipairs(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_load(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_loadfile(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_next(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_pairs(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_rawequal(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_rawlen(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_rawget(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_rawset(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_select(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_warn(std::vector<LuaValue> args);
+std::vector<LuaValue> lua_xpcall(std::vector<LuaValue> args);
+std::vector<LuaValue> pairs_iterator(std::vector<LuaValue> args);
+std::vector<LuaValue> ipairs_iterator(std::vector<LuaValue> args);
+std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::vector<LuaValue> args);
 LuaValue lua_get_member(const LuaValue& base, const LuaValue& key);
 LuaValue lua_get_length(const LuaValue& val);
 

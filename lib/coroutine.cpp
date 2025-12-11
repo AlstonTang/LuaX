@@ -26,20 +26,12 @@ LuaCoroutine::~LuaCoroutine() {
 }
 
 void LuaCoroutine::run() {
-	std::shared_ptr<LuaObject> args_ptr;
-	
 	// Phase 1: Wait for start and capture arguments safely
 	{
 		std::unique_lock<std::mutex> lock(mtx);
 		cv_resume.wait(lock, [this] { return started; });
 		
-		// COPY args to a local/shared pointer while we hold the lock.
-		// This ensures we don't read 'args' while another thread might be writing (in a different design)
-		// and ensures memory visibility.
-		args_ptr = std::make_shared<LuaObject>();
-		for (size_t i = 0; i < args.size(); ++i) {
-			args_ptr->set(std::to_string(i + 1), args[i]);
-		}
+		// MIGHT WANT TO COPY?
 	} // Lock released here, allowing main thread to call await()
 
 	// Phase 2: Execute
@@ -47,7 +39,7 @@ void LuaCoroutine::run() {
 		current_coroutine = this;
 		
 		// Execute the Lua function (NO LOCK HELD, allowing concurrency)
-		std::vector<LuaValue> res = func->func(args_ptr);
+		std::vector<LuaValue> res = func->func(args);
 		
 		// Phase 3: Store results
 		{
@@ -153,8 +145,8 @@ std::vector<LuaValue> LuaCoroutine::yield(std::vector<LuaValue> yield_args) {
 
 // --- Lua Bindings ---
 
-std::vector<LuaValue> coroutine_create(std::shared_ptr<LuaObject> args) {
-	LuaValue val = args->get("1");
+std::vector<LuaValue> coroutine_create(std::vector<LuaValue> args) {
+	LuaValue val = args.at(0);
 	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(val)) {
 		auto func = std::get<std::shared_ptr<LuaFunctionWrapper>>(val);
 		// Default: Standard Synchronous Coroutine
@@ -165,8 +157,8 @@ std::vector<LuaValue> coroutine_create(std::shared_ptr<LuaObject> args) {
 }
 
 // EXTENSION: Create Parallel
-std::vector<LuaValue> coroutine_create_parallel(std::shared_ptr<LuaObject> args) {
-	LuaValue val = args->get("1");
+std::vector<LuaValue> coroutine_create_parallel(std::vector<LuaValue> args) {
+	LuaValue val = args.at(0);
 	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(val)) {
 		auto func = std::get<std::shared_ptr<LuaFunctionWrapper>>(val);
 		// Parallel Mode
@@ -176,15 +168,13 @@ std::vector<LuaValue> coroutine_create_parallel(std::shared_ptr<LuaObject> args)
 	throw std::runtime_error("bad argument #1 to 'create_parallel'");
 }
 
-std::vector<LuaValue> coroutine_resume(std::shared_ptr<LuaObject> args) {
-	LuaValue val = args->get("1");
+std::vector<LuaValue> coroutine_resume(std::vector<LuaValue> args) {
+	LuaValue val = args.at(0);
 	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {
 		auto co = std::get<std::shared_ptr<LuaCoroutine>>(val);
 		std::vector<LuaValue> resume_args;
-		for (int i = 2; ; ++i) {
-			auto key = std::to_string(i);
-			if (!args->properties.count(key)) break;
-			resume_args.push_back(args->get(key));
+		for (int i = 1; i < args.size(); ++i) {
+			resume_args.push_back(args.at(i));
 		}
 		return co->resume(resume_args);
 	}
@@ -192,8 +182,8 @@ std::vector<LuaValue> coroutine_resume(std::shared_ptr<LuaObject> args) {
 }
 
 // EXTENSION: Await Binding
-std::vector<LuaValue> coroutine_await(std::shared_ptr<LuaObject> args) {
-	LuaValue val = args->get("1");
+std::vector<LuaValue> coroutine_await(std::vector<LuaValue> args) {
+	LuaValue val = args.at(0);
 	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {
 		auto co = std::get<std::shared_ptr<LuaCoroutine>>(val);
 		return co->await();
@@ -202,18 +192,16 @@ std::vector<LuaValue> coroutine_await(std::shared_ptr<LuaObject> args) {
 }
 
 // Existing yield, status, running implementations remain mostly unchanged...
-std::vector<LuaValue> coroutine_yield(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> coroutine_yield(std::vector<LuaValue> args) {
 	std::vector<LuaValue> yield_args;
-	for (int i = 1; ; ++i) {
-		auto key = std::to_string(i);
-		if (!args->properties.count(key)) break;
-		yield_args.push_back(args->get(key));
+	for (int i = 0; i < args.size(); ++i) {
+		yield_args.push_back(args.at(i));
 	}
 	return LuaCoroutine::yield(yield_args);
 }
 
-std::vector<LuaValue> coroutine_status(std::shared_ptr<LuaObject> args) {
-	LuaValue val = args->get("1");
+std::vector<LuaValue> coroutine_status(std::vector<LuaValue> args) {
+	LuaValue val = args.at(0);
 	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {
 		auto co = std::get<std::shared_ptr<LuaCoroutine>>(val);
 		switch (co->status) {
@@ -225,7 +213,7 @@ std::vector<LuaValue> coroutine_status(std::shared_ptr<LuaObject> args) {
 	return {std::monostate{}, "invalid thread"};
 }
 
-std::vector<LuaValue> coroutine_running(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> coroutine_running(std::vector<LuaValue> args) {
 	// Note: With parallelism, checking current_coroutine is still valid 
 	// because it is thread_local.
 	if (current_coroutine) {
@@ -236,8 +224,8 @@ std::vector<LuaValue> coroutine_running(std::shared_ptr<LuaObject> args) {
 	return {std::monostate{}, true};
 }
 
-std::vector<LuaValue> coroutine_close(std::shared_ptr<LuaObject> args) {
-	LuaValue val = args->get("1");
+std::vector<LuaValue> coroutine_close(std::vector<LuaValue> args) {
+	LuaValue val = args.at(0);
 	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {
 		// Cannot force-close a thread blocked on CV in this implementation
 		return {true};
@@ -245,23 +233,17 @@ std::vector<LuaValue> coroutine_close(std::shared_ptr<LuaObject> args) {
 	return {false, "invalid thread"};
 }
 
-std::vector<LuaValue> coroutine_isyieldable(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> coroutine_isyieldable(std::vector<LuaValue> args) {
 	return {current_coroutine != nullptr};
 }
 
-std::vector<LuaValue> coroutine_wrap(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> coroutine_wrap(std::vector<LuaValue> args) {
 	// wrap returns a function that calls resume
 	auto create_res = coroutine_create(args);
 	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(create_res[0])) {
 		auto co = std::get<std::shared_ptr<LuaCoroutine>>(create_res[0]);
-		auto wrapper = std::make_shared<LuaFunctionWrapper>([co](std::shared_ptr<LuaObject> wrap_args) -> std::vector<LuaValue> {
-			std::vector<LuaValue> resume_args;
-			for (int i = 1; ; ++i) {
-				auto key = std::to_string(i);
-				if (!wrap_args->properties.count(key)) break;
-				resume_args.push_back(wrap_args->get(key));
-			}
-			auto res = co->resume(resume_args);
+		auto wrapper = std::make_shared<LuaFunctionWrapper>([co](std::vector<LuaValue> wrap_args) -> std::vector<LuaValue> {
+			auto res = co->resume(wrap_args);
 			if (std::holds_alternative<bool>(res[0]) && !std::get<bool>(res[0])) {
 				// If resume failed (returned false, err), wrap should error
 				if (res.size() > 1) throw std::runtime_error(to_cpp_string(res[1]));

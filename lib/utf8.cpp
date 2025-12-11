@@ -74,10 +74,10 @@ int decode_utf8(const std::string& s, size_t& offset) {
 }
 
 // utf8.char (integer codepoint(s) to string)
-std::vector<LuaValue> utf8_char(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> utf8_char(std::vector<LuaValue> args) {
 	std::string result_str;
-	for (int i = 1; ; ++i) {
-		LuaValue cp_val = args->get(std::to_string(i));
+	for (int i = 0; i < args.size(); ++i) {
+		LuaValue cp_val = args.at(i);
 		if (std::holds_alternative<std::monostate>(cp_val)) {
 			break;
 		}
@@ -92,23 +92,23 @@ std::vector<LuaValue> utf8_char(std::shared_ptr<LuaObject> args) {
 }
 
 // utf8.charpattern
-std::vector<LuaValue> utf8_charpattern(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> utf8_charpattern(std::vector<LuaValue> args) {
 	return {std::string("[\0-\x7F\xC2-\xF4][\x80-\xBF]*")};
 }
 
 // utf8.codepoint (string to integer codepoint(s))
-std::vector<LuaValue> utf8_codepoint(std::shared_ptr<LuaObject> args) {
-	LuaValue s_val = args->get("1");
+std::vector<LuaValue> utf8_codepoint(std::vector<LuaValue> args) {
+	LuaValue s_val = args.at(0);
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'codepoint' (string expected)");
 	}
 	std::string s = std::get<std::string>(s_val);
 
-	LuaValue i_val = args->get("2");
+	LuaValue i_val = args.at(1);
 	double i_double = std::holds_alternative<double>(i_val) ? std::get<double>(i_val) : 1.0;
 	int i = static_cast<int>(i_double);
 
-	LuaValue j_val = args->get("3");
+	LuaValue j_val = args.at(2);
 	double j_double = std::holds_alternative<double>(j_val) ? std::get<double>(j_val) : i_double;
 	int j = static_cast<int>(j_double);
 
@@ -146,14 +146,14 @@ std::vector<LuaValue> utf8_codepoint(std::shared_ptr<LuaObject> args) {
 }
 
 // utf8.codes (iterator for codepoints)
-std::vector<LuaValue> utf8_codes_iterator(std::shared_ptr<LuaObject> args) {
-	LuaValue s_val = args->get("1");
+std::vector<LuaValue> utf8_codes_iterator(std::vector<LuaValue> args) {
+	LuaValue s_val = args.at(0);
 	if (!std::holds_alternative<std::string>(s_val)) {
 		return {std::monostate{}};
 	}
 	std::string s = std::get<std::string>(s_val);
 
-	LuaValue offset_val = args->get("2");
+	LuaValue offset_val = args.at(1);
 	size_t offset = 0;
 	if (std::holds_alternative<double>(offset_val)) {
 		offset = static_cast<size_t>(std::get<double>(offset_val));
@@ -173,8 +173,8 @@ std::vector<LuaValue> utf8_codes_iterator(std::shared_ptr<LuaObject> args) {
 	}
 }
 
-std::vector<LuaValue> utf8_codes(std::shared_ptr<LuaObject> args) {
-	LuaValue s_val = args->get("1");
+std::vector<LuaValue> utf8_codes(std::vector<LuaValue> args) {
+	LuaValue s_val = args.at(0);
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'codes' (string expected)");
 	}
@@ -182,8 +182,8 @@ std::vector<LuaValue> utf8_codes(std::shared_ptr<LuaObject> args) {
 }
 
 // utf8.len (length of UTF-8 string)
-std::vector<LuaValue> utf8_len(std::shared_ptr<LuaObject> args) {
-	LuaValue s_val = args->get("1");
+std::vector<LuaValue> utf8_len(std::vector<LuaValue> args) {
+	LuaValue s_val = args.at(0);
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'len' (string expected)");
 	}
@@ -203,21 +203,21 @@ std::vector<LuaValue> utf8_len(std::shared_ptr<LuaObject> args) {
 }
 
 // utf8.offset (byte offset of n-th character)
-std::vector<LuaValue> utf8_offset(std::shared_ptr<LuaObject> args) {
-	LuaValue s_val = args->get("1");
+std::vector<LuaValue> utf8_offset(std::vector<LuaValue> args) {
+	LuaValue s_val = args.at(0);
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'offset' (string expected)");
 	}
 	std::string s = std::get<std::string>(s_val);
 
-	LuaValue n_val = args->get("2");
+	LuaValue n_val = args.at(1);
 	if (!std::holds_alternative<double>(n_val)) {
 		throw std::runtime_error("bad argument #2 to 'offset' (number expected)");
 	}
 	int n = static_cast<int>(std::get<double>(n_val));
 
 	// Optional third argument: pos (starting position in bytes)
-	LuaValue pos_val = args->get("3");
+	LuaValue pos_val = args.at(2);
 	size_t byte_offset = 0;
 	if (std::holds_alternative<double>(pos_val)) {
 		byte_offset = static_cast<size_t>(std::get<double>(pos_val)) - 1; // Convert to 0-based

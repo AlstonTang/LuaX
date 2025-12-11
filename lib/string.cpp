@@ -277,10 +277,10 @@ std::vector<LuaValue> get_captures(const LuaPattern::MatchState& ms, const std::
 // --- Library Functions ---
 
 // string.byte
-std::vector<LuaValue> string_byte(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
-	double i_d = !std::holds_alternative<std::monostate>(args->get("2")) ? get_double(args->get("2")) : 1.0;
-	double j_d = !std::holds_alternative<std::monostate>(args->get("3")) ? get_double(args->get("3")) : i_d;
+std::vector<LuaValue> string_byte(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
+	double i_d = args.size() >= 2 ? get_double(args.at(1)) : 1.0;
+	double j_d = args.size() >= 3 ? get_double(args.at(2)) : i_d;
 
 	long long i = static_cast<long long>(i_d);
 	long long j = static_cast<long long>(j_d);
@@ -301,28 +301,26 @@ std::vector<LuaValue> string_byte(std::shared_ptr<LuaObject> args) {
 }
 
 // string.char
-std::vector<LuaValue> string_char(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> string_char(std::vector<LuaValue> args) {
 	std::string result_str = "";
-	for (int i = 1; ; ++i) {
-		LuaValue val = args->get(std::to_string(i));
-		if (std::holds_alternative<std::monostate>(val)) break;
+	for (LuaValue val: args) {
 		result_str += static_cast<char>(static_cast<int>(get_double(val)));
 	}
 	return {result_str};
 }
 
 // string.dump
-std::vector<LuaValue> string_dump(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> string_dump(std::vector<LuaValue> args) {
 	throw std::runtime_error("string.dump is not supported.");
 	return {};
 }
 
 // string.find
-std::vector<LuaValue> string_find(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
-	std::string pattern = get_string(args->get("2"));
-	double init_double = !std::holds_alternative<std::monostate>(args->get("3")) ? get_double(args->get("3")) : 1.0;
-	bool plain = std::holds_alternative<bool>(args->get("4")) ? std::get<bool>(args->get("4")) : false;
+std::vector<LuaValue> string_find(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
+	std::string pattern = get_string(args.at(1));
+	double init_double = args.size() >= 3 ? get_double(args.at(2)) : 1.0;
+	bool plain = args.size() >= 4 && std::holds_alternative<bool>(args.at(3)) ? std::get<bool>(args.at(3)) : false;
 
 	long long init = static_cast<long long>(init_double);
 	long long len = s.length();
@@ -379,10 +377,10 @@ std::vector<LuaValue> string_find(std::shared_ptr<LuaObject> args) {
 }
 
 // string.format
-std::vector<LuaValue> string_format(std::shared_ptr<LuaObject> args) {
-	std::string format_str = get_string(args->get("1"));
+std::vector<LuaValue> string_format(std::vector<LuaValue> args) {
+	std::string format_str = get_string(args.at(0));
 	std::string result = "";
-	int arg_idx = 2;
+	int arg_idx = 0;
 	size_t i = 0;
 	size_t len = format_str.length();
 
@@ -410,7 +408,7 @@ std::vector<LuaValue> string_format(std::shared_ptr<LuaObject> args) {
 		std::string fmt_spec = format_str.substr(spec_start, i - spec_start + 1);
 		i++; 
 
-		LuaValue val = args->get(std::to_string(arg_idx++));
+		LuaValue val = args.at(++arg_idx);
 		char buffer[4096]; 
 
 		switch (spec) {
@@ -458,15 +456,15 @@ std::vector<LuaValue> string_format(std::shared_ptr<LuaObject> args) {
 }
 
 // string.gmatch
-std::vector<LuaValue> string_gmatch(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
-	std::string pattern = get_string(args->get("2"));
+std::vector<LuaValue> string_gmatch(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
+	std::string pattern = get_string(args.at(1));
 
 	auto s_ptr = std::make_shared<std::string>(s);
 	auto p_ptr = std::make_shared<std::string>(pattern);
 	auto pos_ptr = std::make_shared<size_t>(0); // Current search index
 
-	auto func = [s_ptr, p_ptr, pos_ptr](std::shared_ptr<LuaObject> _) -> std::vector<LuaValue> {
+	auto func = [s_ptr, p_ptr, pos_ptr](std::vector<LuaValue> _) -> std::vector<LuaValue> {
 		const char* s_raw = s_ptr->c_str();
 		const char* s_end = s_raw + s_ptr->length();
 		const char* p_raw = p_ptr->c_str();
@@ -516,11 +514,11 @@ std::vector<LuaValue> string_gmatch(std::shared_ptr<LuaObject> args) {
 }
 
 // string.gsub
-std::vector<LuaValue> string_gsub(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
-	std::string pattern = get_string(args->get("2"));
-	LuaValue repl_val = args->get("3");
-	double n_d = !std::holds_alternative<std::monostate>(args->get("4")) ? get_double(args->get("4")) : -1.0;
+std::vector<LuaValue> string_gsub(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
+	std::string pattern = get_string(args.at(1));
+	LuaValue repl_val = args.at(2);
+	double n_d = args.size() >= 4 ? get_double(args.at(3)) : -1.0;
 	long long max_subs = (n_d < 0) ? (long long)(s.length() + 1) : (long long)n_d;
 
 	std::string result;
@@ -593,12 +591,13 @@ std::vector<LuaValue> string_gsub(std::shared_ptr<LuaObject> args) {
 				auto f_args = std::make_shared<LuaObject>();
 				// If we have explicit captures (caps.size() > 1 since caps[0] is whole), use them
 				// otherwise use caps[0] (whole match)
+				std::vector<LuaValue> f_res;
 				if (caps.size() > 1) {
-					for (size_t k = 1; k < caps.size(); ++k) f_args->set(std::to_string(k), caps[k]);
+					f_res = func->func(caps);
 				} else {
 					f_args->set("1", caps[0]);
+					f_res = func->func({caps[0]});
 				}
-				auto f_res = func->func(f_args);
 				if (!f_res.empty() && !std::holds_alternative<std::monostate>(f_res[0])) {
 					replacement_str = to_cpp_string(f_res[0]);
 					has_rep = true;
@@ -652,23 +651,23 @@ std::vector<LuaValue> string_gsub(std::shared_ptr<LuaObject> args) {
 }
 
 // string.len
-std::vector<LuaValue> string_len(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
+std::vector<LuaValue> string_len(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
 	return {static_cast<double>(s.length())};
 }
 
 // string.lower
-std::vector<LuaValue> string_lower(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
+std::vector<LuaValue> string_lower(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
 	std::transform(s.begin(), s.end(), s.begin(), ::tolower);
 	return {s};
 }
 
 // string.match
-std::vector<LuaValue> string_match(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
-	std::string pattern = get_string(args->get("2"));
-	double init_d = !std::holds_alternative<std::monostate>(args->get("3")) ? get_double(args->get("3")) : 1.0;
+std::vector<LuaValue> string_match(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
+	std::string pattern = get_string(args.at(1));
+	double init_d = (args.size() >= 3) ? get_double(args.at(2)) : 1.0;
 	
 	long long init = (long long)init_d;
 	if(init < 0) init = s.length() + init + 1;
@@ -707,15 +706,15 @@ std::vector<LuaValue> string_match(std::shared_ptr<LuaObject> args) {
 }
 
 // string.pack (Stub)
-std::vector<LuaValue> string_pack(std::shared_ptr<LuaObject> args) { throw std::runtime_error("not implemented"); }
+std::vector<LuaValue> string_pack(std::vector<LuaValue> args) { throw std::runtime_error("not implemented"); }
 // string.packsize (Stub)
-std::vector<LuaValue> string_packsize(std::shared_ptr<LuaObject> args) { throw std::runtime_error("not implemented"); }
+std::vector<LuaValue> string_packsize(std::vector<LuaValue> args) { throw std::runtime_error("not implemented"); }
 
 // string.rep
-std::vector<LuaValue> string_rep(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
-	double n = get_double(args->get("2"));
-	std::string sep = std::holds_alternative<std::string>(args->get("3")) ? std::get<std::string>(args->get("3")) : "";
+std::vector<LuaValue> string_rep(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
+	double n = get_double(args.at(1));
+	std::string sep = args.size() >= 3 && std::holds_alternative<std::string>(args.at(2)) ? std::get<std::string>(args.at(2)) : "";
 	
 	if (n <= 0) return {""};
 	std::string res;
@@ -729,17 +728,17 @@ std::vector<LuaValue> string_rep(std::shared_ptr<LuaObject> args) {
 }
 
 // string.reverse
-std::vector<LuaValue> string_reverse(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
+std::vector<LuaValue> string_reverse(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
 	std::reverse(s.begin(), s.end());
 	return {s};
 }
 
 // string.sub
-std::vector<LuaValue> string_sub(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
-	double i_d = !std::holds_alternative<std::monostate>(args->get("2")) ? get_double(args->get("2")) : 1.0;
-	double j_d = !std::holds_alternative<std::monostate>(args->get("3")) ? get_double(args->get("3")) : -1.0;
+std::vector<LuaValue> string_sub(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
+	double i_d = args.size() >= 2 ? get_double(args.at(1)) : 1.0;
+	double j_d = args.size() >= 3 ? get_double(args.at(2)) : -1.0;
 
 	long long len = s.length();
 	long long i = (long long)i_d;
@@ -755,11 +754,11 @@ std::vector<LuaValue> string_sub(std::shared_ptr<LuaObject> args) {
 }
 
 // string.unpack (Stub)
-std::vector<LuaValue> string_unpack(std::shared_ptr<LuaObject> args) { throw std::runtime_error("not implemented"); }
+std::vector<LuaValue> string_unpack(std::vector<LuaValue> args) { throw std::runtime_error("not implemented"); }
 
 // string.upper
-std::vector<LuaValue> string_upper(std::shared_ptr<LuaObject> args) {
-	std::string s = get_string(args->get("1"));
+std::vector<LuaValue> string_upper(std::vector<LuaValue> args) {
+	std::string s = get_string(args.at(0));
 	std::transform(s.begin(), s.end(), s.begin(), ::toupper);
 	return {s};
 }
@@ -767,25 +766,15 @@ std::vector<LuaValue> string_upper(std::shared_ptr<LuaObject> args) {
 // --- C++ Helper Implementations (Updated to use native matcher) ---
 
 std::vector<LuaValue> lua_string_match(const LuaValue& str, const LuaValue& pattern) {
-	std::shared_ptr<LuaObject> args = std::make_shared<LuaObject>();
-	args->set("1", str);
-	args->set("2", pattern);
-	return string_match(args);
+	return string_match({str, pattern});
 }
 
 std::vector<LuaValue> lua_string_find(const LuaValue& str, const LuaValue& pattern) {
-	std::shared_ptr<LuaObject> args = std::make_shared<LuaObject>();
-	args->set("1", str);
-	args->set("2", pattern);
-	return string_find(args);
+	return string_find({str, pattern});
 }
 
 std::vector<LuaValue> lua_string_gsub(const LuaValue& str, const LuaValue& pattern, const LuaValue& replacement) {
-	std::shared_ptr<LuaObject> args = std::make_shared<LuaObject>();
-	args->set("1", str);
-	args->set("2", pattern);
-	args->set("3", replacement);
-	return string_gsub(args);
+	return string_gsub({str, pattern, replacement});
 }
 
 // --- Library Creation ---

@@ -11,7 +11,7 @@ std::string get_lua_type_name(const LuaValue& val);
 std::string to_cpp_string(const LuaValue& value);
 bool lua_equals(const LuaValue& a, const LuaValue& b);
 bool is_integer_key(double d, long long& out);
-std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<LuaObject> args);
+std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::vector<LuaValue> args);
 
 // ==========================================
 // Internal Helper Functions
@@ -77,9 +77,7 @@ LuaValue LuaObject::get_item(const LuaValue& key) {
 			return std::get<std::shared_ptr<LuaObject>>(index_val)->get_item(key);
 		} else if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(index_val)) {
 			auto args = std::make_shared<LuaObject>();
-			args->set_item("1", shared_from_this());
-			args->set_item("2", key);
-			std::vector<LuaValue> results = std::get<std::shared_ptr<LuaFunctionWrapper>>(index_val)->func(args);
+			std::vector<LuaValue> results = std::get<std::shared_ptr<LuaFunctionWrapper>>(index_val)->func({shared_from_this(), key});
 			return results.empty() ? std::monostate{} : results[0];
 		}
 	}
@@ -115,11 +113,7 @@ void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
 	if (!key_exists && metatable) {
 		auto newindex_val = metatable->get_item("__newindex");
 		if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(newindex_val)) {
-			auto args = std::make_shared<LuaObject>();
-			args->set_item("1", shared_from_this());
-			args->set_item("2", key);
-			args->set_item("3", value);
-			std::get<std::shared_ptr<LuaFunctionWrapper>>(newindex_val)->func(args);
+			std::get<std::shared_ptr<LuaFunctionWrapper>>(newindex_val)->func({shared_from_this(), key, value});
 			return;
 		} else if (std::holds_alternative<std::shared_ptr<LuaObject>>(newindex_val)) {
 			std::get<std::shared_ptr<LuaObject>>(newindex_val)->set_item(key, value);
@@ -227,9 +221,7 @@ bool lua_less_than(const LuaValue& a, const LuaValue& b) {
 		if (t->metatable) {
 			auto lt = t->metatable->get_item("__lt");
 			if (!std::holds_alternative<std::monostate>(lt)) {
-				auto args = std::make_shared<LuaObject>();
-				args->set_item("1", a); args->set_item("2", b);
-				auto res = call_lua_value(lt, args);
+				auto res = call_lua_value(lt, {a, b});
 				return !res.empty() && is_lua_truthy(res[0]);
 			}
 		}
@@ -240,9 +232,7 @@ bool lua_less_than(const LuaValue& a, const LuaValue& b) {
 		if (t->metatable) {
 			 auto lt = t->metatable->get_item("__lt");
 			 if (!std::holds_alternative<std::monostate>(lt)) {
-				auto args = std::make_shared<LuaObject>();
-				args->set_item("1", a); args->set_item("2", b);
-				auto res = call_lua_value(lt, args);
+				auto res = call_lua_value(lt, {a, b});
 				return !res.empty() && is_lua_truthy(res[0]);
 			 }
 		}
@@ -278,9 +268,7 @@ bool lua_less_equals(const LuaValue& a, const LuaValue& b) {
 			if (t->metatable) {
 				auto le = t->metatable->get_item("__le");
 				if (!std::holds_alternative<std::monostate>(le)) {
-					auto args = std::make_shared<LuaObject>();
-					args->set_item("1", a); args->set_item("2", b);
-					auto res = call_lua_value(le, args);
+					auto res = call_lua_value(le, {a, b});
 					return !res.empty() && is_lua_truthy(res[0]);
 				}
 			}
@@ -291,9 +279,7 @@ bool lua_less_equals(const LuaValue& a, const LuaValue& b) {
 			if (t->metatable) {
 				auto le = t->metatable->get_item("__le");
 				if (!std::holds_alternative<std::monostate>(le)) {
-					auto args = std::make_shared<LuaObject>();
-					args->set_item("1", a); args->set_item("2", b);
-					auto res = call_lua_value(le, args);
+					auto res = call_lua_value(le, {a, b});
 					return !res.empty() && is_lua_truthy(res[0]);
 				}
 			}
@@ -338,9 +324,7 @@ LuaValue lua_concat(const LuaValue& a, const LuaValue& b) {
 		if (t->metatable) {
 			 auto concat = t->metatable->get_item("__concat");
 			 if (!std::holds_alternative<std::monostate>(concat)) {
-				 auto args = std::make_shared<LuaObject>();
-				 args->set_item("1", a); args->set_item("2", b);
-				 return call_lua_value(concat, args)[0];
+				 return call_lua_value(concat, {a, b})[0];
 			 }
 		}
 	}
@@ -351,9 +335,9 @@ LuaValue lua_concat(const LuaValue& a, const LuaValue& b) {
 // Standard Library
 // ==========================================
 
-std::vector<LuaValue> lua_rawget(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get_item("1"));
-	auto key = args->get_item("2");
+std::vector<LuaValue> lua_rawget(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
+	auto key = args.at(1);
 	if (!table) throw std::runtime_error("bad argument #1 to 'rawget' (table expected)");
 
 	long long int_key;
@@ -371,10 +355,10 @@ std::vector<LuaValue> lua_rawget(std::shared_ptr<LuaObject> args) {
 	return {std::monostate{}};
 }
 
-std::vector<LuaValue> lua_rawset(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get_item("1"));
-	auto key = args->get_item("2");
-	auto value = args->get_item("3");
+std::vector<LuaValue> lua_rawset(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
+	auto key = args.at(1);
+	auto value = args.at(2);
 	if (!table) throw std::runtime_error("bad argument #1 to 'rawset' (table expected)");
 	if (std::holds_alternative<std::monostate>(key)) throw std::runtime_error("table index is nil");
 
@@ -392,11 +376,11 @@ std::vector<LuaValue> lua_rawset(std::shared_ptr<LuaObject> args) {
 		if (std::holds_alternative<std::monostate>(value)) table->properties.erase(s_key);
 		else table->properties[s_key] = value;
 	}
-	return {args->get_item("1")};
+	return {args.at(0)};
 }
 
-std::vector<LuaValue> lua_rawlen(std::shared_ptr<LuaObject> args) {
-	LuaValue v = args->get_item("1");
+std::vector<LuaValue> lua_rawlen(std::vector<LuaValue> args) {
+	LuaValue v = args.at(0);
 	if (std::holds_alternative<std::string>(v)) return {static_cast<double>(std::get<std::string>(v).length())};
 	if (std::holds_alternative<std::shared_ptr<LuaObject>>(v)) {
 		auto t = std::get<std::shared_ptr<LuaObject>>(v);
@@ -406,10 +390,10 @@ std::vector<LuaValue> lua_rawlen(std::shared_ptr<LuaObject> args) {
 	return {0.0};
 }
 
-std::vector<LuaValue> lua_rawequal(std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> lua_rawequal(std::vector<LuaValue> args) {
 	// Delegates to a simplified check
-	LuaValue a = args->get_item("1");
-	LuaValue b = args->get_item("2");
+	LuaValue a = args.at(0);
+	LuaValue b = args.at(1);
 	if (a.index() != b.index()) return {false};
 	
 	// Manual check to avoid recursion into metamethods
@@ -422,10 +406,9 @@ std::vector<LuaValue> lua_rawequal(std::shared_ptr<LuaObject> args) {
 	return {false};
 }
 
-std::vector<LuaValue> lua_select(std::shared_ptr<LuaObject> args) {
-	LuaValue index_val = args->get_item("1");
-	int count = 0;
-	while (!std::holds_alternative<std::monostate>(args->get_item(std::to_string(count + 2)))) count++;
+std::vector<LuaValue> lua_select(std::vector<LuaValue> args) {
+	LuaValue index_val = args.at(0);
+	int count = args.size() - 1;
 
 	if (std::holds_alternative<std::string>(index_val) && std::get<std::string>(index_val) == "#") {
 		return {static_cast<double>(count)};
@@ -437,15 +420,15 @@ std::vector<LuaValue> lua_select(std::shared_ptr<LuaObject> args) {
 
 	std::vector<LuaValue> results;
 	for (int i = n; i <= count; ++i) {
-		results.push_back(args->get_item(std::to_string(i + 1)));
+		results.push_back(args.at(i));
 	}
 	return results;
 }
 
-std::vector<LuaValue> lua_next(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get_item("1"));
+std::vector<LuaValue> lua_next(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
 	if (!table) throw std::runtime_error("bad argument #1 to 'next' (table expected)");
-	LuaValue key = args->get_item("2");
+	LuaValue key = args.at(1);
 
 	bool searching_array = true;
 	if (std::holds_alternative<std::monostate>(key)) {
@@ -488,35 +471,33 @@ std::vector<LuaValue> lua_next(std::shared_ptr<LuaObject> args) {
 	return {std::monostate{}};
 }
 
-std::vector<LuaValue> lua_pairs(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get_item("1"));
+std::vector<LuaValue> lua_pairs(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
 	if (!table) throw std::runtime_error("bad argument #1 to 'pairs' (table expected)");
 	if (table->metatable) {
 		auto m = table->metatable->get_item("__pairs");
 		if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(m)) {
-			auto a = std::make_shared<LuaObject>(); a->set_item("1", table);
-			return std::get<std::shared_ptr<LuaFunctionWrapper>>(m)->func(a);
+			return std::get<std::shared_ptr<LuaFunctionWrapper>>(m)->func({table});
 		}
 	}
 	return {std::make_shared<LuaFunctionWrapper>(lua_next), table, std::monostate{}};
 }
 
-std::vector<LuaValue> ipairs_iterator(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get_item("1"));
-	long long index = get_long_long(args->get_item("2")) + 1;
+std::vector<LuaValue> ipairs_iterator(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
+	long long index = get_long_long(args.at(1)) + 1;
 	LuaValue val = table->get_item(static_cast<double>(index));
 	if (std::holds_alternative<std::monostate>(val)) return {std::monostate{}};
 	return {static_cast<double>(index), val};
 }
 
-std::vector<LuaValue> lua_ipairs(std::shared_ptr<LuaObject> args) {
-	auto table = get_object(args->get_item("1"));
+std::vector<LuaValue> lua_ipairs(std::vector<LuaValue> args) {
+	auto table = get_object(args.at(0));
 	if (!table) throw std::runtime_error("bad argument #1 to 'ipairs' (table expected)");
 	if (table->metatable) {
 		auto m = table->metatable->get_item("__ipairs");
 		if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(m)) {
-			auto a = std::make_shared<LuaObject>(); a->set_item("1", table);
-			return std::get<std::shared_ptr<LuaFunctionWrapper>>(m)->func(a);
+			return std::get<std::shared_ptr<LuaFunctionWrapper>>(m)->func({table});
 		}
 	}
 	return {std::make_shared<LuaFunctionWrapper>(ipairs_iterator), table, 0.0};
@@ -526,7 +507,7 @@ std::vector<LuaValue> lua_ipairs(std::shared_ptr<LuaObject> args) {
 // Runtime Execution Helpers
 // ==========================================
 
-std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<LuaObject> args) {
+std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::vector<LuaValue> args) {
 	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(callable)) {
 		return std::get<std::shared_ptr<LuaFunctionWrapper>>(callable)->func(args);
 	}
@@ -535,82 +516,54 @@ std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::shared_ptr<L
 		if (t->metatable) {
 			auto call = t->metatable->get_item("__call");
 			if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(call)) {
-				auto new_args = std::make_shared<LuaObject>();
-				new_args->set_item("1", t);
-				int i = 1;
-				while (true) {
-					auto val = args->get_item(std::to_string(i));
-					if (std::holds_alternative<std::monostate>(val)) break;
-					new_args->set_item(std::to_string(i+1), val);
-					i++;
-				}
-				return std::get<std::shared_ptr<LuaFunctionWrapper>>(call)->func(new_args);
+				return std::get<std::shared_ptr<LuaFunctionWrapper>>(call)->func(args);
 			}
 		}
 	}
 	throw std::runtime_error("attempt to call a " + get_lua_type_name(callable) + " value");
 }
 
-std::vector<LuaValue> lua_xpcall(std::shared_ptr<LuaObject> args) {
-	LuaValue func = args->get_item("1");
-	LuaValue errh = args->get_item("2");
-
-	auto fargs = std::make_shared<LuaObject>();
-	int i = 3;
-	while(true) {
-		auto v = args->get_item(std::to_string(i));
-		if (std::holds_alternative<std::monostate>(v)) break;
-		fargs->set_item(std::to_string(i-2), v);
-		i++;
-	}
+std::vector<LuaValue> lua_xpcall(std::vector<LuaValue> args) {
+	LuaValue func = args.at(0);
+	LuaValue errh = args.at(1);
 
 	try {
-		std::vector<LuaValue> res = call_lua_value(func, fargs);
+		std::vector<LuaValue> res = call_lua_value(func, std::vector(args.begin() + 2, args.end()));
 		res.insert(res.begin(), true);
 		return res;
 	} catch (const std::exception& e) {
 		if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(errh)) {
-			auto eargs = std::make_shared<LuaObject>();
-			eargs->set_item("1", std::string(e.what()));
-			auto eres = std::get<std::shared_ptr<LuaFunctionWrapper>>(errh)->func(eargs);
+			auto eres = std::get<std::shared_ptr<LuaFunctionWrapper>>(errh)->func({std::string(e.what())});
 			return {false, eres.empty() ? LuaValue(std::monostate{}) : eres[0]};
 		}
 		return {false, std::string(e.what())};
 	}
 }
 
-std::vector<LuaValue> lua_assert(std::shared_ptr<LuaObject> args) {
-	if (!is_lua_truthy(args->get_item("1"))) {
-		LuaValue msg = args->get_item("2");
+std::vector<LuaValue> lua_assert(std::vector<LuaValue> args) {
+	if (!is_lua_truthy(args.at(0))) {
+		LuaValue msg = args.at(1);
 		throw std::runtime_error(std::holds_alternative<std::string>(msg) ? std::get<std::string>(msg) : "assertion failed!");
 	}
 	std::vector<LuaValue> ret;
-	int i=1;
-	while(true) {
-		LuaValue v = args->get_item(std::to_string(i));
-		if (std::holds_alternative<std::monostate>(v)) break;
+	for(LuaValue v: args) {
 		ret.push_back(v);
-		i++;
 	}
 	return ret;
 }
 
-std::vector<LuaValue> lua_warn(std::shared_ptr<LuaObject> args) {
-	int i=1;
-	while(true) {
-		LuaValue v = args->get_item(std::to_string(i));
-		if (std::holds_alternative<std::monostate>(v)) break;
+std::vector<LuaValue> lua_warn(std::vector<LuaValue> args) {
+	for (LuaValue v: args) {
 		std::cerr << to_cpp_string(v);
-		i++;
 	}
 	std::cerr << std::endl;
 	return {std::monostate{}};
 }
 
-std::vector<LuaValue> lua_load(std::shared_ptr<LuaObject>) { throw std::runtime_error("load not supported"); }
-std::vector<LuaValue> lua_loadfile(std::shared_ptr<LuaObject>) { throw std::runtime_error("loadfile not supported"); }
-std::vector<LuaValue> lua_dofile(std::shared_ptr<LuaObject>) { throw std::runtime_error("dofile not supported"); }
-std::vector<LuaValue> lua_collectgarbage(std::shared_ptr<LuaObject>) { return {std::monostate{}}; }
+std::vector<LuaValue> lua_load(std::vector<LuaValue>) { throw std::runtime_error("load not supported"); }
+std::vector<LuaValue> lua_loadfile(std::vector<LuaValue>) { throw std::runtime_error("loadfile not supported"); }
+std::vector<LuaValue> lua_dofile(std::vector<LuaValue>) { throw std::runtime_error("dofile not supported"); }
+std::vector<LuaValue> lua_collectgarbage(std::vector<LuaValue>) { return {std::monostate{}}; }
 
 LuaValue lua_get_member(const LuaValue& base, const LuaValue& key) {
 	if (std::holds_alternative<std::shared_ptr<LuaObject>>(base)) {
@@ -631,9 +584,7 @@ LuaValue lua_get_length(const LuaValue& val) {
 		if (obj->metatable) {
 			auto len_meta = obj->metatable->get_item("__len");
 			if (!std::holds_alternative<std::monostate>(len_meta)) {
-				auto args = std::make_shared<LuaObject>();
-				args->set_item("1", obj);
-				auto res = call_lua_value(len_meta, args);
+				auto res = call_lua_value(len_meta, {obj});
 				if (!res.empty()) return res[0];
 				return std::monostate{};
 			}

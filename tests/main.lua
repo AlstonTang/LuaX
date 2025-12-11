@@ -91,6 +91,7 @@ print("my_object.x (after attempted set):", my_object.x)
 print("Begin loop")
 
 thing = 1
+print("os.clock right before starting:", os.clock())
 
 for i=1, 100000 do
     thing = thing + math.sin(i)
