@@ -24,7 +24,13 @@ std::vector<LuaValue> os_exit(std::shared_ptr<LuaObject> args) {
 	double code_double = std::holds_alternative<double>(args->get("1")) ? std::get<double>(args->get("1")) : 0.0;
 	bool close = std::holds_alternative<bool>(args->get("2")) ? std::get<bool>(args->get("2")) : false; // Lua 5.4 close argument
 
-	int code = static_cast<int>(code_double);
+	int code = 0;
+
+	if (std::holds_alternative<long long>(args->get("1"))) {
+		code = static_cast<int>(std::get<long long>(args->get("1")));
+	} else {
+		code = static_cast<int>(code_double);
+	}
 	// In a real Lua interpreter, 'close' would handle closing the Lua state.
 	// Here, we just exit the C++ program.
 	std::exit(code);
@@ -156,7 +162,7 @@ std::vector<LuaValue> os_time(std::shared_ptr<LuaObject> args) {
 // os.sleep
 std::vector<LuaValue> os_sleep(std::shared_ptr<LuaObject> args) {
 	auto duration = std::chrono::duration<double>(get_double(args->get("1")));
-    std::this_thread::sleep_for(duration);
+	std::this_thread::sleep_for(duration);
 	return {std::monostate{}};
 }
 

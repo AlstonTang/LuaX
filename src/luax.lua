@@ -11,14 +11,14 @@ package.path = package.path .. ";" .. script_dir .. "../?.lua;" .. script_dir ..
 local cpp_translator = require("src.cpp_translator")
 local translator = require("src.translator")
 local formatter = require("src.formatter")
-local is_running_native = (_G._VERSION ~= "Lua 5.4")
+local is_running_native = (_G._VERSION:find("LuaX") ~= nil)
 
 -- Configuration
 local BUILD_DIR = "build" -- Change this to modify where intermediate files go
 local CXX = "clang++"
 
 -- Argument Parsing
-local usage = "Usage: lua5.4 src/luax.lua [-k|--keep] <path_to_src_lua_file> <path_to_out_file> <build_directory>"
+local usage = (is_running_native and "Usage: luax" or "Usage: lua5.4 src/luax.lua") .. " [-k|--keep] <path_to_src_lua_file> <path_to_out_file> <build_directory>"
 local input_lua_file = nil
 local path_to_out_file = nil
 local build_directory = nil
