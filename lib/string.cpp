@@ -466,10 +466,13 @@ std::vector<LuaValue> string_gmatch(std::vector<LuaValue> args) {
 
 	auto func = [s_ptr, p_ptr, pos_ptr](std::vector<LuaValue> _) -> std::vector<LuaValue> {
 		const char* s_raw = s_ptr->c_str();
-		const char* s_end = s_raw + s_ptr->length();
+		size_t len = s_ptr->length();
+		const char* s_end = s_raw + len;
 		const char* p_raw = p_ptr->c_str();
 		const char* p_end = p_raw + p_ptr->length();
 		
+		if (*pos_ptr > len) return {};
+
 		bool anchor = (*p_raw == '^');
 		const char* p_eff = anchor ? p_raw + 1 : p_raw;
 
@@ -485,16 +488,20 @@ std::vector<LuaValue> string_gmatch(std::vector<LuaValue> args) {
 			const char* res = LuaPattern::match(&ms, curr, p_eff);
 			if (res) {
 				size_t match_len = res - curr;
-				// Next search starts after this match. 
-				// If match is empty, we must advance 1 char to avoid infinite loop.
-				size_t new_pos = (res - s_raw);
-				if (match_len == 0 && new_pos < s_ptr->length()) new_pos++;
-				
-				*pos_ptr = new_pos;
-				
-				if (anchor && *pos_ptr > 0) {
-					 // Anchor matched once, subsequent calls return nil
-					 *pos_ptr = s_ptr->length() + 2; 
+				size_t current_idx = (curr - s_raw);
+
+				if (match_len == 0) {
+					if (current_idx < len) {
+						*pos_ptr = current_idx + 1;
+					} else {
+						*pos_ptr = len + 1;
+					}
+				} else {
+					*pos_ptr = (res - s_raw);
+				}
+
+				if (anchor) {
+					*pos_ptr = len + 1;
 				}
 
 				if (ms.level > 0) {
@@ -503,10 +510,12 @@ std::vector<LuaValue> string_gmatch(std::vector<LuaValue> args) {
 					return {std::string(curr, match_len)};
 				}
 			}
-			if (anchor) break;
-			if (curr == s_end) break;
+
+			if (anchor) break; // Anchored search fails if not found immediately
+			if (curr == s_end) break; // End of string reached
 			curr++;
 		}
+		*pos_ptr = len + 1;
 		return {}; // nil
 	};
 
