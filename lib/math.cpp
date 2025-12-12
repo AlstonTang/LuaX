@@ -32,8 +32,8 @@ std::vector<LuaValue> math_randomseed(std::vector<LuaValue> args) {
 
 // math.random
 std::vector<LuaValue> math_random(std::vector<LuaValue> args) {
-	LuaValue arg1 = args.at(0);
-	LuaValue arg2 = args.at(1);
+	LuaValue arg1 = args.size() >= 1 ? args.at(0) : std::monostate{};
+	LuaValue arg2 = args.size() >= 2 ? args.at(1) : std::monostate{};
 
 	if (std::holds_alternative<std::monostate>(arg1)) {
 		// math.random() returns a float in [0,1)
