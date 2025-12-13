@@ -1,0 +1,60 @@
+# LuaX clang-tidy configuration
+# Enables helpful warnings and diagnostics for C++ tooling
+
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  clang-analyzer-*,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-pro-type-member-init,
+  cppcoreguidelines-slicing,
+  misc-definitions-in-headers,
+  misc-redundant-expression,
+  misc-unused-parameters,
+  modernize-use-auto,
+  modernize-use-default-member-init,
+  modernize-use-emplace,
+  modernize-use-nullptr,
+  modernize-use-override,
+  performance-*,
+  -performance-no-int-to-ptr,
+  readability-braces-around-statements,
+  readability-const-return-type,
+  readability-container-size-empty,
+  readability-duplicate-include,
+  readability-identifier-naming,
+  readability-inconsistent-declaration-parameter-name,
+  readability-misleading-indentation,
+  readability-misplaced-array-index,
+  readability-redundant-string-cstr,
+  readability-simplify-boolean-expr,
+  readability-simplify-subscript-expr,
+  readability-string-compare,
+
+WarningsAsErrors: ""
+
+HeaderFilterRegex: "include/.*\\.hpp$"
+
+CheckOptions:
+  - key: readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key: readability-identifier-naming.StructCase
+    value: CamelCase
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.PrivateMemberSuffix
+    value: "_"
+  - key: readability-identifier-naming.ConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+  - key: misc-unused-parameters.StrictMode
+    value: false
+  - key: cppcoreguidelines-init-variables.IncludeStyle
+    value: google
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: false

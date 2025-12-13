@@ -181,16 +181,29 @@ local function is_table_unpack_call(node)
 end
 
 --------------------------------------------------------------------------------
+-- Helper: Check if node returns multiple values (call, varargs matches)
+--------------------------------------------------------------------------------
+
+local function is_multiret(node)
+	return node.type == "call_expression" or 
+	       node.type == "method_call_expression" or 
+	       node.type == "varargs"
+end
+
+--------------------------------------------------------------------------------
 -- Helper: Build Arguments Code
 --------------------------------------------------------------------------------
 
 local function build_args_code(ctx, node, start_index, depth, self_arg)
-	-- Check for complex args (table.unpack)
+	local children = node.ordered_children
+	local count = #children
 	local has_complex_args = false
-	for i = start_index, #node.ordered_children do
-		if is_table_unpack_call(node.ordered_children[i]) then
+	
+	-- Check if the LAST argument is multiret (call or varargs)
+	if count >= start_index then
+		local last_arg = children[count]
+		if is_multiret(last_arg) or is_table_unpack_call(last_arg) then
 			has_complex_args = true
-			break
 		end
 	end
 	
@@ -203,16 +216,17 @@ local function build_args_code(ctx, node, start_index, depth, self_arg)
 			args_init_code = args_init_code .. temp_args_var .. ".push_back(" .. self_arg .. "); "
 		end
 		
-		for i = start_index, #node.ordered_children do
-			local arg_node = node.ordered_children[i]
-			if is_table_unpack_call(arg_node) then
-				local unpack_table_arg = arg_node.ordered_children[2]
-				local unpack_vec_var = "unpack_vec_" .. ctx:get_unique_id()
-				local translated_table = translate_node(ctx, unpack_table_arg, depth + 1)
-				
-				args_init_code = args_init_code .. "auto " .. unpack_vec_var .. " = call_lua_value(get_object(_G->get_item(\"table\"))->get_item(\"unpack\"), ( [=]() mutable { std::vector<LuaValue> temp_unpack_args; temp_unpack_args.push_back(" .. translated_table .. "); return temp_unpack_args; } )()); "
-				args_init_code = args_init_code .. temp_args_var .. ".insert(" .. temp_args_var .. ".end(), " .. unpack_vec_var .. ".begin(), " .. unpack_vec_var .. ".end()); "
+		for i = start_index, count do
+			local arg_node = children[i]
+			-- If it's the last argument AND it's multiret, expand it
+			if i == count and (is_multiret(arg_node) or is_table_unpack_call(arg_node)) then
+				local vec_var = "arg_vec_" .. ctx:get_unique_id()
+				-- Use translate_node directly to get the vector
+				local val_code = translate_node(ctx, arg_node, depth + 1)
+				args_init_code = args_init_code .. "auto " .. vec_var .. " = " .. val_code .. "; "
+				args_init_code = args_init_code .. temp_args_var .. ".insert(" .. temp_args_var .. ".end(), " .. vec_var .. ".begin(), " .. vec_var .. ".end()); "
 			else
+				-- Otherwise, just take the first value
 				local arg_val_code = get_single_value(ctx, arg_node, depth)
 				args_init_code = args_init_code .. temp_args_var .. ".push_back(" .. arg_val_code .. "); "
 			end
@@ -220,19 +234,19 @@ local function build_args_code(ctx, node, start_index, depth, self_arg)
 		
 		return "( [=]() mutable { std::vector<LuaValue> " .. temp_args_var .. "; " .. args_init_code .. "return " .. temp_args_var .. "; } )()"
 	else
-		-- Clean initialization using initializer list
+		-- Clean initialization using comma list
 		local arg_list = {}
 		
 		if self_arg then
 			table.insert(arg_list, self_arg)
 		end
 		
-		for i = start_index, #node.ordered_children do
-			local arg_val_code = get_single_value(ctx, node.ordered_children[i], depth)
+		for i = start_index, count do
+			local arg_val_code = get_single_value(ctx, children[i], depth)
 			table.insert(arg_list, arg_val_code)
 		end
 		
-		return "std::vector<LuaValue>{" .. table.concat(arg_list, ", ") .. "}"
+		return table.concat(arg_list, ", ")
 	end
 end
 
@@ -396,11 +410,9 @@ register_handler("binary_expression", function(ctx, node, depth)
 		return "lua_greater_equals(" .. left .. ", " .. right .. ")"
 	-- Logical operators
 	elseif operator == "and" then
-		local id = ctx:get_unique_id()
-		return "( [=]() mutable -> LuaValue { const auto left_and_val_" .. id .. " = " .. left .. "; return is_lua_truthy(left_and_val_" .. id .. ") ? LuaValue(" .. right .. ") : LuaValue(left_and_val_" .. id .. "); } )()"
+		return "lua_logical_and(" .. left .. ", [&]() { return " .. right .. "; })"
 	elseif operator == "or" then
-		local id = ctx:get_unique_id()
-		return "( [=]() mutable -> LuaValue { const auto left_or_val_" .. id .. " = " .. left .. "; return is_lua_truthy(left_or_val_" .. id .. ") ? LuaValue(left_or_val_" .. id .. ") : LuaValue(" .. right .. "); } )()"
+		return "lua_logical_or(" .. left .. ", [&]() { return " .. right .. "; })"
 	-- String concatenation
 	elseif operator == ".." then
 		return "lua_concat(" .. left .. ", " .. right .. ")"
@@ -466,7 +478,7 @@ end)
 
 register_handler("varargs", function(ctx, node, depth)
 	local start_index = ctx.current_function_fixed_params_count
-	return "( [=]() mutable -> std::vector<LuaValue> { if(args.size() > " .. start_index .. ") return std::vector<LuaValue>(args.begin() + " .. start_index .. ", args.end()); return {}; } )()"
+	return "( [=]() mutable -> std::vector<LuaValue> { if(n_args > " .. start_index .. ") return std::vector<LuaValue>(args + " .. start_index .. ", args + n_args); return {}; } )()"
 end)
 
 --------------------------------------------------------------------------------
@@ -474,8 +486,12 @@ end)
 --------------------------------------------------------------------------------
 
 register_handler("table_constructor", function(ctx, node, depth)
-	local cpp_code = "std::make_shared<LuaObject>()"
 	local fields = node:get_all_children_of_type("table_field")
+	if #fields == 0 then
+		return "std::make_shared<LuaObject>()"
+	end
+
+	local cpp_code = "std::make_shared<LuaObject>()"
 	local list_index = 1
 	local temp_table_var = "temp_table_" .. ctx:get_unique_id()
 	local construction_code = "auto " .. temp_table_var .. " = " .. cpp_code .. ";\n"
@@ -525,11 +541,43 @@ local BuiltinCallHandlers = {}
 
 BuiltinCallHandlers["print"] = function(ctx, node, depth)
 	local cpp_code = ""
-	for i, arg_node in ipairs(node.ordered_children) do
-		if i > 1 then
+	local children = node.ordered_children
+	local count = #children
+	
+	for i = 2, count do
+		local arg_node = children[i]
+		
+		if i == count and (is_multiret(arg_node) or is_table_unpack_call(arg_node)) then
+			-- Last argument is multiret: expand it
+			local vec_var = "print_vec_" .. ctx:get_unique_id()
+			local val_code = translate_node(ctx, arg_node, depth + 1)
+			cpp_code = cpp_code .. "auto " .. vec_var .. " = " .. val_code .. "; "
+			cpp_code = cpp_code .. "for (size_t k = 0; k < " .. vec_var .. ".size(); ++k) { "
+			-- Print separator if not the very first element overall, or between elements
+
+				-- If this is the first arg (i=2) but inside loop, need separator for k>0
+				cpp_code = cpp_code .. "if (k > 0) std::cout << \"\\t\"; "
+
+			-- But wait, if i > 2, we already printed separators for previous args.
+			-- Inside loop: k=0 should likely have separator if i > 2.
+			-- If i=2, k=0 is first item, no separator. k>0 needs separator.
+			-- Logic:
+			-- If i > 2: We printed a tab after previous arg? No, loop below handles trailing tab?
+			-- The original loop: `if i < #children then cout << tab`.
+			-- So previous args printed a tab after themselves.
+			-- So k=0 does NOT need a tab? 
+			-- Wait, `i < #children` logic in original code meant "tab *between* args".
+			-- If we are at last arg, previous arg printed tab?
+			-- Original: `if i < #children`. So arg i-1 printed tab.
+			-- So arg i (this one) starts with no tab needed? 
+			-- YES.
+			-- Inside loop: elements need tabs between them.
+			cpp_code = cpp_code .. "if (k > 0) std::cout << \"\\t\"; "
+			cpp_code = cpp_code .. "print_value(" .. vec_var .. "[k]); } "
+		else
 			local translated_arg = get_single_value(ctx, arg_node, depth)
 			cpp_code = cpp_code .. "print_value(" .. translated_arg .. ");"
-			if i < #node.ordered_children then
+			if i < count then
 				cpp_code = cpp_code .. "std::cout << \"\\t\";"
 			end
 		end
@@ -625,7 +673,11 @@ register_handler("call_expression", function(ctx, node, depth)
 		translated_func_access = translate_node(ctx, func_node, depth + 1)
 	end
 	
-	return "call_lua_value(" .. translated_func_access .. ", " .. args_code .. ")"
+	if args_code == "" then
+		return "call_lua_value(" .. translated_func_access .. ")"
+	else
+		return "call_lua_value(" .. translated_func_access .. ", " .. args_code .. ")"
+	end
 end)
 
 -- Method string handlers (for obj:method() syntax)
@@ -817,7 +869,7 @@ local function translate_function_body(ctx, node, depth)
 	
 	-- Handle method 'self' parameter
 	if node.type == "method_declaration" or node.is_method then
-		params_extraction = params_extraction .. "    LuaValue self = (args.size() > 0 ? args[0] : LuaValue(std::monostate{}));\n"
+		params_extraction = params_extraction .. "    LuaValue self = (n_args > 0 ? args[0] : LuaValue(std::monostate{}));\n"
 		ctx:declare_variable("self")
 		param_index_offset = 1
 	end
@@ -830,7 +882,7 @@ local function translate_function_body(ctx, node, depth)
 			ctx.current_function_fixed_params_count = ctx.current_function_fixed_params_count + 1
 			local param_name = param_node.identifier
 			local vector_idx = i + param_index_offset - 1
-			params_extraction = params_extraction .. "    LuaValue " .. param_name .. " = (args.size() > " .. vector_idx .. " ? args[" .. vector_idx .. "] : LuaValue(std::monostate{}));\n"
+			params_extraction = params_extraction .. "    LuaValue " .. param_name .. " = (n_args > " .. vector_idx .. " ? args[" .. vector_idx .. "] : LuaValue(std::monostate{}));\n"
 			ctx:declare_variable(param_name)
 		end
 	end
@@ -854,7 +906,8 @@ local function translate_function_body(ctx, node, depth)
 	ctx:restore_scope(saved_scope)
 	ctx.current_function_fixed_params_count = prev_param_count
 	
-	return "std::make_shared<LuaFunctionWrapper>([=](std::vector<LuaValue> args) mutable -> " .. return_type .. " {\n" .. params_extraction .. lambda_body .. "})"
+	return "std::make_shared<LuaFunctionWrapper>([=](const LuaValue* args, size_t n_args) mutable -> " .. return_type .. " {\n" .. params_extraction .. lambda_body .. "})"
+
 end
 
 register_handler("function_declaration", function(ctx, node, depth)
@@ -1023,14 +1076,22 @@ register_handler("for_numeric_statement", function(ctx, node, depth)
 			"LuaValue " .. var_name .. " = static_cast<long long>(" .. var_name .. "_native);\n" ..
 			translate_node(ctx, body_node, depth + 1) .. "}"
 	else
+		local start_var = "start_" .. ctx:get_unique_id()
+		local limit_var = "limit_" .. ctx:get_unique_id()
+		local step_var = "step_" .. ctx:get_unique_id()
+		local native_var = var_name .. "_native_" .. ctx:get_unique_id()
 		local actual_step = step_expr_code or "LuaValue(1.0)"
-		local loop_condition
-		if actual_step == "LuaValue(1.0)" or actual_step == "LuaValue(1)" or actual_step == "LuaValue(static_cast<long long>(1))" then
-			loop_condition = "get_double(" .. var_name .. ") <= get_double(" .. end_expr_code .. ")"
-		else
-			loop_condition = "(get_double(" .. actual_step .. ") >= 0 ? get_double(" .. var_name .. ") <= get_double(" .. end_expr_code .. ") : get_double(" .. var_name .. ") >= get_double(" .. end_expr_code .. "))"
-		end
-		return "for (LuaValue " .. var_name .. " = " .. start_expr_code .. "; " .. loop_condition .. "; " .. var_name .. " = LuaValue(get_double(" .. var_name .. ") + get_double(" .. actual_step .. "))) {\n" .. translate_node(ctx, body_node, depth + 1) .. "}"
+
+		local setup = "double " .. start_var .. " = get_double(" .. start_expr_code .. ");\n" ..
+					  "double " .. limit_var .. " = get_double(" .. end_expr_code .. ");\n" ..
+					  "double " .. step_var .. " = get_double(" .. actual_step .. ");\n"
+		
+		local loop_condition = "(" .. step_var .. " >= 0 ? " .. native_var .. " <= " .. limit_var .. " : " .. native_var .. " >= " .. limit_var .. ")"
+		
+		return "{\n" .. setup .. 
+			   "for (double " .. native_var .. " = " .. start_var .. "; " .. loop_condition .. "; " .. native_var .. " += " .. step_var .. ") {\n" ..
+			   "LuaValue " .. var_name .. " = " .. native_var .. ";\n" ..
+			   translate_node(ctx, body_node, depth + 1) .. "}}\n"
 	end
 end)
 

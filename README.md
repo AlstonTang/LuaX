@@ -68,6 +68,29 @@ LuaX works by traversing the Lua AST (Abstract Syntax Tree) and generating equiv
 *   **Garbage Collection**: The runtime uses C++ smart pointers (`std::shared_ptr`) for memory management, which differs from Lua's garbage collector (e.g., reference counting vs. mark-and-sweep). Cycle detection is not currently implemented.
 *   **Speed**: Currently not very fast (yet). The intent is to ensure feature-compatability before we go in and actually make it faster.
 
+## Developer Setup
+
+If you're contributing to LuaX or want enhanced IDE support (clangd, IntelliSense, go-to-definition), run the following:
+
+```bash
+./build_self.sh
+./setup.sh
+```
+
+This configures CMake and generates `compile_commands.json` for C++ tooling. **This is optional for end users** - the transpiler works without it.
+
+### Build System Philosophy
+
+LuaX uses two complementary build approaches:
+
+1. **For Development** (CMake): The `CMakeLists.txt` provides IDE tooling support and builds `libluax_runtime.a` for development workflows.
+
+2. **For User Programs** (Dynamic Makefile): The transpiler (`src/luax.lua`) dynamically generates a Makefile for each project, making it directory-agnostic and independent of where LuaX is installed.
+
+This separation ensures that:
+- Users can transpile Lua programs from anywhere without setup
+- Developers get full IDE support when working on the runtime
+
 ## License
 
 [Apache 2.0](LICENSE)

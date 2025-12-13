@@ -44,7 +44,7 @@ int decode_utf8(const std::string& s, size_t& offset) {
 	}
 
 	unsigned char byte1 = static_cast<unsigned char>(s[offset]);
-	int len = get_utf8_char_length(byte1);
+	const int len = get_utf8_char_length(byte1);
 
 	if (len == 0 || offset + len > s.length()) {
 		// Invalid UTF-8 sequence or incomplete character
@@ -63,7 +63,7 @@ int decode_utf8(const std::string& s, size_t& offset) {
 		codepoint = (byte1 & 0x0F) << 12;
 		codepoint |= (static_cast<unsigned char>(s[offset + 1]) & 0x3F) << 6;
 		codepoint |= (static_cast<unsigned char>(s[offset + 2]) & 0x3F);
-	} else if (len == 4) {
+	} else {
 		codepoint = (byte1 & 0x07) << 18;
 		codepoint |= (static_cast<unsigned char>(s[offset + 1]) & 0x3F) << 12;
 		codepoint |= (static_cast<unsigned char>(s[offset + 2]) & 0x3F) << 6;
@@ -74,10 +74,10 @@ int decode_utf8(const std::string& s, size_t& offset) {
 }
 
 // utf8.char (integer codepoint(s) to string)
-std::vector<LuaValue> utf8_char(std::vector<LuaValue> args) {
+std::vector<LuaValue> utf8_char(const LuaValue* args, size_t n_args) {
 	std::string result_str;
-	for (int i = 0; i < args.size(); ++i) {
-		LuaValue cp_val = args.at(i);
+	for (size_t i = 0; i < n_args; ++i) {
+		LuaValue cp_val = args[i];
 		if (std::holds_alternative<std::monostate>(cp_val)) {
 			break;
 		}
@@ -85,30 +85,30 @@ std::vector<LuaValue> utf8_char(std::vector<LuaValue> args) {
 			int codepoint = static_cast<int>(std::get<double>(cp_val));
 			result_str += encode_utf8(codepoint);
 		} else {
-			throw std::runtime_error("bad argument #" + std::to_string(i) + " to 'char' (number expected)");
+			throw std::runtime_error("bad argument #" + std::to_string(i+1) + " to 'char' (number expected)");
 		}
 	}
 	return {result_str};
 }
 
 // utf8.charpattern
-std::vector<LuaValue> utf8_charpattern(std::vector<LuaValue> args) {
+std::vector<LuaValue> utf8_charpattern(const LuaValue* args, size_t n_args) {
 	return {std::string("[\0-\x7F\xC2-\xF4][\x80-\xBF]*")};
 }
 
 // utf8.codepoint (string to integer codepoint(s))
-std::vector<LuaValue> utf8_codepoint(std::vector<LuaValue> args) {
-	LuaValue s_val = args.at(0);
+std::vector<LuaValue> utf8_codepoint(const LuaValue* args, size_t n_args) {
+	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'codepoint' (string expected)");
 	}
 	std::string s = std::get<std::string>(s_val);
 
-	LuaValue i_val = args.at(1);
+	LuaValue i_val = (n_args >= 2) ? args[1] : LuaValue(1.0);
 	double i_double = std::holds_alternative<double>(i_val) ? std::get<double>(i_val) : 1.0;
 	int i = static_cast<int>(i_double);
 
-	LuaValue j_val = args.at(2);
+	LuaValue j_val = (n_args >= 3) ? args[2] : LuaValue(i_double);
 	double j_double = std::holds_alternative<double>(j_val) ? std::get<double>(j_val) : i_double;
 	int j = static_cast<int>(j_double);
 
@@ -146,14 +146,14 @@ std::vector<LuaValue> utf8_codepoint(std::vector<LuaValue> args) {
 }
 
 // utf8.codes (iterator for codepoints)
-std::vector<LuaValue> utf8_codes_iterator(std::vector<LuaValue> args) {
-	LuaValue s_val = args.at(0);
+std::vector<LuaValue> utf8_codes_iterator(const LuaValue* args, size_t n_args) {
+	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		return {std::monostate{}};
 	}
 	std::string s = std::get<std::string>(s_val);
 
-	LuaValue offset_val = args.at(1);
+	LuaValue offset_val = args[1];
 	size_t offset = 0;
 	if (std::holds_alternative<double>(offset_val)) {
 		offset = static_cast<size_t>(std::get<double>(offset_val));
@@ -173,8 +173,8 @@ std::vector<LuaValue> utf8_codes_iterator(std::vector<LuaValue> args) {
 	}
 }
 
-std::vector<LuaValue> utf8_codes(std::vector<LuaValue> args) {
-	LuaValue s_val = args.at(0);
+std::vector<LuaValue> utf8_codes(const LuaValue* args, size_t n_args) {
+	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'codes' (string expected)");
 	}
@@ -182,8 +182,8 @@ std::vector<LuaValue> utf8_codes(std::vector<LuaValue> args) {
 }
 
 // utf8.len (length of UTF-8 string)
-std::vector<LuaValue> utf8_len(std::vector<LuaValue> args) {
-	LuaValue s_val = args.at(0);
+std::vector<LuaValue> utf8_len(const LuaValue* args, size_t n_args) {
+	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'len' (string expected)");
 	}
@@ -203,21 +203,21 @@ std::vector<LuaValue> utf8_len(std::vector<LuaValue> args) {
 }
 
 // utf8.offset (byte offset of n-th character)
-std::vector<LuaValue> utf8_offset(std::vector<LuaValue> args) {
-	LuaValue s_val = args.at(0);
+std::vector<LuaValue> utf8_offset(const LuaValue* args, size_t n_args) {
+	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'offset' (string expected)");
 	}
 	std::string s = std::get<std::string>(s_val);
 
-	LuaValue n_val = args.at(1);
+	LuaValue n_val = (n_args >= 2) ? args[1] : LuaValue(std::monostate{});
 	if (!std::holds_alternative<double>(n_val)) {
 		throw std::runtime_error("bad argument #2 to 'offset' (number expected)");
 	}
 	int n = static_cast<int>(std::get<double>(n_val));
 
 	// Optional third argument: pos (starting position in bytes)
-	LuaValue pos_val = args.at(2);
+	LuaValue pos_val = (n_args >= 3) ? args[2] : LuaValue(std::monostate{});
 	size_t byte_offset = 0;
 	if (std::holds_alternative<double>(pos_val)) {
 		byte_offset = static_cast<size_t>(std::get<double>(pos_val)) - 1; // Convert to 0-based
@@ -243,10 +243,11 @@ std::vector<LuaValue> utf8_offset(std::vector<LuaValue> args) {
 		return {LuaValue(static_cast<double>(current_offset + 1))}; // Lua is 1-based
 	}
 
-	int char_count = 0;
 	size_t current_byte_offset = byte_offset;
 
-	if (n > 0) {
+	if (n > 0)
+	{
+		int char_count = 0;
 		while (current_byte_offset < s.length()) {
 			char_count++;
 			if (char_count == n) {
@@ -270,7 +271,7 @@ std::vector<LuaValue> utf8_offset(std::vector<LuaValue> args) {
 			}
 		}
 
-		int abs_n = std::abs(n);
+		unsigned long abs_n = std::abs(n);
 		if (abs_n <= char_start_offsets.size()) {
 			return {LuaValue(static_cast<double>(char_start_offsets[char_start_offsets.size() - abs_n] + 1))};
 		}

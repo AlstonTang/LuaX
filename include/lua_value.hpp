@@ -3,7 +3,6 @@
 
 #include <variant>
 #include <string>
-#include <vector>
 #include <memory> // Required for std::shared_ptr
 
 // Forward declarations for types used in LuaValue

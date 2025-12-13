@@ -1,5 +1,18 @@
 #include "init.hpp"
 
+#include <memory>
+
+#include "coroutine.hpp"
+#include "debug.hpp"
+#include "io.hpp"
+#include "lua_object.hpp"
+#include "math.hpp"
+#include "os.hpp"
+#include "package.hpp"
+#include "string.hpp"
+#include "table.hpp"
+#include "utf8.hpp"
+
 static std::shared_ptr<LuaObject> create_initial_global() {
 	auto globals = std::make_shared<LuaObject>();
 	globals->properties = {
@@ -28,9 +41,9 @@ static std::shared_ptr<LuaObject> create_initial_global() {
 		{"coroutine", create_coroutine_library()},
 		{"debug", create_debug_library()},
 		{"_VERSION", LuaValue(std::string("LuaX (Lua 5.4)"))},
-		{"tonumber", std::make_shared<LuaFunctionWrapper>([](std::vector<LuaValue> args) -> std::vector<LuaValue> {
+		{"tonumber", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
 			// tonumber implementation
-			LuaValue val = args.at(0);
+			LuaValue val = args[0];
 			if (std::holds_alternative<double>(val)) {
 				return {val};
 			} else if (std::holds_alternative<long long>(val)) {
@@ -48,11 +61,11 @@ static std::shared_ptr<LuaObject> create_initial_global() {
 			}
 			return {std::monostate{}}; // nil
 		})},
-		{"tostring", std::make_shared<LuaFunctionWrapper>([](std::vector<LuaValue> args) -> std::vector<LuaValue> {
-			return {to_cpp_string(args.at(0))};
+		{"tostring", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
+			return {to_cpp_string(args[0])};
 		})},
-		{"type", std::make_shared<LuaFunctionWrapper>([](std::vector<LuaValue> args) -> std::vector<LuaValue> {
-			LuaValue val = args.at(0);
+		{"type", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
+			LuaValue val = args[0];
 			if (std::holds_alternative<std::monostate>(val)) return {"nil"};
 			if (std::holds_alternative<bool>(val)) return {"boolean"};
 			if (std::holds_alternative<double>(val) || std::holds_alternative<long long>(val)) return {"number"};
@@ -62,8 +75,8 @@ static std::shared_ptr<LuaObject> create_initial_global() {
 			if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) return {"thread"};
 			return {"unknown"};
 		})},
-		{"getmetatable", std::make_shared<LuaFunctionWrapper>([](std::vector<LuaValue> args) -> std::vector<LuaValue> {
-			LuaValue val = args.at(0);
+		{"getmetatable", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
+			LuaValue val = args[0];
 			if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) {
 				auto obj = std::get<std::shared_ptr<LuaObject>>(val);
 				if (obj->metatable) {
@@ -72,17 +85,22 @@ static std::shared_ptr<LuaObject> create_initial_global() {
 			}
 			return {std::monostate{}}; // nil
 		})},
-		{"error", std::make_shared<LuaFunctionWrapper>([](std::vector<LuaValue> args) -> std::vector<LuaValue> {
-			LuaValue message = args.at(0);
+		{"error", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
+			LuaValue message = args[0];
 			throw std::runtime_error(to_cpp_string(message));
-			return {std::monostate{}}; // Should not be reached
 		})},
-		{"pcall", std::make_shared<LuaFunctionWrapper>([](std::vector<LuaValue> args) -> std::vector<LuaValue> {
-			LuaValue func_to_call = args.at(0);
+		{"pcall", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
+			LuaValue func_to_call = args[0];
 			if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(func_to_call)) {
 				auto callable_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(func_to_call);
 				try {
-					std::vector<LuaValue> results_from_func = callable_func->func(args);
+					std::vector<LuaValue> results_from_func;
+					if (n_args > 1) {
+						results_from_func = callable_func->func(args + 1, n_args - 1);
+					} else {
+						results_from_func = callable_func->func(nullptr, 0);
+					}
+
 					std::vector<LuaValue> pcall_results;
 					pcall_results.push_back(true);
 					pcall_results.insert(pcall_results.end(), results_from_func.begin(), results_from_func.end());

@@ -3,7 +3,6 @@
 #include <cstring>
 #include <algorithm>
 #include <vector>
-#include <numeric>
 #include <stdexcept>
 #include <cstdio>
 #include <cctype>
@@ -13,10 +12,9 @@
 // --- Lua Pattern Matching Engine ---
 
 namespace LuaPattern {
-
-	const int LUA_MAXCAPTURES = 32;
-	const int CAP_UNFINISHED = -1;
-	const int CAP_POSITION = -2;
+	constexpr int LUA_MAXCAPTURES = 32;
+	constexpr int CAP_UNFINISHED = -1;
+	constexpr int CAP_POSITION = -2;
 
 	struct MatchState {
 		const char* src_init;
@@ -73,7 +71,7 @@ namespace LuaPattern {
 		return !sig;
 	}
 
-	static bool singlematch(MatchState* ms, const char* s, const char* p, const char* ep) {
+	static bool singlematch(const MatchState* ms, const char* s, const char* p, const char* ep) {
 		if (s >= ms->src_end) return false;
 		int c = static_cast<unsigned char>(*s);
 		switch (*p) {
@@ -86,7 +84,7 @@ namespace LuaPattern {
 
 	static const char* match(MatchState* ms, const char* s, const char* p);
 
-	static const char* matchbalance(MatchState* ms, const char* s, const char* p) {
+	static const char* matchbalance(const MatchState* ms, const char* s, const char* p) {
 		if (p >= ms->p_end - 1) throw std::runtime_error("malformed pattern (missing arguments to '%b')");
 		if (s >= ms->src_end) return nullptr;
 		char b = *p;
@@ -107,17 +105,15 @@ namespace LuaPattern {
 		while (singlematch(ms, s + i, p, ep)) i++;
 		// Keeps trying to match the rest of the pattern, shrinking the expansion
 		while (i >= 0) {
-			const char* res = match(ms, s + i, ep + 1);
-			if (res) return res;
+			if (const char* res = match(ms, s + i, ep + 1)) return res;
 			i--;
 		}
 		return nullptr;
 	}
 
 	static const char* min_expand(MatchState* ms, const char* s, const char* p, const char* ep) {
-		for (;;) {
-			const char* res = match(ms, s, ep + 1);
-			if (res) return res;
+		while (true) {
+			if (const char* res = match(ms, s, ep + 1)) return res;
 			if (singlematch(ms, s, p, ep)) s++;
 			else return nullptr;
 		}
@@ -134,10 +130,11 @@ namespace LuaPattern {
 	}
 
 	static const char* end_capture(MatchState* ms, const char* s, const char* p) {
-		int l = -1;
+		int l = ms->level - 1;
 		// find most recent unfinished capture
-		for (l = ms->level - 1; l >= 0; l--) {
+		while (l >= 0) {
 			if (ms->capture[l].len == CAP_UNFINISHED) break;
+			--l;
 		}
 		if (l < 0) throw std::runtime_error("invalid pattern capture");
 		ms->capture[l].len = s - ms->capture[l].init;
@@ -146,17 +143,17 @@ namespace LuaPattern {
 		return res;
 	}
 
-	static const char* match_capture(MatchState* ms, const char* s, int l) {
+	static const char* match_capture(const MatchState* ms, const char* s, int l) {
 		l = l - '1';
 		if (l < 0 || l >= ms->level || ms->capture[l].len == CAP_UNFINISHED)
 			throw std::runtime_error("invalid capture index");
 		size_t len = ms->capture[l].len;
-		if ((size_t)(ms->src_end - s) >= len && memcmp(ms->capture[l].init, s, len) == 0)
+		if (static_cast<size_t>(ms->src_end - s) >= len && memcmp(ms->capture[l].init, s, len) == 0)
 			return s + len;
 		return nullptr;
 	}
 
-	static const char* classend(MatchState* ms, const char* p) {
+	static const char* classend(const MatchState* ms, const char* p) {
 		switch (*p++) {
 			case '%':
 				if (p == ms->p_end) throw std::runtime_error("malformed pattern (ends with %)");
@@ -253,7 +250,7 @@ std::string get_string(const LuaValue& v) {
 }
 
 // Helper to extract captures from a completed MatchState
-std::vector<LuaValue> get_captures(const LuaPattern::MatchState& ms, const std::string& s) {
+std::vector<LuaValue> get_captures(const LuaPattern::MatchState& ms) {
 	std::vector<LuaValue> results;
 	int nlevels = (ms.level == 0 && ms.capture[0].len != LuaPattern::CAP_UNFINISHED) ? 1 : ms.level;
 	
@@ -277,10 +274,10 @@ std::vector<LuaValue> get_captures(const LuaPattern::MatchState& ms, const std::
 // --- Library Functions ---
 
 // string.byte
-std::vector<LuaValue> string_byte(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
-	double i_d = args.size() >= 2 ? get_double(args.at(1)) : 1.0;
-	double j_d = args.size() >= 3 ? get_double(args.at(2)) : i_d;
+std::vector<LuaValue> string_byte(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
+	double i_d = n_args >= 2 ? get_double(args[1]) : 1.0;
+	double j_d = n_args >= 3 ? get_double(args[2]) : i_d;
 
 	long long i = static_cast<long long>(i_d);
 	long long j = static_cast<long long>(j_d);
@@ -301,26 +298,26 @@ std::vector<LuaValue> string_byte(std::vector<LuaValue> args) {
 }
 
 // string.char
-std::vector<LuaValue> string_char(std::vector<LuaValue> args) {
+std::vector<LuaValue> string_char(const LuaValue* args, size_t n_args) {
 	std::string result_str = "";
-	for (LuaValue val: args) {
-		result_str += static_cast<char>(static_cast<int>(get_double(val)));
+	for (size_t i = 0; i < n_args; ++i) {
+		result_str += static_cast<char>(static_cast<int>(get_double(args[i])));
 	}
 	return {result_str};
 }
 
 // string.dump
-std::vector<LuaValue> string_dump(std::vector<LuaValue> args) {
+std::vector<LuaValue> string_dump(const LuaValue* args, size_t n_args) {
 	throw std::runtime_error("string.dump is not supported.");
 	return {};
 }
 
 // string.find
-std::vector<LuaValue> string_find(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
-	std::string pattern = get_string(args.at(1));
-	double init_double = args.size() >= 3 ? get_double(args.at(2)) : 1.0;
-	bool plain = args.size() >= 4 && std::holds_alternative<bool>(args.at(3)) ? std::get<bool>(args.at(3)) : false;
+std::vector<LuaValue> string_find(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
+	std::string pattern = get_string(args[1]);
+	double init_double = n_args >= 3 ? get_double(args[2]) : 1.0;
+	bool plain = n_args >= 4 && std::holds_alternative<bool>(args[3]) ? std::get<bool>(args[3]) : false;
 
 	long long init = static_cast<long long>(init_double);
 	long long len = s.length();
@@ -353,9 +350,8 @@ std::vector<LuaValue> string_find(std::vector<LuaValue> args) {
 			ms.src_end = s_end;
 			ms.p_end = p_end;
 			ms.level = 0;
-			
-			const char* res = LuaPattern::match(&ms, curr, p_ptr);
-			if (res) {
+
+			if (const char* res = LuaPattern::match(&ms, curr, p_ptr)) {
 				// Match found
 				double start_idx = static_cast<double>(curr - s_ptr + 1);
 				double end_idx = static_cast<double>(res - s_ptr);
@@ -365,7 +361,7 @@ std::vector<LuaValue> string_find(std::vector<LuaValue> args) {
 				results.push_back(end_idx);
 
 				if (ms.level > 0) {
-					std::vector<LuaValue> caps = get_captures(ms, s);
+					std::vector<LuaValue> caps = get_captures(ms);
 					results.insert(results.end(), caps.begin(), caps.end());
 				}
 				return results;
@@ -377,8 +373,8 @@ std::vector<LuaValue> string_find(std::vector<LuaValue> args) {
 }
 
 // string.format
-std::vector<LuaValue> string_format(std::vector<LuaValue> args) {
-	std::string format_str = get_string(args.at(0));
+std::vector<LuaValue> string_format(const LuaValue* args, size_t n_args) {
+	std::string format_str = get_string(args[0]);
 	std::string result = "";
 	int arg_idx = 0;
 	size_t i = 0;
@@ -408,18 +404,18 @@ std::vector<LuaValue> string_format(std::vector<LuaValue> args) {
 		std::string fmt_spec = format_str.substr(spec_start, i - spec_start + 1);
 		i++; 
 
-		LuaValue val = args.at(++arg_idx);
+		LuaValue val = args[++arg_idx];
 		char buffer[4096]; 
 
 		switch (spec) {
 			case 'c':
-				snprintf(buffer, sizeof(buffer), fmt_spec.c_str(), (int)get_double(val));
+				snprintf(buffer, sizeof(buffer), fmt_spec.c_str(), static_cast<int>(get_double(val)));
 				break;
 			case 'd': case 'i':
-				snprintf(buffer, sizeof(buffer), fmt_spec.c_str(), (long long)get_double(val));
+				snprintf(buffer, sizeof(buffer), fmt_spec.c_str(), static_cast<long long>(get_double(val)));
 				break;
 			case 'o': case 'u': case 'x': case 'X':
-				snprintf(buffer, sizeof(buffer), fmt_spec.c_str(), (unsigned long long)get_double(val));
+				snprintf(buffer, sizeof(buffer), fmt_spec.c_str(), static_cast<unsigned long long>(get_double(val)));
 				break;
 			case 'e': case 'E': case 'f': case 'g': case 'G': case 'a': case 'A':
 				snprintf(buffer, sizeof(buffer), fmt_spec.c_str(), get_double(val));
@@ -437,7 +433,7 @@ std::vector<LuaValue> string_format(std::vector<LuaValue> args) {
 					else if (c == '\\') result += "\\\\";
 					else if (c == '\n') result += "\\\n";
 					else if (c < 32 || c > 126) {
-						char esc[5]; snprintf(esc, 5, "\\%03d", (unsigned char)c);
+						char esc[5]; snprintf(esc, 5, "\\%03d", static_cast<unsigned char>(c));
 						result += esc;
 					} else {
 						result += c;
@@ -456,15 +452,15 @@ std::vector<LuaValue> string_format(std::vector<LuaValue> args) {
 }
 
 // string.gmatch
-std::vector<LuaValue> string_gmatch(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
-	std::string pattern = get_string(args.at(1));
+std::vector<LuaValue> string_gmatch(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
+	std::string pattern = get_string(args[1]);
 
 	auto s_ptr = std::make_shared<std::string>(s);
 	auto p_ptr = std::make_shared<std::string>(pattern);
 	auto pos_ptr = std::make_shared<size_t>(0); // Current search index
 
-	auto func = [s_ptr, p_ptr, pos_ptr](std::vector<LuaValue> _) -> std::vector<LuaValue> {
+	auto func = [s_ptr, p_ptr, pos_ptr](const LuaValue* _, size_t __) -> std::vector<LuaValue> {
 		const char* s_raw = s_ptr->c_str();
 		size_t len = s_ptr->length();
 		const char* s_end = s_raw + len;
@@ -485,8 +481,7 @@ std::vector<LuaValue> string_gmatch(std::vector<LuaValue> args) {
 			ms.p_end = p_end;
 			ms.level = 0;
 
-			const char* res = LuaPattern::match(&ms, curr, p_eff);
-			if (res) {
+			if (const char* res = LuaPattern::match(&ms, curr, p_eff)) {
 				size_t match_len = res - curr;
 				size_t current_idx = (curr - s_raw);
 
@@ -505,7 +500,7 @@ std::vector<LuaValue> string_gmatch(std::vector<LuaValue> args) {
 				}
 
 				if (ms.level > 0) {
-					return get_captures(ms, *s_ptr);
+					return get_captures(ms);
 				} else {
 					return {std::string(curr, match_len)};
 				}
@@ -523,12 +518,12 @@ std::vector<LuaValue> string_gmatch(std::vector<LuaValue> args) {
 }
 
 // string.gsub
-std::vector<LuaValue> string_gsub(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
-	std::string pattern = get_string(args.at(1));
-	LuaValue repl_val = args.at(2);
-	double n_d = args.size() >= 4 ? get_double(args.at(3)) : -1.0;
-	long long max_subs = (n_d < 0) ? (long long)(s.length() + 1) : (long long)n_d;
+std::vector<LuaValue> string_gsub(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
+	std::string pattern = get_string(args[1]);
+	LuaValue repl_val = args[2];
+	double n_d = n_args >= 4 ? get_double(args[3]) : -1.0;
+	long long max_subs = (n_d < 0) ? static_cast<long long>(s.length() + 1) : static_cast<long long>(n_d);
 
 	std::string result;
 	long long matches = 0;
@@ -551,8 +546,7 @@ std::vector<LuaValue> string_gsub(std::vector<LuaValue> args) {
 		ms.p_end = p_end;
 		ms.level = 0;
 
-		const char* res = LuaPattern::match(&ms, curr, p_eff);
-		if (res) {
+		if (const char* res = LuaPattern::match(&ms, curr, p_eff)) {
 			// Append non-matched part
 			result.append(last_match_end, curr - last_match_end);
 			
@@ -567,7 +561,7 @@ std::vector<LuaValue> string_gsub(std::vector<LuaValue> args) {
 				// Func: args are cap1...capN. If no caps, arg is whole match.
 				// Table: key is cap1 (or whole match).
 				caps.push_back(std::string(curr, res - curr)); // Push whole match as index 0 for reference
-				std::vector<LuaValue> real_caps = get_captures(ms, s);
+				std::vector<LuaValue> real_caps = get_captures(ms);
 				caps.insert(caps.end(), real_caps.begin(), real_caps.end());
 			}
 
@@ -585,7 +579,7 @@ std::vector<LuaValue> string_gsub(std::vector<LuaValue> args) {
 						if (c == '%') replacement_str += '%';
 						else if (isdigit(c)) {
 							int idx = c - '0';
-							if (idx < (int)caps.size()) replacement_str += to_cpp_string(caps[idx]);
+							if (idx < static_cast<int>(caps.size())) replacement_str += to_cpp_string(caps[idx]);
 							 // else invalid capture, ignore or error? Lua ignores
 						} else {
 							replacement_str += '%'; replacement_str += c;
@@ -597,15 +591,16 @@ std::vector<LuaValue> string_gsub(std::vector<LuaValue> args) {
 				has_rep = true;
 			} else if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(repl_val)) {
 				auto func = std::get<std::shared_ptr<LuaFunctionWrapper>>(repl_val);
-				auto f_args = std::make_shared<LuaObject>();
 				// If we have explicit captures (caps.size() > 1 since caps[0] is whole), use them
 				// otherwise use caps[0] (whole match)
 				std::vector<LuaValue> f_res;
 				if (caps.size() > 1) {
-					f_res = func->func(caps);
+					// We need to pass [cap1, cap2, ...]
+					std::vector<LuaValue> cap_only_args(caps.begin() + 1, caps.end());
+					f_res = func->func(cap_only_args.data(), cap_only_args.size());
 				} else {
-					f_args->set("1", caps[0]);
-					f_res = func->func({caps[0]});
+					LuaValue c0 = caps[0];
+					f_res = func->func(&c0, 1);
 				}
 				if (!f_res.empty() && !std::holds_alternative<std::monostate>(f_res[0])) {
 					replacement_str = to_cpp_string(f_res[0]);
@@ -634,13 +629,6 @@ std::vector<LuaValue> string_gsub(std::vector<LuaValue> args) {
 			if (res == curr) {
 				 // Empty match, advance 1 to avoid loop
 				 if (curr < s_end) {
-					 result += *curr; // Append char at curr since we skipped it in matching logic?
-					 // Wait, if match is empty, we effectively matched at the boundary.
-					 // The loop condition needs care.
-					 // Lua logic: if empty match, copy one char and retry.
-					 // But we already appended up to `curr`.
-					 // The `last_match_end` is now `curr`.
-					 // We need to consume one char from source if we aren't at end.
 					 last_match_end++; 
 					 curr++;
 				 } else {
@@ -660,25 +648,25 @@ std::vector<LuaValue> string_gsub(std::vector<LuaValue> args) {
 }
 
 // string.len
-std::vector<LuaValue> string_len(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
+std::vector<LuaValue> string_len(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
 	return {static_cast<double>(s.length())};
 }
 
 // string.lower
-std::vector<LuaValue> string_lower(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
+std::vector<LuaValue> string_lower(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
 	std::transform(s.begin(), s.end(), s.begin(), ::tolower);
 	return {s};
 }
 
 // string.match
-std::vector<LuaValue> string_match(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
-	std::string pattern = get_string(args.at(1));
-	double init_d = (args.size() >= 3) ? get_double(args.at(2)) : 1.0;
+std::vector<LuaValue> string_match(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
+	std::string pattern = get_string(args[1]);
+	double init_d = (n_args >= 3) ? get_double(args[2]) : 1.0;
 	
-	long long init = (long long)init_d;
+	unsigned long init = static_cast<long long>(init_d);
 	if(init < 0) init = s.length() + init + 1;
 	if(init < 1) init = 1; 
 	if(init > s.length() + 1) return {std::monostate{}};
@@ -699,11 +687,10 @@ std::vector<LuaValue> string_match(std::vector<LuaValue> args) {
 		ms.src_end = s_end;
 		ms.p_end = p_end;
 		ms.level = 0;
-		
-		const char* res = LuaPattern::match(&ms, curr, p_eff);
-		if (res) {
+
+		if (const char* res = LuaPattern::match(&ms, curr, p_eff)) {
 			if (ms.level > 0) {
-				return get_captures(ms, s);
+				return get_captures(ms);
 			} else {
 				return {std::string(curr, res - curr)};
 			}
@@ -715,21 +702,21 @@ std::vector<LuaValue> string_match(std::vector<LuaValue> args) {
 }
 
 // string.pack (Stub)
-std::vector<LuaValue> string_pack(std::vector<LuaValue> args) { throw std::runtime_error("not implemented"); }
+std::vector<LuaValue> string_pack(const LuaValue* args, size_t n_args) { throw std::runtime_error("not implemented"); }
 // string.packsize (Stub)
-std::vector<LuaValue> string_packsize(std::vector<LuaValue> args) { throw std::runtime_error("not implemented"); }
+std::vector<LuaValue> string_packsize(const LuaValue* args, size_t n_args) { throw std::runtime_error("not implemented"); }
 
 // string.rep
-std::vector<LuaValue> string_rep(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
-	double n = get_double(args.at(1));
-	std::string sep = args.size() >= 3 && std::holds_alternative<std::string>(args.at(2)) ? std::get<std::string>(args.at(2)) : "";
+std::vector<LuaValue> string_rep(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
+	long long n = static_cast<long long>(get_double(args[1]));
+	std::string sep = n_args >= 3 && std::holds_alternative<std::string>(args[2]) ? std::get<std::string>(args[2]) : "";
 	
 	if (n <= 0) return {""};
 	std::string res;
-	res.reserve((s.length() + sep.length()) * (size_t)n);
+	res.reserve((s.length() + sep.length()) * static_cast<size_t>(n));
 	
-	for(long long i=0; i<(long long)n; ++i) {
+	for(long long i=0; i<n; ++i) {
 		if(i > 0) res += sep;
 		res += s;
 	}
@@ -737,21 +724,21 @@ std::vector<LuaValue> string_rep(std::vector<LuaValue> args) {
 }
 
 // string.reverse
-std::vector<LuaValue> string_reverse(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
+std::vector<LuaValue> string_reverse(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
 	std::reverse(s.begin(), s.end());
 	return {s};
 }
 
 // string.sub
-std::vector<LuaValue> string_sub(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
-	double i_d = args.size() >= 2 ? get_double(args.at(1)) : 1.0;
-	double j_d = args.size() >= 3 ? get_double(args.at(2)) : -1.0;
+std::vector<LuaValue> string_sub(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
+	double i_d = n_args >= 2 ? get_double(args[1]) : 1.0;
+	double j_d = n_args >= 3 ? get_double(args[2]) : -1.0;
 
 	long long len = s.length();
-	long long i = (long long)i_d;
-	long long j = (long long)j_d;
+	long long i = static_cast<long long>(i_d);
+	long long j = static_cast<long long>(j_d);
 
 	if (i < 0) i = len + i + 1;
 	if (j < 0) j = len + j + 1;
@@ -763,11 +750,11 @@ std::vector<LuaValue> string_sub(std::vector<LuaValue> args) {
 }
 
 // string.unpack (Stub)
-std::vector<LuaValue> string_unpack(std::vector<LuaValue> args) { throw std::runtime_error("not implemented"); }
+std::vector<LuaValue> string_unpack(const LuaValue* args, size_t n_args) { throw std::runtime_error("not implemented"); }
 
 // string.upper
-std::vector<LuaValue> string_upper(std::vector<LuaValue> args) {
-	std::string s = get_string(args.at(0));
+std::vector<LuaValue> string_upper(const LuaValue* args, size_t n_args) {
+	std::string s = get_string(args[0]);
 	std::transform(s.begin(), s.end(), s.begin(), ::toupper);
 	return {s};
 }
@@ -775,15 +762,18 @@ std::vector<LuaValue> string_upper(std::vector<LuaValue> args) {
 // --- C++ Helper Implementations (Updated to use native matcher) ---
 
 std::vector<LuaValue> lua_string_match(const LuaValue& str, const LuaValue& pattern) {
-	return string_match({str, pattern});
+	LuaValue args[] = {str, pattern};
+	return string_match(args, 2);
 }
 
 std::vector<LuaValue> lua_string_find(const LuaValue& str, const LuaValue& pattern) {
-	return string_find({str, pattern});
+	LuaValue args[] = {str, pattern};
+	return string_find(args, 2);
 }
 
 std::vector<LuaValue> lua_string_gsub(const LuaValue& str, const LuaValue& pattern, const LuaValue& replacement) {
-	return string_gsub({str, pattern, replacement});
+	LuaValue args[] = {str, pattern, replacement};
+	return string_gsub(args, 3);
 }
 
 // --- Library Creation ---

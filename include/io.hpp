@@ -16,32 +16,32 @@ public:
 
 	LuaFile(const std::string& filename, const std::string& mode);
 	LuaFile(FILE* f, bool is_popen_mode = false); // Constructor for existing FILE*
-	~LuaFile();
+	~LuaFile() override;
 
-	std::vector<LuaValue> close(std::vector<LuaValue> args);
-	std::vector<LuaValue> flush(std::vector<LuaValue> args);
-	std::vector<LuaValue> lines(std::vector<LuaValue> args);
-	std::vector<LuaValue> read(std::vector<LuaValue> args);
-	std::vector<LuaValue> seek(std::vector<LuaValue> args);
-	std::vector<LuaValue> setvbuf(std::vector<LuaValue> args);
-	std::vector<LuaValue> write(std::vector<LuaValue> args);
+	std::vector<LuaValue> close(const LuaValue* args, size_t n_args);
+	std::vector<LuaValue> flush(const LuaValue* args, size_t n_args) const;
+	std::vector<LuaValue> lines(const LuaValue* args, size_t n_args);
+	std::vector<LuaValue> read(const LuaValue* args, size_t n_args) const;
+	std::vector<LuaValue> seek(const LuaValue* args, size_t n_args) const;
+	std::vector<LuaValue> setvbuf(const LuaValue* args, size_t n_args) const;
+	std::vector<LuaValue> write(const LuaValue* args, size_t n_args);
 };
 
 // Function to create the 'io' library table
 std::shared_ptr<LuaObject> create_io_library();
 
 // Global IO functions
-std::vector<LuaValue> io_close(std::vector<LuaValue> args);
-std::vector<LuaValue> io_flush(std::vector<LuaValue> args);
-std::vector<LuaValue> io_input(std::vector<LuaValue> args);
-std::vector<LuaValue> io_lines(std::vector<LuaValue> args);
-std::vector<LuaValue> io_open(std::vector<LuaValue> args);
-std::vector<LuaValue> io_output(std::vector<LuaValue> args);
-std::vector<LuaValue> io_popen(std::vector<LuaValue> args);
-std::vector<LuaValue> io_read(std::vector<LuaValue> args);
-std::vector<LuaValue> io_tmpfile(std::vector<LuaValue> args);
-std::vector<LuaValue> io_type(std::vector<LuaValue> args);
-std::vector<LuaValue> io_write(std::vector<LuaValue> args);
+std::vector<LuaValue> io_close(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> io_flush(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> io_input(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> io_lines(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> io_open(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> io_output(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> io_popen(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> io_read(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> io_tmpfile(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> io_type(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> io_write(const LuaValue* args, size_t n_args);
 
 // Helper to safely get a LuaFile from a LuaValue. Throws on type error.
 inline std::shared_ptr<LuaFile> get_file(const LuaValue& value) {

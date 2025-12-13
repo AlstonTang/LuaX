@@ -7,12 +7,11 @@
 #include <mutex>
 #include <condition_variable>
 #include <vector>
-#include <atomic>
 
 // Moved class definition to header to support the logic extensions
 class LuaCoroutine {
 public:
-	enum class Status { SUSPENDED, RUNNING, DEAD };
+	enum class Status : std::uint8_t { SUSPENDED, RUNNING, DEAD };
 
 	std::shared_ptr<LuaFunctionWrapper> func;
 	Status status;
@@ -31,19 +30,34 @@ public:
 	// EXTENSION: Mode flag
 	bool is_parallel = false; 
 
-	LuaCoroutine(std::shared_ptr<LuaFunctionWrapper> f, bool parallel = false);
+	LuaCoroutine(const std::shared_ptr<LuaFunctionWrapper>& f, bool parallel = false);
 	~LuaCoroutine();
 
 	void run();
 	
 	// Returns immediate results for standard, empty/handle for parallel
-	std::vector<LuaValue> resume(std::vector<LuaValue> resume_args);
+	std::vector<LuaValue> resume(const LuaValue* args, size_t n_args);
 	
 	// New: Blocks until the specific coroutine yields/returns
 	std::vector<LuaValue> await(); 
 
-	static std::vector<LuaValue> yield(std::vector<LuaValue> yield_args);
+	static std::vector<LuaValue> yield(const LuaValue* args, size_t n_args);
 };
+
+// Thread-local pointer to currently running coroutine
+extern thread_local LuaCoroutine* current_coroutine;
+
+// Lua binding functions for the coroutine library
+std::vector<LuaValue> coroutine_create(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> coroutine_create_parallel(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> coroutine_resume(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> coroutine_await(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> coroutine_yield(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> coroutine_status(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> coroutine_running(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> coroutine_close(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> coroutine_isyieldable(const LuaValue* args, size_t n_args);
+std::vector<LuaValue> coroutine_wrap(const LuaValue* args, size_t n_args);
 
 std::shared_ptr<LuaObject> create_coroutine_library();
 

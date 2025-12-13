@@ -8,7 +8,7 @@ function Formatter.format_cpp_code(code)
 	local lines = {}
 	
 	-- First, split the code into lines
-	for line in code:gmatch("[^\n]*") do
+	for line in (code .. "\n"):gmatch("([^\n]*)\n") do
 		table.insert(lines, line)
 	end
 	
