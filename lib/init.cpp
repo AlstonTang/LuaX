@@ -41,83 +41,58 @@ static std::shared_ptr<LuaObject> create_initial_global() {
 		{"coroutine", create_coroutine_library()},
 		{"debug", create_debug_library()},
 		{"_VERSION", LuaValue(std::string("LuaX (Lua 5.4)"))},
-		{"tonumber", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
-			// tonumber implementation
+		{"tonumber", std::make_shared<LuaFunctionWrapper>(lua_tonumber)},
+		{"tostring", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) -> void {
+			out.assign({to_cpp_string(args[0])}); return;
+		})},
+		{"type", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) -> void {
 			LuaValue val = args[0];
-			if (std::holds_alternative<double>(val)) {
-				return {val};
-			} else if (std::holds_alternative<long long>(val)) {
-				return {static_cast<double>(std::get<long long>(val))};
-			} else if (std::holds_alternative<std::string>(val)) {
-				std::string s = std::get<std::string>(val);
-				try {
-					// Check if the string contains only digits and an optional decimal point
-					if (s.find_first_not_of("0123456789.") == std::string::npos) {
-						return {std::stod(s)};
-					}
-				} catch (...) {
-					// Fall through to return nil
-				}
-			}
-			return {std::monostate{}}; // nil
+			if (std::holds_alternative<std::monostate>(val)) {out.assign({"nil"}); return;};
+			if (std::holds_alternative<bool>(val)) {out.assign({"boolean"}); return;};
+			if (std::holds_alternative<double>(val) || std::holds_alternative<long long>(val)) {out.assign({"number"}); return;};
+			if (std::holds_alternative<std::string>(val)) {out.assign({"string"}); return;};
+			if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) {out.assign({"table"}); return;};
+			if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(val)) {out.assign({"function"}); return;};
+			if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) {out.assign({"thread"}); return;};
+			out.assign({"unknown"}); return;
 		})},
-		{"tostring", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
-			return {to_cpp_string(args[0])};
-		})},
-		{"type", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
-			LuaValue val = args[0];
-			if (std::holds_alternative<std::monostate>(val)) return {"nil"};
-			if (std::holds_alternative<bool>(val)) return {"boolean"};
-			if (std::holds_alternative<double>(val) || std::holds_alternative<long long>(val)) return {"number"};
-			if (std::holds_alternative<std::string>(val)) return {"string"};
-			if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) return {"table"};
-			if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(val)) return {"function"};
-			if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) return {"thread"};
-			return {"unknown"};
-		})},
-		{"getmetatable", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
+		{"getmetatable", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) -> void {
 			LuaValue val = args[0];
 			if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) {
 				auto obj = std::get<std::shared_ptr<LuaObject>>(val);
 				if (obj->metatable) {
-					return {obj->metatable};
+					out.assign({obj->metatable}); return;
 				}
 			}
-			return {std::monostate{}}; // nil
+			out.assign({std::monostate{}}); return; // nil
 		})},
-		{"error", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
+		{"error", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) -> void {
 			LuaValue message = args[0];
 			throw std::runtime_error(to_cpp_string(message));
 		})},
-		{"pcall", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args) -> std::vector<LuaValue> {
+		{"pcall", std::make_shared<LuaFunctionWrapper>([](const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) -> void {
 			LuaValue func_to_call = args[0];
 			if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(func_to_call)) {
+				out.clear();
 				auto callable_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(func_to_call);
 				try {
-					std::vector<LuaValue> results_from_func;
 					if (n_args > 1) {
-						results_from_func = callable_func->func(args + 1, n_args - 1);
+						callable_func->func(args + 1, n_args - 1, out);
 					} else {
-						results_from_func = callable_func->func(nullptr, 0);
+						callable_func->func(nullptr, 0, out);
 					}
 
 					std::vector<LuaValue> pcall_results;
-					pcall_results.push_back(true);
-					pcall_results.insert(pcall_results.end(), results_from_func.begin(), results_from_func.end());
-					return pcall_results;
+					out.insert(out.begin(), true);
 				} catch (const std::exception& e) {
 					std::vector<LuaValue> pcall_results;
-					pcall_results.push_back(false);
-					pcall_results.push_back(LuaValue(e.what()));
-					return pcall_results;
+					out.assign({false, LuaValue(e.what())});
 				} catch (...) {
 					std::vector<LuaValue> pcall_results;
-					pcall_results.push_back(false);
-					pcall_results.push_back(LuaValue("An unknown C++ error occurred"));
-					return pcall_results;
+					out.assign({false, LuaValue("An unknown C++ error occurred")});
 				}
 			}
-			return {false}; // Not a callable function
+			out.assign({false}); return; // Not a callable function
 		})}
 	};
 	// Define _G inside _G

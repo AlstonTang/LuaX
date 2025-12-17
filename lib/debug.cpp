@@ -2,67 +2,67 @@
 #include "lua_object.hpp"
 #include <stdexcept>
 
-std::vector<LuaValue> debug_debug(const LuaValue* args, size_t n_args) {
+void debug_debug(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.debug is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_gethook(const LuaValue* args, size_t n_args) {
+void debug_gethook(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.gethook is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getinfo(const LuaValue* args, size_t n_args) {
+void debug_getinfo(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.getinfo is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getlocal(const LuaValue* args, size_t n_args) {
+void debug_getlocal(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.getlocal is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getmetatable(const LuaValue* args, size_t n_args) {
+void debug_getmetatable(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.getmetatable is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getregistry(const LuaValue* args, size_t n_args) {
+void debug_getregistry(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.getregistry is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getupvalue(const LuaValue* args, size_t n_args) {
+void debug_getupvalue(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.getupvalue is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_getuservalue(const LuaValue* args, size_t n_args) {
+void debug_getuservalue(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.getuservalue is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_sethook(const LuaValue* args, size_t n_args) {
+void debug_sethook(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.sethook is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_setlocal(const LuaValue* args, size_t n_args) {
+void debug_setlocal(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.setlocal is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_setmetatable(const LuaValue* args, size_t n_args) {
+void debug_setmetatable(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.setmetatable is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_setupvalue(const LuaValue* args, size_t n_args) {
+void debug_setupvalue(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.setupvalue is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_setuservalue(const LuaValue* args, size_t n_args) {
+void debug_setuservalue(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.setuservalue is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_traceback(const LuaValue* args, size_t n_args) {
+void debug_traceback(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.traceback is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_upvalueid(const LuaValue* args, size_t n_args) {
+void debug_upvalueid(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.upvalueid is not supported in the translated environment.");
 }
 
-std::vector<LuaValue> debug_upvaluejoin(const LuaValue* args, size_t n_args) {
+void debug_upvaluejoin(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("debug.upvaluejoin is not supported in the translated environment.");
 }
 

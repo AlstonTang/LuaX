@@ -13,14 +13,14 @@
 #include <chrono>
 
 // os.execute
-std::vector<LuaValue> os_execute(const LuaValue* args, size_t n_args) {
+void os_execute(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	std::string command = to_cpp_string(args[0]);
 	int result = std::system(command.c_str());
-	return {static_cast<double>(result)};
+	out.assign({static_cast<double>(result)}); return;
 }
 
 // os.exit
-std::vector<LuaValue> os_exit(const LuaValue* args, size_t n_args) {
+void os_exit(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	double code_double = n_args >= 1 && std::holds_alternative<double>(args[0]) ? std::get<double>(args[0]) : 0.0;
 	bool close = n_args >= 2 && std::holds_alternative<bool>(args[1]) ? std::get<bool>(args[1]) : false; // Lua 5.4 close argument
 
@@ -34,40 +34,40 @@ std::vector<LuaValue> os_exit(const LuaValue* args, size_t n_args) {
 	// In a real Lua interpreter, 'close' would handle closing the Lua state.
 	// Here, we just exit the C++ program.
 	std::exit(code);
-	return {std::monostate{}}; // Should not be reached
+	out.assign({std::monostate{}}); return; // Should not be reached
 }
 
 // os.getenv
-std::vector<LuaValue> os_getenv(const LuaValue* args, size_t n_args) {
+void os_getenv(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	std::string varname = to_cpp_string(args[0]);
 	const char* value = std::getenv(varname.c_str());
 	if (value) {
-		return {std::string(value)};
+		out.assign({std::string(value)}); return;
 	}
-	return {std::monostate{}}; // nil
+	out.assign({std::monostate{}}); return; // nil
 }
 
 // os.remove
-std::vector<LuaValue> os_remove(const LuaValue* args, size_t n_args) {
+void os_remove(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	std::string filename = to_cpp_string(args[0]);
 	if (std::remove(filename.c_str()) == 0) {
-		return {true}; // Success
+		out.assign({true}); return; // Success
 	}
-	return {std::monostate{}}; // nil on failure
+	out.assign({std::monostate{}}); return; // nil on failure
 }
 
 // os.rename
-std::vector<LuaValue> os_rename(const LuaValue* args, size_t n_args) {
+void os_rename(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	std::string oldname = to_cpp_string(args[0]);
 	std::string newname = to_cpp_string(args[1]);
 	if (std::rename(oldname.c_str(), newname.c_str()) == 0) {
-		return {true}; // Success
+		out.assign({true}); return; // Success
 	}
-	return {std::monostate{}}; // nil on failure
+	out.assign({std::monostate{}}); return; // nil on failure
 }
 
 // os.setlocale
-std::vector<LuaValue> os_setlocale(const LuaValue* args, size_t n_args) {
+void os_setlocale(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	std::string locale_str = to_cpp_string(args[0]);
 	std::string category_str = to_cpp_string(args[1]);
 
@@ -81,13 +81,13 @@ std::vector<LuaValue> os_setlocale(const LuaValue* args, size_t n_args) {
 
 	const char* result = std::setlocale(category, locale_str.c_str());
 	if (result) {
-		return {std::string(result)};
+		out.assign({std::string(result)}); return;
 	}
-	return {std::monostate{}}; // nil on failure
+	out.assign({std::monostate{}}); return; // nil on failure
 }
 
 // os.tmpname
-std::vector<LuaValue> os_tmpname(const LuaValue* args, size_t n_args) {
+void os_tmpname(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	// mkstemp requires a template string like "XXXXXX"
 	std::string temp_filename_template = "/tmp/luax_temp_XXXXXX";
 	// mkstemp modifies the template string in place
@@ -98,13 +98,13 @@ std::vector<LuaValue> os_tmpname(const LuaValue* args, size_t n_args) {
 	if (fd != -1) {
 		// Close the file descriptor immediately as Lua's tmpname just returns the name
 		close(fd);
-		return {std::string(buffer.data())};
+		out.assign({std::string(buffer.data())}); return;
 	}
-	return {std::monostate{}}; // nil on failure
+	out.assign({std::monostate{}}); return; // nil on failure
 }
 
 // os.date
-std::vector<LuaValue> os_date(const LuaValue* args, size_t n_args) {
+void os_date(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	std::string format = n_args >= 1 && std::holds_alternative<std::string>(args[0]) ? std::get<std::string>(args[0]) : "%c";
 	time_t timer;
 	if (n_args >= 2 && std::holds_alternative<double>(args[1])) {
@@ -121,7 +121,7 @@ std::vector<LuaValue> os_date(const LuaValue* args, size_t n_args) {
 		lt = std::localtime(&timer);
 	}
 
-	if (!lt) return {std::monostate{}};
+	if (!lt) {out.assign({std::monostate{}}); return;};
 
 	if (format == "*t") {
 		auto date_table = std::make_shared<LuaObject>();
@@ -134,36 +134,36 @@ std::vector<LuaValue> os_date(const LuaValue* args, size_t n_args) {
 		date_table->set("wday", static_cast<double>(lt->tm_wday + 1));
 		date_table->set("yday", static_cast<double>(lt->tm_yday + 1));
 		date_table->set("isdst", static_cast<bool>(lt->tm_isdst));
-		return {date_table};
+		out.assign({date_table}); return;
 	} else {
 		std::stringstream ss;
 		ss << std::put_time(lt, format.c_str());
-		return {ss.str()};
+		out.assign({ss.str()}); return;
 	}
 }
 
 // os.difftime
-std::vector<LuaValue> os_difftime(const LuaValue* args, size_t n_args) {
+void os_difftime(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	time_t t2 = static_cast<time_t>(get_double(args[0]));
 	time_t t1 = static_cast<time_t>(get_double(args[1]));
-	return {static_cast<double>(std::difftime(t2, t1))};
+	out.assign({static_cast<double>(std::difftime(t2, t1))}); return;
 }
 
 // os.clock
-std::vector<LuaValue> os_clock(const LuaValue* args, size_t n_args) {
-	return {static_cast<double>(std::clock()) / CLOCKS_PER_SEC};
+void os_clock(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({static_cast<double>(std::clock()) / CLOCKS_PER_SEC}); return;
 }
 
 // os.time
-std::vector<LuaValue> os_time(const LuaValue* args, size_t n_args) {
-	return {static_cast<double>(std::time(nullptr))};
+void os_time(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({static_cast<double>(std::time(nullptr))}); return;
 }
 
 // os.sleep
-std::vector<LuaValue> os_sleep(const LuaValue* args, size_t n_args) {
+void os_sleep(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	auto duration = std::chrono::duration<double>(get_double(args[0]));
 	std::this_thread::sleep_for(duration);
-	return {std::monostate{}};
+	out.assign({std::monostate{}}); return;
 }
 
 std::shared_ptr<LuaObject> create_os_library() {

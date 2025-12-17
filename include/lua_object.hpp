@@ -8,27 +8,41 @@
 #include <memory>
 #include <functional>
 #include <stdexcept>
+#include <cstdlib>
 #include "lua_value.hpp"
 
-// Now define LuaFunctionWrapper, which can now use LuaValue
+// Forward declaration
+class LuaObject;
+
+// 1. Refactored Wrapper: Returns void, takes Output Parameter
 struct LuaFunctionWrapper {
-	std::function<std::vector<LuaValue>(const LuaValue*, size_t)> func;
-	LuaFunctionWrapper(std::function<std::vector<LuaValue>(const LuaValue*, size_t)> f) : func(std::move(f)) {}
+	// Function signature definition
+	using FuncSignature = std::function<void(const LuaValue*, size_t, std::vector<LuaValue>&)>;
+	
+	FuncSignature func;
+
+	// Default constructor
+	LuaFunctionWrapper() = default;
+
+	// Template constructor: Accepts raw function pointers, lambdas, or std::function
+	// This fixes the "no matching function" error with std::make_shared
+	template <typename F>
+	LuaFunctionWrapper(F&& f) : func(std::forward<F>(f)) {}
 };
 
-// Now define LuaObject, which can now use LuaValue
+// LuaObject Definition
 class LuaObject : public std::enable_shared_from_this<LuaObject> {
 public:
-	virtual ~LuaObject() = default; // Make LuaObject polymorphic
+	virtual ~LuaObject() = default; 
 	std::map<std::string, LuaValue> properties;
 	std::map<long long, LuaValue> array_properties; // For integer-indexed tables
 	std::shared_ptr<LuaObject> metatable;
 
 	LuaValue get(const std::string& key);
 	void set(const std::string& key, const LuaValue& value);
-	LuaValue get_item(const LuaValue& key); // New method for LuaValue keys
-	void set_item(const LuaValue& key, const LuaValue& value); // New method for LuaValue keys
-	void set_item(const LuaValue& key, const std::vector<LuaValue>& value); // New method for LuaValue keys
+	LuaValue get_item(const LuaValue& key); 
+	void set_item(const LuaValue& key, const LuaValue& value); 
+	void set_item(const LuaValue& key, const std::vector<LuaValue>& value); 
 	void set_metatable(const std::shared_ptr<LuaObject>& mt);
 };
 
@@ -36,18 +50,31 @@ extern std::shared_ptr<LuaObject> _G;
 
 // Global helper functions
 void print_value(const LuaValue& value);
+
 inline double get_double(const LuaValue& value) {
-	if (std::holds_alternative<double>(value)) {
-		return std::get<double>(value);
-	} else if (std::holds_alternative<long long>(value)) {
-		return static_cast<double>(std::get<long long>(value));
-	} else if (std::holds_alternative<std::string>(value)) {
-		try {
-			return std::stod(std::get<std::string>(value));
-		} catch (...) {
-			// Fall through to error
+	if (const double* val = std::get_if<double>(&value)) {
+		return *val;
+	} 
+
+	if (const long long* val = std::get_if<long long>(&value)) {
+		return static_cast<double>(*val);
+	} 
+
+	if (const std::string* str = std::get_if<std::string>(&value)) {
+		if (str->empty()) {
+			 // Original stod throws on empty, so we fall through to the error
+			 goto error;
+		}
+
+		char* end;
+		double result = std::strtod(str->c_str(), &end);
+
+		if (end != str->c_str()) {
+			return result;
 		}
 	}
+
+error:
 	throw std::runtime_error("Type error: expected number.");
 }
 
@@ -60,7 +87,7 @@ inline long long get_long_long(const LuaValue& value) {
 		try {
 			return std::stoll(std::get<std::string>(value));
 		} catch (...) {
-			// Fall through to error
+			// Fall through
 		}
 	}
 	throw std::runtime_error("Type error: expected integer.");
@@ -78,56 +105,55 @@ inline std::shared_ptr<LuaObject> get_object(const LuaValue& value) {
 	throw std::runtime_error("Type error: expected table or userdata, got unknown.");
 }
 
-// Helper to safely get a LuaFile from a LuaValue. Throws on type error.
+// Helpers
 std::string to_cpp_string(const LuaValue& value);
 std::string to_cpp_string(const std::vector<LuaValue>& value);
-LuaValue rawget(std::shared_ptr<LuaObject> table, const LuaValue& key);
-void rawset(std::shared_ptr<LuaObject> table, const LuaValue& key, const LuaValue& value); // Declaration for rawset
+std::string get_lua_type_name(const LuaValue& val);
 
-// Declarations for global Lua functions
-std::vector<LuaValue> lua_assert(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_collectgarbage(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_dofile(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_ipairs(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_load(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_loadfile(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_next(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_pairs(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_rawequal(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_rawlen(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_rawget(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_rawset(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_select(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_warn(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> lua_xpcall(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> pairs_iterator(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> ipairs_iterator(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args);
+// Declarations for global Lua functions (Updated Signatures)
+void lua_assert(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_collectgarbage(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_dofile(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_ipairs(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_load(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_loadfile(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_next(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_pairs(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_rawequal(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_rawlen(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_rawget(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_rawset(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_select(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_warn(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_xpcall(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_print(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result); // Added for completeness
 
-inline std::vector<LuaValue> call_lua_value(const LuaValue& callable, const std::vector<LuaValue>& args) {
-	return call_lua_value(callable, args.data(), args.size());
+// Iterators
+void pairs_iterator(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void ipairs_iterator(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+void lua_tonumber(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+
+// Core Call Function
+void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
+
+// Overloads for convenience
+inline void call_lua_value(const LuaValue& callable, std::vector<LuaValue>& out_result, const std::vector<LuaValue>& args) {
+	call_lua_value(callable, args.data(), args.size(), out_result);
 }
 
-inline std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::vector<LuaValue>& args) {
-	return call_lua_value(callable, args.data(), args.size());
-}
-
-inline std::vector<LuaValue> call_lua_value(const LuaValue& callable, std::vector<LuaValue>&& args) {
-	return call_lua_value(callable, args.data(), args.size());
-}
-
+// Template for variadic arguments (creating vector on stack)
 template<typename... Args>
-std::vector<LuaValue> call_lua_value(const LuaValue& callable, Args&&... args) {
+inline void call_lua_value(const LuaValue& callable, std::vector<LuaValue>& out_result, Args&&... args) {
 	if constexpr (sizeof...(args) == 0) {
-		return call_lua_value(callable, static_cast<const LuaValue*>(nullptr), static_cast<size_t>(0));
+		call_lua_value(callable, nullptr, 0, out_result);
 	} else {
 		const LuaValue stack_args[] = {LuaValue(std::forward<Args>(args))...};
-		return call_lua_value(callable, stack_args, sizeof...(args));
+		call_lua_value(callable, stack_args, sizeof...(args), out_result);
 	}
 }
 
 LuaValue lua_get_member(const LuaValue& base, const LuaValue& key);
-LuaValue lua_get_length(const LuaValue& val);
+LuaValue lua_get_length(const LuaValue& val); // Returns single value, handles buffer internally
 
 inline bool is_lua_truthy(const LuaValue& val) {
 	if (std::holds_alternative<std::monostate>(val)) return false;
@@ -137,7 +163,7 @@ inline bool is_lua_truthy(const LuaValue& val) {
 
 bool operator<=(const LuaValue& lhs, const LuaValue& rhs);
 
-// Helper for Lua-style comparison
+// Comparison Helpers
 bool lua_equals(const LuaValue& a, const LuaValue& b);
 bool lua_not_equals(const LuaValue& a, const LuaValue& b);
 bool lua_less_than(const LuaValue& a, const LuaValue& b);
@@ -147,17 +173,13 @@ bool lua_greater_equals(const LuaValue& a, const LuaValue& b);
 
 LuaValue lua_concat(const LuaValue& a, const LuaValue& b);
 
-inline LuaValue get_return_value(const std::vector<LuaValue>& results, size_t index) {
-	if (index < results.size()) return results[index];
-	return std::monostate{};
+// Transpiler helper to safely extract return values
+inline LuaValue get_return_value(std::vector<LuaValue>& results, size_t index) {
+    // std::move avoids copying the underlying string/table/heavy data
+    return index < results.size() ? std::move(results[index]) : std::monostate{};
 }
 
-inline LuaValue get_return_value(std::vector<LuaValue>&& results, size_t index) {
-	if (index < results.size()) return std::move(results[index]);
-	return std::monostate{};
-}
-
-
+// Logic operators
 template <typename T, typename F>
 LuaValue lua_logical_or(T&& left, F&& right_provider) {
 	if (is_lua_truthy(left)) {

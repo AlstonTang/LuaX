@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <random>
 #include <chrono>
+#include <charconv>
+#include <string>
 
 // Constants
 constexpr double PI = 3.14159265358979323846;
@@ -14,170 +16,187 @@ std::default_random_engine generator;
 
 // Helper function to get a number from a LuaValue
 double get_number(const LuaValue& v) {
-	if (std::holds_alternative<double>(v)) {
-		return std::get<double>(v);
+	if (const double* val = std::get_if<double>(&v)) {
+		return *val;
 	}
-	if (std::holds_alternative<long long>(v)) {
-		return static_cast<double>(std::get<long long>(v));
+
+	if (const long long* val = std::get_if<long long>(&v)) {
+		return static_cast<double>(*val);
 	}
+
+	if (const std::string* pStr = std::get_if<std::string>(&v)) {
+		const std::string& s = *pStr;
+		
+		if (s.empty()) return 0.0;
+		double result;
+		const char* start = s.data();
+		const char* end = start + s.size();
+
+		auto [ptr, ec] = std::from_chars(start, end, result);
+
+		if (ec == std::errc()) {
+			return result;
+		}
+	}
+
 	return 0.0;
 }
 
 // math.randomseed
-std::vector<LuaValue> math_randomseed(const LuaValue* args, size_t n_args) {
+void math_randomseed(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	long long seed = static_cast<long long>(get_number(args[0]));
 	generator.seed(seed);
-	return {std::monostate{}};
+	out.assign({std::monostate{}}); return;
 }
 
 // math.random
-std::vector<LuaValue> math_random(const LuaValue* args, size_t n_args) {
+void math_random(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	LuaValue arg1 = n_args >= 1 ? args[0] : std::monostate{};
 	LuaValue arg2 = n_args >= 2 ? args[1] : std::monostate{};
 
 	if (std::holds_alternative<std::monostate>(arg1)) {
 		// math.random() returns a float in [0,1)
 		std::uniform_real_distribution<double> distribution(0.0, 1.0);
-		return {distribution(generator)};
+		out.assign({distribution(generator)}); return;
 	} else if (std::holds_alternative<std::monostate>(arg2)) {
 		// math.random(m) returns an integer in [1, m]
 		int m = static_cast<int>(get_number(arg1));
 		std::uniform_int_distribution<int> distribution(1, m);
-		return {static_cast<double>(distribution(generator))};
+		out.assign({static_cast<double>(distribution(generator))}); return;
 	} else {
 		// math.random(m, n) returns an integer in [m, n]
 		int m = static_cast<int>(get_number(arg1));
 		int n = static_cast<int>(get_number(arg2));
 		std::uniform_int_distribution<int> distribution(m, n);
-		return {static_cast<double>(distribution(generator))};
+		out.assign({static_cast<double>(distribution(generator))}); return;
 	}
 }
 
 // math.abs
-std::vector<LuaValue> math_abs(const LuaValue* args, size_t n_args) {
-	return {std::abs(get_number(args[0]))};
+void math_abs(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::abs(get_number(args[0]))}); return;
 }
 
 // math.acos
-std::vector<LuaValue> math_acos(const LuaValue* args, size_t n_args) {
-	return {std::acos(get_number(args[0]))};
+void math_acos(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::acos(get_number(args[0]))}); return;
 }
 
 // math.asin
-std::vector<LuaValue> math_asin(const LuaValue* args, size_t n_args) {
-	return {std::asin(get_number(args[0]))};
+void math_asin(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::asin(get_number(args[0]))}); return;
 }
 
 // math.atan
-std::vector<LuaValue> math_atan(const LuaValue* args, size_t n_args) {
-	return {std::atan(get_number(args[0]))};
+void math_atan(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::atan(get_number(args[0]))}); return;
 }
 
 // math.ceil
-std::vector<LuaValue> math_ceil(const LuaValue* args, size_t n_args) {
-	return {std::ceil(get_number(args[0]))};
+void math_ceil(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::ceil(get_number(args[0]))}); return;
 }
 
 // math.cos
-std::vector<LuaValue> math_cos(const LuaValue* args, size_t n_args) {
-	return {std::cos(get_number(args[0]))};
+void math_cos(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::cos(get_number(args[0]))}); return;
 }
 
 // math.deg
-std::vector<LuaValue> math_deg(const LuaValue* args, size_t n_args) {
-	return {get_number(args[0]) * 180.0 / PI};
+void math_deg(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({get_number(args[0]) * 180.0 / PI}); return;
 }
 
 // math.exp
-std::vector<LuaValue> math_exp(const LuaValue* args, size_t n_args) {
-	return {std::exp(get_number(args[0]))};
+void math_exp(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::exp(get_number(args[0]))}); return;
 }
 
 // math.floor
-std::vector<LuaValue> math_floor(const LuaValue* args, size_t n_args) {
-	return {std::floor(get_number(args[0]))};
+void math_floor(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::floor(get_number(args[0]))}); return;
 }
 
 // math.fmod
-std::vector<LuaValue> math_fmod(const LuaValue* args, size_t n_args) {
-	return {std::fmod(get_number(args[0]), get_number(args[1]))};
+void math_fmod(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::fmod(get_number(args[0]), get_number(args[1]))}); return;
 }
 
 // math.log
-std::vector<LuaValue> math_log(const LuaValue* args, size_t n_args) {
-	return {std::log(get_number(args[0]))};
+void math_log(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::log(get_number(args[0]))}); return;
 }
 
 // math.max
-std::vector<LuaValue> math_max(const LuaValue* args, size_t n_args) {
+void math_max(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	if (n_args == 0) throw std::runtime_error("bad argument #1 to 'max' (value expected)");
 	double max_val = get_number(args[0]);
 	for (unsigned long i = 1; i < n_args; ++i) {
 		LuaValue val = args[i];
 		max_val = std::max(max_val, get_number(val));
 	}
-	return {max_val};
+	out.assign({max_val}); return;
 }
 
 // math.min
-std::vector<LuaValue> math_min(const LuaValue* args, size_t n_args) {
+void math_min(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	if (n_args == 0) throw std::runtime_error("bad argument #1 to 'min' (value expected)");
 	double min_val = get_number(args[0]);
 	for (unsigned long i = 1; i < n_args; ++i) {
 		LuaValue val = args[i];
 		min_val = std::min(min_val, get_number(val));
 	}
-	return {min_val};
+	out.assign({min_val}); return;
 }
 
 // math.modf
-std::vector<LuaValue> math_modf(const LuaValue* args, size_t n_args) {
+void math_modf(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	double intpart;
 	double fractpart = std::modf(get_number(args[0]), &intpart);
-	return {intpart, fractpart};
+	out.assign({intpart, fractpart}); return;
 }
 
 // math.rad
-std::vector<LuaValue> math_rad(const LuaValue* args, size_t n_args) {
-	return {get_number(args[0]) * PI / 180.0};
+void math_rad(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({get_number(args[0]) * PI / 180.0}); return;
 }
 
 // math.sin
-std::vector<LuaValue> math_sin(const LuaValue* args, size_t n_args) {
-	return {std::sin(get_number(args[0]))};
+void math_sin(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::sin(get_number(args[0]))}); return;
 }
 
 // math.sqrt
-std::vector<LuaValue> math_sqrt(const LuaValue* args, size_t n_args) {
-	return {std::sqrt(get_number(args[0]))};
+void math_sqrt(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::sqrt(get_number(args[0]))}); return;
 }
 
 // math.tan
-std::vector<LuaValue> math_tan(const LuaValue* args, size_t n_args) {
-	return {std::tan(get_number(args[0]))};
+void math_tan(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::tan(get_number(args[0]))}); return;
 }
 
 // math.tointeger
-std::vector<LuaValue> math_tointeger(const LuaValue* args, size_t n_args) {
-	return {LuaValue(static_cast<double>(static_cast<long long>(get_number(args[0]))))};
+void math_tointeger(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({static_cast<long long>(get_number(args[0]))}); return;
 }
 
 // math.type
-std::vector<LuaValue> math_type(const LuaValue* args, size_t n_args) {
+void math_type(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	if (n_args < 1) {
-		return {"nil"};
+		out.assign({"nil"}); return;
 	}
 	if (std::holds_alternative<double>(args[0])) {
-		return {"float"};
+		out.assign({"float"}); return;
 	} else if (std::holds_alternative<long long>(args[0])) {
-		return {"integer"};
+		out.assign({"integer"}); return;
 	}
-	return {"nil"};
+	out.assign({"nil"}); return;
 }
 
 // math.ult
-std::vector<LuaValue> math_ult(const LuaValue* args, size_t n_args) {
-	return {static_cast<unsigned long long>(get_number(args[0])) < static_cast<unsigned long long>(get_number(args[1]))};
+void math_ult(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({static_cast<unsigned long long>(get_number(args[0])) < static_cast<unsigned long long>(get_number(args[1]))}); return;
 }
 
 

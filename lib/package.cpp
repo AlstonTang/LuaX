@@ -8,7 +8,7 @@
 #include <stdexcept>
 
 // package.searchpath
-std::vector<LuaValue> package_searchpath(const LuaValue* args, size_t n_args) {
+void package_searchpath(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	std::string name = to_cpp_string(args[0]);
 	std::string path = to_cpp_string(args[1]);
 	std::string sep = n_args >= 3 && std::holds_alternative<std::string>(args[2]) ? std::get<std::string>(args[2]) : ".";
@@ -38,7 +38,7 @@ std::vector<LuaValue> package_searchpath(const LuaValue* args, size_t n_args) {
 		// Check if file exists (simplified check for now)
 		std::ifstream f(search_file);
 		if (f.good()) {
-			return {search_file};
+			out.assign({search_file}); return;
 		}
 		tried_paths.push_back(search_file);
 	}
@@ -49,13 +49,13 @@ std::vector<LuaValue> package_searchpath(const LuaValue* args, size_t n_args) {
 						[](const std::string& a, const std::string& b) {
 							return a + "\t" + b + "\n";
 						});
-	return {std::monostate{}, error_msg}; // Return nil, error message would be second return value in Lua
+	out.assign({std::monostate{}, error_msg}); return; // Return nil, error message would be second return value in Lua
 }
 
 // package.loadlib
-std::vector<LuaValue> package_loadlib(const LuaValue* args, size_t n_args) {
+void package_loadlib(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("package.loadlib is not supported in the translated environment.");
-	return {}; // Should not be reached
+	out.assign({}); return; // Should not be reached
 }
 
 // Global tables for package.loaded and package.preload

@@ -74,7 +74,7 @@ int decode_utf8(const std::string& s, size_t& offset) {
 }
 
 // utf8.char (integer codepoint(s) to string)
-std::vector<LuaValue> utf8_char(const LuaValue* args, size_t n_args) {
+void utf8_char(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	std::string result_str;
 	for (size_t i = 0; i < n_args; ++i) {
 		LuaValue cp_val = args[i];
@@ -88,16 +88,16 @@ std::vector<LuaValue> utf8_char(const LuaValue* args, size_t n_args) {
 			throw std::runtime_error("bad argument #" + std::to_string(i+1) + " to 'char' (number expected)");
 		}
 	}
-	return {result_str};
+	out.assign({result_str}); return;
 }
 
 // utf8.charpattern
-std::vector<LuaValue> utf8_charpattern(const LuaValue* args, size_t n_args) {
-	return {std::string("[\0-\x7F\xC2-\xF4][\x80-\xBF]*")};
+void utf8_charpattern(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+	out.assign({std::string("[\0-\x7F\xC2-\xF4][\x80-\xBF]*")}); return;
 }
 
 // utf8.codepoint (string to integer codepoint(s))
-std::vector<LuaValue> utf8_codepoint(const LuaValue* args, size_t n_args) {
+void utf8_codepoint(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'codepoint' (string expected)");
@@ -111,26 +111,25 @@ std::vector<LuaValue> utf8_codepoint(const LuaValue* args, size_t n_args) {
 	LuaValue j_val = (n_args >= 3) ? args[2] : LuaValue(i_double);
 	double j_double = std::holds_alternative<double>(j_val) ? std::get<double>(j_val) : i_double;
 	int j = static_cast<int>(j_double);
-
-	std::vector<LuaValue> results_vec;
 	size_t current_byte_offset = 0;
 
 	// Iterate through the string to find the starting byte offset for the i-th character
 	size_t start_byte_offset = 0;
 	for (int k = 1; k < i; ++k) {
 		if (current_byte_offset >= s.length()) {
-			return {}; // i is out of bounds
+			out.assign({}); return; // i is out of bounds
 		}
 		size_t prev_offset = current_byte_offset;
 		decode_utf8(s, current_byte_offset); // Just advance offset
 		if (current_byte_offset == prev_offset) { // If decode_utf8 didn't advance, it's an error or end
-			 return {};
+			 {out.assign({}); return;};
 		}
 	}
 	start_byte_offset = current_byte_offset;
 
 	// Now extract codepoints from i to j
 	current_byte_offset = start_byte_offset;
+	out.clear();
 	for (int k = i; k <= j; ++k) {
 		if (current_byte_offset >= s.length()) {
 			break; // Reached end of string
@@ -140,16 +139,15 @@ std::vector<LuaValue> utf8_codepoint(const LuaValue* args, size_t n_args) {
 		if (current_byte_offset == prev_offset) { // If decode_utf8 didn't advance, it's an error or end
 			 break;
 		}
-		results_vec.push_back(LuaValue(static_cast<double>(codepoint)));
+		out.push_back(LuaValue(static_cast<double>(codepoint)));
 	}
-	return results_vec;
 }
 
 // utf8.codes (iterator for codepoints)
-std::vector<LuaValue> utf8_codes_iterator(const LuaValue* args, size_t n_args) {
+void utf8_codes_iterator(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
-		return {std::monostate{}};
+		out.assign({std::monostate{}}); return;
 	}
 	std::string s = std::get<std::string>(s_val);
 
@@ -160,29 +158,29 @@ std::vector<LuaValue> utf8_codes_iterator(const LuaValue* args, size_t n_args) {
 	}
 
 	if (offset >= s.length()) {
-		return {std::monostate{}};
+		out.assign({std::monostate{}}); return;
 	}
 
 	size_t original_offset = offset;
 	int codepoint = decode_utf8(s, offset);
 
 	if (offset > original_offset) {
-		return {LuaValue(static_cast<double>(offset)), LuaValue(static_cast<double>(codepoint))};
+		out.assign({LuaValue(static_cast<double>(offset)), LuaValue(static_cast<double>(codepoint))}); return;
 	} else {
-		return {std::monostate{}};
+		out.assign({std::monostate{}}); return;
 	}
 }
 
-std::vector<LuaValue> utf8_codes(const LuaValue* args, size_t n_args) {
+void utf8_codes(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'codes' (string expected)");
 	}
-	return {std::make_shared<LuaFunctionWrapper>(utf8_codes_iterator), s_val, LuaValue(0.0)};
+	out.assign({std::make_shared<LuaFunctionWrapper>(utf8_codes_iterator), s_val, LuaValue(0.0)}); return;
 }
 
 // utf8.len (length of UTF-8 string)
-std::vector<LuaValue> utf8_len(const LuaValue* args, size_t n_args) {
+void utf8_len(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'len' (string expected)");
@@ -199,11 +197,11 @@ std::vector<LuaValue> utf8_len(const LuaValue* args, size_t n_args) {
 		}
 		len++;
 	}
-	return {LuaValue(static_cast<double>(len))};
+	out.assign({LuaValue(static_cast<double>(len))}); return;
 }
 
 // utf8.offset (byte offset of n-th character)
-std::vector<LuaValue> utf8_offset(const LuaValue* args, size_t n_args) {
+void utf8_offset(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'offset' (string expected)");
@@ -222,7 +220,7 @@ std::vector<LuaValue> utf8_offset(const LuaValue* args, size_t n_args) {
 	if (std::holds_alternative<double>(pos_val)) {
 		byte_offset = static_cast<size_t>(std::get<double>(pos_val)) - 1; // Convert to 0-based
 		if (byte_offset >= s.length()) {
-			return {std::monostate{}}; // pos is out of bounds
+			out.assign({std::monostate{}}); return; // pos is out of bounds
 		}
 		// Adjust byte_offset to be the start of a UTF-8 character
 		while (byte_offset > 0 && (static_cast<unsigned char>(s[byte_offset]) & 0xC0) == 0x80) {
@@ -240,7 +238,7 @@ std::vector<LuaValue> utf8_offset(const LuaValue* args, size_t n_args) {
 				current_offset++;
 			}
 		}
-		return {LuaValue(static_cast<double>(current_offset + 1))}; // Lua is 1-based
+		out.assign({LuaValue(static_cast<double>(current_offset + 1))}); return; // Lua is 1-based
 	}
 
 	size_t current_byte_offset = byte_offset;
@@ -251,7 +249,7 @@ std::vector<LuaValue> utf8_offset(const LuaValue* args, size_t n_args) {
 		while (current_byte_offset < s.length()) {
 			char_count++;
 			if (char_count == n) {
-				return {LuaValue(static_cast<double>(current_byte_offset + 1))}; // Lua is 1-based
+				out.assign({LuaValue(static_cast<double>(current_byte_offset + 1))}); return; // Lua is 1-based
 			}
 			size_t prev_offset = current_byte_offset;
 			decode_utf8(s, current_byte_offset);
@@ -273,11 +271,11 @@ std::vector<LuaValue> utf8_offset(const LuaValue* args, size_t n_args) {
 
 		unsigned long abs_n = std::abs(n);
 		if (abs_n <= char_start_offsets.size()) {
-			return {LuaValue(static_cast<double>(char_start_offsets[char_start_offsets.size() - abs_n] + 1))};
+			out.assign({LuaValue(static_cast<double>(char_start_offsets[char_start_offsets.size() - abs_n] + 1))}); return;
 		}
 	}
 
-	return {std::monostate{}}; // nil for out of bounds
+	out.assign({std::monostate{}}); return; // nil for out of bounds
 }
 
 

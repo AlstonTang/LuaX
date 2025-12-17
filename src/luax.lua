@@ -5,7 +5,7 @@
 ]]
 
 local script_path = arg[0]
-local script_dir = script_path:match("(.*/)") or ""
+local script_dir = "/usr/lib/LuaX/"
 package.path = package.path .. ";" .. script_dir .. "../?.lua;" .. script_dir .. "../?/init.lua"
 
 local cpp_translator = require("src.cpp_translator")
@@ -179,7 +179,7 @@ local function generate_and_run_makefile(output_path, generated_basenames, dep_g
 	-- Calculate Absolute Paths for Robustness
 	-- We assume the Luax Library structure is relative to this script:
 	-- script_dir/../lib/ and script_dir/../include/
-	local luax_root = get_abs_path(script_dir .. "../")
+	local luax_root = get_abs_path(script_dir)
 	
 	-- The output target should also be absolute so Make can find it from inside BUILD_DIR
 	local abs_target = get_abs_path(output_path)

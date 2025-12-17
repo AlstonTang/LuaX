@@ -36,28 +36,28 @@ public:
 	void run();
 	
 	// Returns immediate results for standard, empty/handle for parallel
-	std::vector<LuaValue> resume(const LuaValue* args, size_t n_args);
+	void resume(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
 	
 	// New: Blocks until the specific coroutine yields/returns
-	std::vector<LuaValue> await(); 
+	void await(std::vector<LuaValue>& out); 
 
-	static std::vector<LuaValue> yield(const LuaValue* args, size_t n_args);
+	static void yield(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
 };
 
 // Thread-local pointer to currently running coroutine
 extern thread_local LuaCoroutine* current_coroutine;
 
 // Lua binding functions for the coroutine library
-std::vector<LuaValue> coroutine_create(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> coroutine_create_parallel(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> coroutine_resume(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> coroutine_await(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> coroutine_yield(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> coroutine_status(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> coroutine_running(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> coroutine_close(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> coroutine_isyieldable(const LuaValue* args, size_t n_args);
-std::vector<LuaValue> coroutine_wrap(const LuaValue* args, size_t n_args);
+void coroutine_create(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+void coroutine_create_parallel(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+void coroutine_resume(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+void coroutine_await(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+void coroutine_yield(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+void coroutine_status(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+void coroutine_running(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+void coroutine_close(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+void coroutine_isyieldable(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+void coroutine_wrap(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
 
 std::shared_ptr<LuaObject> create_coroutine_library();
 
