@@ -970,6 +970,9 @@ end)
 --------------------------------------------------------------------------------
 
 local function translate_function_body(ctx, node, depth)
+	-- Start capturing statements for the function body to isolate them from outer scope
+	ctx:capture_start()
+
 	local params_node = node.ordered_children[1]
 	local body_node = node.ordered_children[2]
 	
@@ -1017,6 +1020,9 @@ local function translate_function_body(ctx, node, depth)
 		lambda_body = lambda_body .. "return;\n" -- Void return
 	end
 	
+	-- Capture any remaining statements in the body (should be empty if all statements flushed)
+	local body_stmts = ctx:capture_end()
+
 	-- Restore scope
 	ctx:restore_scope(saved_scope)
 	ctx.current_function_fixed_params_count = prev_param_count
@@ -1024,7 +1030,7 @@ local function translate_function_body(ctx, node, depth)
 	-- Inject reusable return buffer for this function scope
 	local buffer_decl = "    std::vector<LuaValue> " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(8);\n"
 	
-	return "std::make_shared<LuaFunctionWrapper>([=](const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result) mutable -> void {\n" .. buffer_decl .. params_extraction .. lambda_body .. "})"
+	return "std::make_shared<LuaFunctionWrapper>([=](const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result) mutable -> void {\n" .. buffer_decl .. params_extraction .. body_stmts .. lambda_body .. "})"
 end
 
 register_handler("function_declaration", function(ctx, node, depth)
@@ -1045,12 +1051,12 @@ register_handler("function_declaration", function(ctx, node, depth)
 		ctx:declare_variable(var_name)
 	end
 	
-	local prev_stmts = ctx:flush_statements()
-	
 	-- Check for table member function (e.g., function M.greet(name))
 	if node.method_name ~= nil then
+		local prev_stmts = ctx:flush_statements()
 		return prev_stmts .. "get_object(LuaValue(" .. node.identifier .. "))->set(\"" .. node.method_name .. "\", " .. lambda_code .. ");"
 	elseif node.identifier ~= nil then
+		local prev_stmts = ctx:flush_statements()
 		if node.is_local then
 			local var_name = sanitize_cpp_identifier(node.identifier)
 			return prev_stmts .. "auto " .. ptr_name .. " = std::make_shared<LuaValue>();\n" ..
@@ -1060,7 +1066,9 @@ register_handler("function_declaration", function(ctx, node, depth)
 			return prev_stmts .. "_G->set(\"" .. node.identifier .. "\", " .. lambda_code .. ");"
 		end
 	else
-		return prev_stmts .. lambda_code
+		-- Anonymous function (expression context): DO NOT flush statements.
+		-- They will be flushed by the enclosing statement handler.
+		return lambda_code
 	end
 end)
 
