@@ -312,10 +312,6 @@ function Tokenizer.tokenize(parser)
 			parser.position = parser.position + 1
 			token_processed = true
 		end
-		
-		-- To avoid the 'goto' causing issues with C++ translation or duplicate labels,
-		-- we just use standard control flow. If a token was processed, the loop continues naturally.
-		-- If no token matched (shouldn't happen with the `else` block above), we'd just loop again.
 	end
 	return parser.tokens
 end

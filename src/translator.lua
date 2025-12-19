@@ -827,8 +827,10 @@ function Parser:parse_function_declaration(is_local)
 	end
 end
 
-function Parser:parse()
+function Parser:parse(name)
+    print("Tokenizing " .. name .. " at " .. os.clock() .. "...")
 	self:tokenize()
+    print("Generating AST for " .. name .. " at " .. os.clock() .. "...")
 	self.token_position = 1
 	local root = Node:new("Root", nil, nil)
 	
@@ -863,9 +865,9 @@ end
 
 
 -- Translator function
-local function translate(code)
+local function translate(code, name)
 	local parser = Parser:new(code)
-	return parser:parse()
+	return parser:parse(name)
 end
 
 return {

@@ -83,7 +83,7 @@ end
 local function translate_file(lua_file_path, output_file_name, is_main_entry, should_format)
 	local translate_object = cpp_translator:new()
 	
-	print("Translating " .. lua_file_path .. "...")
+	print("Translating " .. lua_file_path .. " at " .. os.clock() .. "...")
 	local file = io.open(lua_file_path, "r")
 	if not file then
 		error("Could not open " .. lua_file_path)
@@ -91,10 +91,11 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry, sh
 	local lua_code = file:read("*all")
 	file:close()
 	
-	local ast = translator.translate(lua_code)
+	local ast = translator.translate(lua_code, lua_file_path)
 	local cpp_code
 	local hpp_code
 	
+    print("Generating CPP and HPP code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 	if is_main_entry then
 		cpp_code = translate_object:translate_recursive(ast, output_file_name, false, nil, true)
 		hpp_code = translate_object:translate_recursive(ast, output_file_name, true, nil, true)
@@ -108,10 +109,12 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry, sh
 	local hpp_output_path = BUILD_DIR .. "/" .. output_file_name .. ".hpp"
 
 	if should_format then
+        print("Formatting CPP and HPP code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 		cpp_code = formatter.format_cpp_code(cpp_code)
 		hpp_code = formatter.format_cpp_code(hpp_code)
 	end
 
+    print("Writing CPP and HPP code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 	local cpp_file = io.open(cpp_output_path, "w")
 	if cpp_file then
 		cpp_file:write(cpp_code)
@@ -127,6 +130,8 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry, sh
 	else
 		error("Could not write to " .. hpp_output_path)
 	end
+
+    print("Completed transpilation of " .. lua_file_path .. " at " .. os.clock() .. ".")
 	
 	return lua_file_path
 end
@@ -298,7 +303,7 @@ end
 
 local generated_basenames = {}
 local threads = {}
-local has_parallel = (type(coroutine.create_parallel) == "function")
+local has_parallel = false --(type(coroutine.create_parallel) == "function")
 
 if has_parallel then
 	print("Parallel translation enabled.")
