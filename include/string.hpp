@@ -30,6 +30,7 @@ void string_upper(const LuaValue* args, size_t n_args, std::vector<LuaValue>& ou
 // Convenience wrappers used by transpiled code
 void lua_string_match(const LuaValue& str, const LuaValue& pattern, std::vector<LuaValue>& out);
 void lua_string_find(const LuaValue& str, const LuaValue& pattern, std::vector<LuaValue>& out);
-void lua_string_gsub(const LuaValue& str, const LuaValue& pattern, const LuaValue& replacement, std::vector<LuaValue>& out);
+void lua_string_gsub(const LuaValue& str, const LuaValue& pattern, const LuaValue& replacement,
+                     std::vector<LuaValue>& out);
 
 #endif // STRING_HPP

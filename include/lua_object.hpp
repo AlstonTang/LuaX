@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include <memory>
 #include <functional>
 #include <stdexcept>
@@ -18,7 +19,7 @@ class LuaObject;
 struct LuaFunctionWrapper {
 	// Function signature definition
 	using FuncSignature = std::function<void(const LuaValue*, size_t, std::vector<LuaValue>&)>;
-	
+
 	FuncSignature func;
 
 	// Default constructor
@@ -33,16 +34,16 @@ struct LuaFunctionWrapper {
 // LuaObject Definition
 class LuaObject : public std::enable_shared_from_this<LuaObject> {
 public:
-	virtual ~LuaObject() = default; 
-	std::map<std::string, LuaValue> properties;
+	virtual ~LuaObject() = default;
+	std::unordered_map<std::string, LuaValue> properties;
 	std::map<long long, LuaValue> array_properties; // For integer-indexed tables
 	std::shared_ptr<LuaObject> metatable;
 
 	LuaValue get(const std::string& key);
 	void set(const std::string& key, const LuaValue& value);
-	LuaValue get_item(const LuaValue& key); 
-	void set_item(const LuaValue& key, const LuaValue& value); 
-	void set_item(const LuaValue& key, const std::vector<LuaValue>& value); 
+	LuaValue get_item(const LuaValue& key);
+	void set_item(const LuaValue& key, const LuaValue& value);
+	void set_item(const LuaValue& key, const std::vector<LuaValue>& value);
 	void set_metatable(const std::shared_ptr<LuaObject>& mt);
 };
 
@@ -54,16 +55,16 @@ void print_value(const LuaValue& value);
 inline double get_double(const LuaValue& value) {
 	if (const double* val = std::get_if<double>(&value)) {
 		return *val;
-	} 
+	}
 
 	if (const long long* val = std::get_if<long long>(&value)) {
 		return static_cast<double>(*val);
-	} 
+	}
 
 	if (const std::string* str = std::get_if<std::string>(&value)) {
 		if (str->empty()) {
-			 // Original stod throws on empty, so we fall through to the error
-			 goto error;
+			// Original stod throws on empty, so we fall through to the error
+			goto error;
 		}
 
 		char* end;
@@ -81,12 +82,15 @@ error:
 inline long long get_long_long(const LuaValue& value) {
 	if (std::holds_alternative<long long>(value)) {
 		return std::get<long long>(value);
-	} else if (std::holds_alternative<double>(value)) {
+	}
+	else if (std::holds_alternative<double>(value)) {
 		return static_cast<long long>(std::get<double>(value));
-	} else if (std::holds_alternative<std::string>(value)) {
+	}
+	else if (std::holds_alternative<std::string>(value)) {
 		try {
 			return std::stoll(std::get<std::string>(value));
-		} catch (...) {
+		}
+		catch (...) {
 			// Fall through
 		}
 	}
@@ -97,11 +101,16 @@ inline std::shared_ptr<LuaObject> get_object(const LuaValue& value) {
 	if (std::holds_alternative<std::shared_ptr<LuaObject>>(value)) {
 		return std::get<std::shared_ptr<LuaObject>>(value);
 	}
-	if (std::holds_alternative<std::monostate>(value)) throw std::runtime_error("Type error: expected table or userdata, got nil.");
-	if (std::holds_alternative<double>(value)) throw std::runtime_error("Type error: expected table or userdata, got number.");
-	if (std::holds_alternative<long long>(value)) throw std::runtime_error("Type error: expected table or userdata, got integer.");
-	if (std::holds_alternative<bool>(value)) throw std::runtime_error("Type error: expected table or userdata, got boolean.");
-	if (std::holds_alternative<std::string>(value)) throw std::runtime_error("Type error: expected table or userdata, got string.");
+	if (std::holds_alternative<std::monostate>(value)) throw std::runtime_error(
+		"Type error: expected table or userdata, got nil.");
+	if (std::holds_alternative<double>(value)) throw std::runtime_error(
+		"Type error: expected table or userdata, got number.");
+	if (std::holds_alternative<long long>(value)) throw std::runtime_error(
+		"Type error: expected table or userdata, got integer.");
+	if (std::holds_alternative<bool>(value)) throw std::runtime_error(
+		"Type error: expected table or userdata, got boolean.");
+	if (std::holds_alternative<std::string>(value)) throw std::runtime_error(
+		"Type error: expected table or userdata, got string.");
 	throw std::runtime_error("Type error: expected table or userdata, got unknown.");
 }
 
@@ -137,16 +146,18 @@ void lua_tonumber(const LuaValue* args, size_t n_args, std::vector<LuaValue>& ou
 void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result);
 
 // Overloads for convenience
-inline void call_lua_value(const LuaValue& callable, std::vector<LuaValue>& out_result, const std::vector<LuaValue>& args) {
+inline void call_lua_value(const LuaValue& callable, std::vector<LuaValue>& out_result,
+                           const std::vector<LuaValue>& args) {
 	call_lua_value(callable, args.data(), args.size(), out_result);
 }
 
 // Template for variadic arguments (creating vector on stack)
-template<typename... Args>
+template <typename... Args>
 inline void call_lua_value(const LuaValue& callable, std::vector<LuaValue>& out_result, Args&&... args) {
 	if constexpr (sizeof...(args) == 0) {
 		call_lua_value(callable, nullptr, 0, out_result);
-	} else {
+	}
+	else {
 		const LuaValue stack_args[] = {LuaValue(std::forward<Args>(args))...};
 		call_lua_value(callable, stack_args, sizeof...(args), out_result);
 	}
@@ -175,8 +186,8 @@ LuaValue lua_concat(const LuaValue& a, const LuaValue& b);
 
 // Transpiler helper to safely extract return values
 inline LuaValue get_return_value(std::vector<LuaValue>& results, size_t index) {
-    // std::move avoids copying the underlying string/table/heavy data
-    return index < results.size() ? std::move(results[index]) : std::monostate{};
+	// std::move avoids copying the underlying string/table/heavy data
+	return index < results.size() ? std::move(results[index]) : std::monostate{};
 }
 
 // Logic operators

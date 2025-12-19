@@ -1,13 +1,5 @@
 #!/bin/bash
 set -e
 
-# We use the existing src/luax.lua (running on lua5.4) to compile src/luax.lua itself into a C++ binary.
-# Output binary will be build/luax
-lua5.4 src/luax.lua -k src/luax.lua build/luax build
-
-if [ -f build/luax ]; then
-    echo "LuaX binary created successfully."
-else
-    echo "Failed to create LuaX binary."
-    exit 1
-fi
+# Automates the file generation process
+lua5.4 src/luax.lua -t src/luax.lua -b build -o build/luax

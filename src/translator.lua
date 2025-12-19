@@ -828,9 +828,9 @@ function Parser:parse_function_declaration(is_local)
 end
 
 function Parser:parse(name)
-    print("Tokenizing " .. name .. " at " .. os.clock() .. "...")
+	print("Tokenizing " .. name .. " at " .. os.clock() .. "...")
 	self:tokenize()
-    print("Generating AST for " .. name .. " at " .. os.clock() .. "...")
+	print("Generating AST for " .. name .. " at " .. os.clock() .. "...")
 	self.token_position = 1
 	local root = Node:new("Root", nil, nil)
 	

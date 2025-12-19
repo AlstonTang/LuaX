@@ -22,4 +22,15 @@ using LuaValue = std::variant<
 	std::shared_ptr<LuaCoroutine>
 >;
 
+enum LuaTypeIndex {
+	INDEX_NIL = 0,
+	INDEX_BOOLEAN = 1,
+	INDEX_DOUBLE = 2,
+	INDEX_INTEGER = 3,
+	INDEX_STRING = 4,
+	INDEX_OBJECT = 5,
+	INDEX_FUNCTION = 6,
+	INDEX_COROUTINE = 7
+};
+
 #endif // LUA_VALUE_HPP

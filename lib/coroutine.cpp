@@ -7,11 +7,10 @@ thread_local LuaCoroutine* current_coroutine = nullptr;
 
 LuaCoroutine::LuaCoroutine(const std::shared_ptr<LuaFunctionWrapper>& f, bool parallel)
 	: func(f),
-	status(Status::SUSPENDED),
-	started(false),
-	is_parallel(parallel),
-	error_occurred(false)
-{
+	  status(Status::SUSPENDED),
+	  started(false),
+	  is_parallel(parallel),
+	  error_occurred(false) {
 	// Launch the thread immediately, it will wait on cv_resume
 	worker = std::thread(&LuaCoroutine::run, this);
 }
@@ -23,7 +22,7 @@ LuaCoroutine::~LuaCoroutine() {
 			// Detach allows the thread to die naturally or daemonize, 
 			// preventing std::terminate from the destructor.
 			worker.detach();
-			return; 
+			return;
 		}
 	}
 	if (worker.joinable()) {
@@ -36,17 +35,17 @@ void LuaCoroutine::run() {
 	{
 		std::unique_lock<std::mutex> lock(mtx);
 		cv_resume.wait(lock, [this] { return started; });
-	} 
+	}
 
 	// 2. Execution Phase
 	try {
 		current_coroutine = this;
-		
+
 		// THREAD SAFETY:
 		// We create 'execution_results' on THIS thread's stack.
 		// No other thread can see this memory.
 		std::vector<LuaValue> execution_results;
-		
+
 		// Optimization: Reserve some space to avoid immediate heap alloc
 		execution_results.reserve(4);
 
@@ -60,12 +59,14 @@ void LuaCoroutine::run() {
 			results = std::move(execution_results); // Move, don't copy
 			status = Status::DEAD;
 		}
-	} catch (const std::exception& e) {
+	}
+	catch (const std::exception& e) {
 		std::lock_guard<std::mutex> lock(mtx);
-		results = {LuaValue(false), LuaValue(std::string(e.what()))}; 
+		results = {LuaValue(false), LuaValue(std::string(e.what()))};
 		status = Status::DEAD;
 		error_occurred = true;
-	} catch (...) {
+	}
+	catch (...) {
 		std::lock_guard<std::mutex> lock(mtx);
 		results = {LuaValue(false), LuaValue("unknown error")};
 		status = Status::DEAD;
@@ -73,9 +74,9 @@ void LuaCoroutine::run() {
 	}
 
 	current_coroutine = nullptr;
-	
+
 	// Notify any thread waiting on await() or resume()
-	cv_yield.notify_all(); 
+	cv_yield.notify_all();
 }
 
 // Updated: Returns void, takes output parameter
@@ -93,11 +94,11 @@ void LuaCoroutine::resume(const LuaValue* resume_args, size_t n_resume_args, std
 
 	// Copy inputs to the coroutine's internal storage
 	args.assign(resume_args, resume_args + n_resume_args);
-	
+
 	// State transition
 	if (!started) started = true;
 	status = Status::RUNNING;
-	
+
 	// Wake up the worker thread
 	cv_resume.notify_one();
 
@@ -112,8 +113,9 @@ void LuaCoroutine::resume(const LuaValue* resume_args, size_t n_resume_args, std
 
 	// Populate Output
 	if (error_occurred) {
-		out = results; 
-	} else {
+		out = results;
+	}
+	else {
 		out.reserve(results.size() + 1);
 		out.assign({LuaValue(true)});
 		out.insert(out.end(), results.begin(), results.end());
@@ -122,7 +124,7 @@ void LuaCoroutine::resume(const LuaValue* resume_args, size_t n_resume_args, std
 
 void LuaCoroutine::await(std::vector<LuaValue>& out) {
 	std::unique_lock<std::mutex> lock(mtx);
-	
+
 	if (!started) {
 		out.assign({LuaValue(false), LuaValue("coroutine has not been started")});
 		return;
@@ -133,7 +135,8 @@ void LuaCoroutine::await(std::vector<LuaValue>& out) {
 
 	if (error_occurred) {
 		out = results;
-	} else {
+	}
+	else {
 		out.reserve(results.size() + 1);
 		out.assign({LuaValue(true)});
 		out.insert(out.end(), results.begin(), results.end());
@@ -157,7 +160,7 @@ void LuaCoroutine::yield(const LuaValue* yield_args, size_t n_args, std::vector<
 
 	// Wait until main thread calls resume() again
 	self->cv_resume.wait(lock, [self] { return self->status == Status::RUNNING; });
-	
+
 	// When we wake up, 'self->args' contains the values passed to resume()
 	out = self->args;
 }
@@ -190,7 +193,8 @@ void coroutine_resume(const LuaValue* args, size_t n_args, std::vector<LuaValue>
 		// Pass remainder of arguments and the output buffer directly
 		if (n_args > 1) {
 			co->resume(args + 1, n_args - 1, out);
-		} else {
+		}
+		else {
 			co->resume(nullptr, 0, out);
 		}
 		return;
@@ -216,9 +220,12 @@ void coroutine_status(const LuaValue* args, size_t n_args, std::vector<LuaValue>
 	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) {
 		auto co = std::get<std::shared_ptr<LuaCoroutine>>(args[0]);
 		switch (co->status) {
-			case LuaCoroutine::Status::SUSPENDED: out.push_back(LuaValue("suspended")); return;
-			case LuaCoroutine::Status::RUNNING: out.push_back(LuaValue("running")); return;
-			case LuaCoroutine::Status::DEAD: out.push_back(LuaValue("dead")); return;
+		case LuaCoroutine::Status::SUSPENDED: out.push_back(LuaValue("suspended"));
+			return;
+		case LuaCoroutine::Status::RUNNING: out.push_back(LuaValue("running"));
+			return;
+		case LuaCoroutine::Status::DEAD: out.push_back(LuaValue("dead"));
+			return;
 		}
 	}
 	out.push_back(LuaValue("invalid"));
@@ -229,7 +236,7 @@ void coroutine_running(const LuaValue* args, size_t n_args, std::vector<LuaValue
 }
 
 void coroutine_close(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
-	out.assign({LuaValue(true)}); 
+	out.assign({LuaValue(true)});
 }
 
 void coroutine_isyieldable(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
@@ -240,38 +247,40 @@ void coroutine_wrap(const LuaValue* args, size_t n_args, std::vector<LuaValue>& 
 	// 1. Create the coroutine
 	std::vector<LuaValue> co_res;
 	coroutine_create(args, n_args, co_res);
-	
+
 	if (co_res.empty() || !std::holds_alternative<std::shared_ptr<LuaCoroutine>>(co_res[0])) {
 		throw std::runtime_error("coroutine.wrap failed to create coroutine");
 	}
 	auto co = std::get<std::shared_ptr<LuaCoroutine>>(co_res[0]);
 
 	// 2. Return a wrapper function
-	auto wrapper = std::make_shared<LuaFunctionWrapper>([co](const LuaValue* wrap_args, size_t n_wrap_args, std::vector<LuaValue>& wrap_out) {
-		wrap_out.clear();
-		co->resume(wrap_args, n_wrap_args, wrap_out);
-		
-		if (wrap_out.empty()) return; // Should not happen based on resume logic
+	auto wrapper = std::make_shared<LuaFunctionWrapper>(
+		[co](const LuaValue* wrap_args, size_t n_wrap_args, std::vector<LuaValue>& wrap_out) {
+			wrap_out.clear();
+			co->resume(wrap_args, n_wrap_args, wrap_out);
 
-		// Check success bool
-		bool success = false;
-		if (std::holds_alternative<bool>(wrap_out[0])) {
-			success = std::get<bool>(wrap_out[0]); // Check bool value
-		} else if (std::holds_alternative<long long>(wrap_out[0])) {
-			success = std::get<long long>(wrap_out[0]) != 0; // Robustness
-		}
+			if (wrap_out.empty()) return; // Should not happen based on resume logic
 
-		if (!success) {
-			// Error!
-			std::string err = "unknown error";
-			if (wrap_out.size() > 1) err = to_cpp_string(wrap_out[1]);
-			throw std::runtime_error(err);
-		}
+			// Check success bool
+			bool success = false;
+			if (std::holds_alternative<bool>(wrap_out[0])) {
+				success = std::get<bool>(wrap_out[0]); // Check bool value
+			}
+			else if (std::holds_alternative<long long>(wrap_out[0])) {
+				success = std::get<long long>(wrap_out[0]) != 0; // Robustness
+			}
 
-		// Remove the first element (the boolean 'true')
-		// Vector erase is O(N) but N is usually small here.
-		wrap_out.erase(wrap_out.begin());
-	});
+			if (!success) {
+				// Error!
+				std::string err = "unknown error";
+				if (wrap_out.size() > 1) err = to_cpp_string(wrap_out[1]);
+				throw std::runtime_error(err);
+			}
+
+			// Remove the first element (the boolean 'true')
+			// Vector erase is O(N) but N is usually small here.
+			wrap_out.erase(wrap_out.begin());
+		});
 	out.assign({LuaValue(wrapper)});
 }
 

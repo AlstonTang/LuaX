@@ -205,8 +205,8 @@ end
 
 local function is_multiret(node)
 	return node.type == "call_expression" or 
-	       node.type == "method_call_expression" or 
-	       node.type == "varargs"
+		   node.type == "method_call_expression" or
+		   node.type == "varargs"
 end
 
 --------------------------------------------------------------------------------
@@ -1246,13 +1246,13 @@ register_handler("for_numeric_statement", function(ctx, node, depth)
 		-- Direct long long iteration, no inner LuaValue casting
 		return setup_code .. "for (long long " .. var_name .. " = " .. start_val .. "LL; " .. var_name .. " <= " .. end_val .. "LL; ++" .. var_name .. ") {\n" ..
 			translate_node(ctx, body_node, depth + 1) .. "}}\n"
-            
+
 	elseif all_integers and step_is_neg_one then
 		local start_val = tostring(start_node.value)
 		local end_val = tostring(end_node.value)
 		return setup_code .. "for (long long " .. var_name .. " = " .. start_val .. "LL; " .. var_name .. " >= " .. end_val .. "LL; --" .. var_name .. ") {\n" ..
 			translate_node(ctx, body_node, depth + 1) .. "}}\n"
-            
+
 	elseif all_integers and step_is_integer then
 		local start_val = tostring(start_node.value)
 		local end_val = tostring(end_node.value)
@@ -1260,7 +1260,7 @@ register_handler("for_numeric_statement", function(ctx, node, depth)
 		local condition = "(" .. step_val .. " >= 0 ? " .. var_name .. " <= " .. end_val .. "LL : " .. var_name .. " >= " .. end_val .. "LL)"
 		return setup_code .. "for (long long " .. var_name .. " = " .. start_val .. "LL; " .. condition .. "; " .. var_name .. " += " .. step_val .. "LL) {\n" ..
 			translate_node(ctx, body_node, depth + 1) .. "}}\n"
-            
+
 	else
 		-- Generic numeric loop (handles variables, doubles, and expression results)
 		local limit_var = "limit_" .. ctx:get_unique_id()

@@ -11,13 +11,17 @@
 void package_searchpath(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	std::string name = to_cpp_string(args[0]);
 	std::string path = to_cpp_string(args[1]);
-	std::string sep = n_args >= 3 && std::holds_alternative<std::string>(args[2]) ? std::get<std::string>(args[2]) : ".";
-	std::string rep = n_args >= 4 && std::holds_alternative<std::string>(args[3]) ? std::get<std::string>(args[3]) : "/";
+	std::string sep = n_args >= 3 && std::holds_alternative<std::string>(args[2])
+		                  ? std::get<std::string>(args[2])
+		                  : ".";
+	std::string rep = n_args >= 4 && std::holds_alternative<std::string>(args[3])
+		                  ? std::get<std::string>(args[3])
+		                  : "/";
 
 	// Replace dots in name with replacement string
 	std::string filename = name;
 	size_t start_pos = 0;
-	while((start_pos = filename.find(sep, start_pos)) != std::string::npos) {
+	while ((start_pos = filename.find(sep, start_pos)) != std::string::npos) {
 		filename.replace(start_pos, sep.length(), rep);
 		start_pos += rep.length();
 	}
@@ -31,14 +35,16 @@ void package_searchpath(const LuaValue* args, size_t n_args, std::vector<LuaValu
 		size_t q_pos = search_file.find("?");
 		if (q_pos != std::string::npos) {
 			search_file.replace(q_pos, 1, filename);
-		} else {
+		}
+		else {
 			search_file += "/" + filename; // Default if no '?'
 		}
 
 		// Check if file exists (simplified check for now)
 		std::ifstream f(search_file);
 		if (f.good()) {
-			out.assign({search_file}); return;
+			out.assign({search_file});
+			return;
 		}
 		tried_paths.push_back(search_file);
 	}
@@ -46,16 +52,18 @@ void package_searchpath(const LuaValue* args, size_t n_args, std::vector<LuaValu
 	// If not found, return nil and a message with tried paths
 	std::string error_msg = "no file '" + name + "' in path:\n\t" +
 		std::accumulate(tried_paths.begin(), tried_paths.end(), std::string(),
-						[](const std::string& a, const std::string& b) {
-							return a + "\t" + b + "\n";
-						});
-	out.assign({std::monostate{}, error_msg}); return; // Return nil, error message would be second return value in Lua
+		                [](const std::string& a, const std::string& b) {
+			                return a + "\t" + b + "\n";
+		                });
+	out.assign({std::monostate{}, error_msg});
+	return; // Return nil, error message would be second return value in Lua
 }
 
 // package.loadlib
 void package_loadlib(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("package.loadlib is not supported in the translated environment.");
-	out.assign({}); return; // Should not be reached
+	out.assign({});
+	return; // Should not be reached
 }
 
 // Global tables for package.loaded and package.preload
@@ -71,23 +79,35 @@ std::shared_ptr<LuaObject> create_package_library() {
 
 	package_lib->properties = {
 		{"config", LuaValue(std::string("/\n;\n?\n!\n-\n"))},
-		#if defined(__linux__)
-		{"cpath", LuaValue(std::string("/usr/local/lib/lua/5.4/?.so;/usr/lib/x86_64-linux-gnu/lua/5.4/?.so;/usr/lib/lua/5.4/?.so;/usr/local/lib/lua/5.4/loadall.so;./?.so"))}
-		#elif defined(_WIN32)
-		{"cpath", LuaValue(std::string(".\\?.dll;!.\\?.dll;!.\\loadall.dll"))}
-		#else
-		{"cpath", LuaValue(std::string("/?.so"))}
-		#endif
+#if defined(__linux__)
+		{
+			"cpath",
+			LuaValue(std::string(
+				"/usr/local/lib/lua/5.4/?.so;/usr/lib/x86_64-linux-gnu/lua/5.4/?.so;/usr/lib/lua/5.4/?.so;/usr/local/lib/lua/5.4/loadall.so;./?.so"))
+		}
+#elif defined(_WIN32)
+		{ "cpath", LuaValue(std::string(".\\?.dll;!.\\?.dll;!.\\loadall.dll")) }
+#else
+		{ "cpath", LuaValue(std::string("/?.so")) }
+#endif
 		,
 		{"loaded", package_loaded_table},
 		{"loadlib", std::make_shared<LuaFunctionWrapper>(package_loadlib)},
-		#if defined(__linux__)
-		{"path", LuaValue(std::string("/usr/local/share/lua/5.4/?.lua;/usr/local/share/lua/5.4/?/init.lua;/usr/local/lib/lua/5.4/?.lua;/usr/local/lib/lua/5.4/?/init.lua;/usr/share/lua/5.4/?.lua;/usr/share/lua/5.4/?/init.lua;./?.lua;./?/init.lua"))}
-		#elif defined(_WIN32)
-		{"path", LuaValue(std::string(".;.\\?.lua;!\\lua\\?.lua;!\\lua\\?\\init.lua;C:\\Program Files\\Lua\\5.4\\?.lua;C:\\Program Files\\Lua\\5.4\\?\\init.lua"))}
-		#else
-		{"path", LuaValue(std::string("./?.lua;./?/init.lua"))}
-		#endif
+#if defined(__linux__)
+		{
+			"path",
+			LuaValue(std::string(
+				"/usr/local/share/lua/5.4/?.lua;/usr/local/share/lua/5.4/?/init.lua;/usr/local/lib/lua/5.4/?.lua;/usr/local/lib/lua/5.4/?/init.lua;/usr/share/lua/5.4/?.lua;/usr/share/lua/5.4/?/init.lua;./?.lua;./?/init.lua"))
+		}
+#elif defined(_WIN32)
+		{
+			"path", LuaValue(std::string(
+					".;.\\?.lua;!\\lua\\?.lua;!\\lua\\?\\init.lua;C:\\Program Files\\Lua\\5.4\\?.lua;C:\\Program Files\\Lua\\5.4\\?\\init.lua"))
+
+		}
+#else
+		{ "path", LuaValue(std::string("./?.lua;./?/init.lua")) }
+#endif
 		,
 		{"preload", package_preload_table},
 		{"searchers", package_searchers_table},

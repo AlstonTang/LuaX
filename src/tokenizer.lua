@@ -273,8 +273,57 @@ function Tokenizer.tokenize(parser)
 			end
 			table.insert(parser.tokens, { type = "string", value = table.concat(buffer) })
 			token_processed = true
-		elseif char == '[' or char == ']' then
-			table.insert(parser.tokens, { type = "square_bracket", value = char })
+		elseif char == '[' then
+			-- Check for long string: [[ ... ]] or [=[ ... ]=]
+			local next_pos = parser.position + 1
+			local num_equals = 0
+			while next_pos <= #parser.code and parser.code:sub(next_pos, next_pos) == '=' do
+				num_equals = num_equals + 1
+				next_pos = next_pos + 1
+			end
+
+			if parser.code:sub(next_pos, next_pos) == '[' then
+				-- Confirmed long string start
+				parser.position = next_pos + 1 -- Move past the opening [===[
+				local content_start = parser.position
+
+				-- Define the closing delimiter: ] followed by same num of =, then ]
+				local expected_end = "]" .. string.rep("=", num_equals) .. "]"
+				local end_len = #expected_end
+				local closing_found = false
+
+				while parser.position <= #parser.code do
+					if parser.code:sub(parser.position, parser.position + end_len - 1) == expected_end then
+						local content_end = parser.position - 1
+						local content = parser.code:sub(content_start, content_end)
+
+						-- Lua Rule: If the first character of the content is a newline, it's ignored
+						if content:sub(1, 1) == "\n" then
+							content = content:sub(2)
+						elseif content:sub(1, 2) == "\r\n" then
+							content = content:sub(3)
+						end
+
+						table.insert(parser.tokens, { type = "string", value = content })
+						parser.position = parser.position + end_len
+						closing_found = true
+						break
+					end
+					parser.position = parser.position + 1
+				end
+
+				if not closing_found then
+					error("Unfinished long string near position " .. content_start)
+				end
+			else
+				-- It's just a regular square bracket
+				table.insert(parser.tokens, { type = "square_bracket", value = "[" })
+				parser.position = parser.position + 1
+			end
+			token_processed = true
+		elseif char == ']' then
+			-- Regular square bracket
+			table.insert(parser.tokens, { type = "square_bracket", value = "]" })
 			parser.position = parser.position + 1
 			token_processed = true
 		elseif char == '{' or char == '}' then

@@ -16,30 +16,30 @@ public:
 	std::shared_ptr<LuaFunctionWrapper> func;
 	Status status;
 	std::thread worker;
-	
+
 	// synchronization
 	std::mutex mtx;
 	std::condition_variable cv_resume; // Main -> Worker
-	std::condition_variable cv_yield;  // Worker -> Main
+	std::condition_variable cv_yield; // Worker -> Main
 
 	bool started;
-	std::vector<LuaValue> args;    // In-bound args
+	std::vector<LuaValue> args; // In-bound args
 	std::vector<LuaValue> results; // Out-bound results
 	bool error_occurred = false;
-	
+
 	// EXTENSION: Mode flag
-	bool is_parallel = false; 
+	bool is_parallel = false;
 
 	LuaCoroutine(const std::shared_ptr<LuaFunctionWrapper>& f, bool parallel = false);
 	~LuaCoroutine();
 
 	void run();
-	
+
 	// Returns immediate results for standard, empty/handle for parallel
 	void resume(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-	
+
 	// New: Blocks until the specific coroutine yields/returns
-	void await(std::vector<LuaValue>& out); 
+	void await(std::vector<LuaValue>& out);
 
 	static void yield(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
 };

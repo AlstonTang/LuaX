@@ -21,7 +21,7 @@ LuaX is a robust transpiler that converts Lua 5.4 source code into C++17, allowi
 
 *   **Lua 5.4**: Required to run the transpiler script (`src/luax.lua`).
 *   **C++ Compiler**: A C++17 compliant compiler (e.g., `clang++`, `g++`).
-*   **Make**: For the build process.
+*   **CMake**: For the build process.
 
 ## Quick Start
 
@@ -30,15 +30,21 @@ LuaX is a robust transpiler that converts Lua 5.4 source code into C++17, allowi
 To transpile and compile a Lua script (e.g., `tests/main.lua`):
 
 ```bash
-lua5.4 src/luax.lua -k tests/main.lua build/my_program build
+# Standard compilation
+lua5.4 src/luax.lua tests/main.lua -o build/my_program -b build -k
 ```
 
 This command will:
-1.  Transpile `tests/main.lua` (and its dependencies) to C++ in the `build/` directory.
-2.  Compile the generated C++ code and the LuaX runtime library.
-3.  Produce an executable named `build/my_program`.
-4.  Build within the build directory 
-*   Note that the `-k` flag means we preserve the transpiled code. In the future, we may make the compiler emit clean, thread-safe, memory-safe C++. You can substitute `-k` with `--keep`, or you can omit it entirely if you do not want to see the transpiled code.
+1.  **Transpile** `tests/main.lua` and its dependencies into C++ source files within the `build/` directory.
+2.  **Compile** the generated C++ code alongside the LuaX runtime library.
+3.  **Produce** an executable named `build/my_program`.
+4.  **Preserve** the intermediate C++ files (due to the `-k` or `--keep` flag).
+
+**Available Options:**
+*   `-o, --output`: Set the path/name of the resulting executable.
+*   `-b, --build-dir`: Specify where intermediate files are stored (default is `build`).
+*   `-k, --keep`: Preserve the generated C++ code after compilation.
+*   `-t, --translate-only`: Generate C++ source files but skip the compilation/binary step.
 
 Then, simply run the executable:
 
@@ -67,17 +73,6 @@ LuaX works by traversing the Lua AST (Abstract Syntax Tree) and generating equiv
 *   **Dynamic Loading**: `load`, `loadfile`, and `dofile` are not supported because the C++ code is compiled ahead-of-time. Use `require` for static dependencies.
 *   **Garbage Collection**: The runtime uses C++ smart pointers (`std::shared_ptr`) for memory management, which differs from Lua's garbage collector (e.g., reference counting vs. mark-and-sweep). Cycle detection is not currently implemented.
 *   **Speed**: Currently not very fast (yet). The intent is to ensure feature-compatability before we go in and actually make it faster.
-
-## Developer Setup
-
-If you're contributing to LuaX or want enhanced IDE support (clangd, IntelliSense, go-to-definition), run the following:
-
-```bash
-./build_self.sh
-./setup.sh
-```
-
-This configures CMake and generates `compile_commands.json` for C++ tooling. **This is optional for end users** - the transpiler works without it.
 
 ### Build System Philosophy
 
