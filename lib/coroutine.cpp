@@ -9,8 +9,7 @@ LuaCoroutine::LuaCoroutine(const std::shared_ptr<LuaFunctionWrapper>& f, bool pa
 	: func(f),
 	  status(Status::SUSPENDED),
 	  started(false),
-	  is_parallel(parallel),
-	  error_occurred(false) {
+	  is_parallel(parallel) {
 	// Launch the thread immediately, it will wait on cv_resume
 	worker = std::thread(&LuaCoroutine::run, this);
 }

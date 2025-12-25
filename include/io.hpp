@@ -19,11 +19,11 @@ public:
 	~LuaFile() override;
 
 	void close(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-	void flush(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+	void flush(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const;
 	void lines(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-	void read(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-	void seek(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-	void setvbuf(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+	void read(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const;
+	void seek(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const;
+	void setvbuf(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const;
 	void write(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
 };
 

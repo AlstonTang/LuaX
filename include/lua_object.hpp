@@ -9,7 +9,6 @@
 #include <memory>
 #include <functional>
 #include <stdexcept>
-#include <cstdlib>
 #include "lua_value.hpp"
 
 // Forward declaration
@@ -35,8 +34,8 @@ struct LuaFunctionWrapper {
 class LuaObject : public std::enable_shared_from_this<LuaObject> {
 public:
 	virtual ~LuaObject() = default;
-	std::unordered_map<std::string, LuaValue> properties;
-	std::map<long long, LuaValue> array_properties; // For integer-indexed tables
+	std::unordered_map<LuaValue, LuaValue> properties;
+	std::vector<LuaValue> array_part;
 	std::shared_ptr<LuaObject> metatable;
 
 	LuaValue get(const std::string& key);
@@ -101,16 +100,21 @@ inline std::shared_ptr<LuaObject> get_object(const LuaValue& value) {
 	if (std::holds_alternative<std::shared_ptr<LuaObject>>(value)) {
 		return std::get<std::shared_ptr<LuaObject>>(value);
 	}
-	if (std::holds_alternative<std::monostate>(value)) throw std::runtime_error(
-		"Type error: expected table or userdata, got nil.");
-	if (std::holds_alternative<double>(value)) throw std::runtime_error(
-		"Type error: expected table or userdata, got number.");
-	if (std::holds_alternative<long long>(value)) throw std::runtime_error(
-		"Type error: expected table or userdata, got integer.");
-	if (std::holds_alternative<bool>(value)) throw std::runtime_error(
-		"Type error: expected table or userdata, got boolean.");
-	if (std::holds_alternative<std::string>(value)) throw std::runtime_error(
-		"Type error: expected table or userdata, got string.");
+	if (std::holds_alternative<std::monostate>(value))
+		throw std::runtime_error(
+			"Type error: expected table or userdata, got nil.");
+	if (std::holds_alternative<double>(value))
+		throw std::runtime_error(
+			"Type error: expected table or userdata, got number.");
+	if (std::holds_alternative<long long>(value))
+		throw std::runtime_error(
+			"Type error: expected table or userdata, got integer.");
+	if (std::holds_alternative<bool>(value))
+		throw std::runtime_error(
+			"Type error: expected table or userdata, got boolean.");
+	if (std::holds_alternative<std::string>(value))
+		throw std::runtime_error(
+			"Type error: expected table or userdata, got string.");
 	throw std::runtime_error("Type error: expected table or userdata, got unknown.");
 }
 

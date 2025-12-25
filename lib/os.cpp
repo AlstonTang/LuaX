@@ -4,13 +4,11 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
-#include <cstdlib>
 #include <cstdio>
 #include <locale>
 #include <unistd.h>
 #include <vector>
 #include <thread>
-#include <chrono>
 
 // os.execute
 void os_execute(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
@@ -23,7 +21,7 @@ void os_execute(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out)
 // os.exit
 void os_exit(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	double code_double = n_args >= 1 && std::holds_alternative<double>(args[0]) ? std::get<double>(args[0]) : 0.0;
-	bool close = n_args >= 2 && std::holds_alternative<bool>(args[1]) ? std::get<bool>(args[1]) : false;
+	// bool close = n_args >= 2 && std::holds_alternative<bool>(args[1]) ? std::get<bool>(args[1]) : false;
 	// Lua 5.4 close argument
 
 	int code = 0;
@@ -37,15 +35,12 @@ void os_exit(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	// In a real Lua interpreter, 'close' would handle closing the Lua state.
 	// Here, we just exit the C++ program.
 	std::exit(code);
-	out.assign({std::monostate{}});
-	return; // Should not be reached
 }
 
 // os.getenv
 void os_getenv(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	std::string varname = to_cpp_string(args[0]);
-	const char* value = std::getenv(varname.c_str());
-	if (value) {
+	if (const char* value = std::getenv(varname.c_str())) {
 		out.assign({std::string(value)});
 		return;
 	}
@@ -89,13 +84,11 @@ void os_setlocale(const LuaValue* args, size_t n_args, std::vector<LuaValue>& ou
 	else if (category_str == "numeric") category = LC_NUMERIC;
 	else if (category_str == "time") category = LC_TIME;
 
-	const char* result = std::setlocale(category, locale_str.c_str());
-	if (result) {
+	if (const char* result = std::setlocale(category, locale_str.c_str())) {
 		out.assign({std::string(result)});
 		return;
 	}
 	out.assign({std::monostate{}});
-	return; // nil on failure
 }
 
 // os.tmpname

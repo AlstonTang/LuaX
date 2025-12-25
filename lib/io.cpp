@@ -22,7 +22,7 @@ std::shared_ptr<LuaFile> io_stderr_handle;
 std::shared_ptr<LuaObject> current_input_file;
 std::shared_ptr<LuaObject> current_output_file;
 
-inline LuaValue file_to_value(std::shared_ptr<LuaFile> f) {
+inline LuaValue file_to_value(const std::shared_ptr<LuaFile>& f) {
 	return LuaValue(std::static_pointer_cast<LuaObject>(f));
 }
 
@@ -95,7 +95,7 @@ void LuaFile::close(const LuaValue* args, size_t n_args, std::vector<LuaValue>& 
 	}
 }
 
-void LuaFile::flush(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void LuaFile::flush(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const {
 	if (is_closed) {
 		out.assign({std::monostate{}, "attempt to use a closed file"});
 		return;
@@ -108,7 +108,7 @@ void LuaFile::flush(const LuaValue* args, size_t n_args, std::vector<LuaValue>& 
 	}
 }
 
-void LuaFile::read(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void LuaFile::read(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const {
 	if (is_closed) {
 		out.assign({std::monostate{}, "attempt to use a closed file"});
 		return;
@@ -204,7 +204,7 @@ void LuaFile::read(const LuaValue* args, size_t n_args, std::vector<LuaValue>& o
 	}
 }
 
-void LuaFile::seek(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void LuaFile::seek(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const {
 	if (is_closed) {
 		out.assign({std::monostate{}, "attempt to use a closed file"});
 		return;
@@ -226,7 +226,7 @@ void LuaFile::seek(const LuaValue* args, size_t n_args, std::vector<LuaValue>& o
 	}
 }
 
-void LuaFile::setvbuf(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void LuaFile::setvbuf(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const {
 	out.clear();
 	if (is_closed) {
 		out.push_back(std::monostate{});

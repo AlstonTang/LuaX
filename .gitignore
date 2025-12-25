@@ -1,6 +1,7 @@
 # Build directories
 build/
 debug/
+temp/
 
 # IDE files
 .vscode/

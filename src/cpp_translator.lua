@@ -70,6 +70,9 @@ function TranslatorContext:new(translator, for_header, current_module_object_nam
 	ctx.module_global_vars = {}
 	ctx.current_function_fixed_params_count = 0
 	ctx.lib_member_caches = {}
+	ctx.string_literals = {}
+	ctx.global_identifier_caches = {}
+	ctx.current_return_stmt = is_main_script and "return 0;" or "return out_result;"
 	
 	-- Stack of statement lists for hoisting side effects
 	ctx.stmt_stack = {{}} 
@@ -111,9 +114,27 @@ end
 function TranslatorContext:get_lib_cache(lib_name, member_name)
 	local cache_key = lib_name .. "_" .. member_name
 	if not self.lib_member_caches[cache_key] then
-		self.lib_member_caches[cache_key] = "_cache_" .. cache_key
+		self.lib_member_caches[cache_key] = "_cache_lib_" .. cache_key
 	end
 	return self.lib_member_caches[cache_key]
+end
+
+function TranslatorContext:get_string_cache(s)
+	if not self.string_literals[s] then
+		-- Generate a safe variable name for the string
+		local safe_s = s:gsub("[^%a%d]", "_")
+		if #safe_s > 20 then safe_s = safe_s:sub(1, 20) end
+		local id = self:get_unique_id()
+		self.string_literals[s] = "_cache_str_" .. safe_s .. "_" .. id
+	end
+	return self.string_literals[s]
+end
+
+function TranslatorContext:get_global_cache(name)
+	if not self.global_identifier_caches[name] then
+		self.global_identifier_caches[name] = "_cache_global_" .. name
+	end
+	return self.global_identifier_caches[name]
 end
 
 -- Statement Hoisting Methods
@@ -306,8 +327,7 @@ end
 
 register_handler("string", function(ctx, node, depth)
 	local s = node.value
-	s = s:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\t', '\\t'):gsub('\r', '\\r')
-	return "std::string(\"" .. s .. "\")"
+	return ctx:get_string_cache(s)
 end)
 
 register_handler("number", function(ctx, node, depth)
@@ -320,6 +340,10 @@ register_handler("number", function(ctx, node, depth)
 end)
 
 register_handler("integer", function(ctx, node, depth)
+	local val = tonumber(node.value)
+	if val and val >= 0 and val <= 10 then
+		return ctx:get_global_cache("const_int_" .. val)
+	end
 	return "LuaValue(static_cast<long long>(" .. tostring(node.value) .. "))"
 end)
 
@@ -341,13 +365,14 @@ register_handler("identifier", function(ctx, node, depth)
 	end
 	
 	if node.identifier == "_VERSION" then
-		return "get_object(_G)->get_item(\"_VERSION\")"
+		return ctx:get_lib_cache("_G", "_VERSION") -- Cache global version access
 	elseif node.identifier == "nil" then
 		return "std::monostate{}"
 	elseif lua_global_libraries[node.identifier] then
-		return "get_object(_G->get_item(\"" .. node.identifier .. "\"))"
-	elseif node.identifier == "type" then
-		return "_G->get_item(\"type\")"
+		-- Cache standard library objects
+		return "get_object(" .. ctx:get_global_cache(node.identifier) .. ")"
+	elseif node.identifier == "type" or node.identifier == "print" or node.identifier == "error" or node.identifier == "tonumber" or node.identifier == "tostring" or node.identifier == "setmetatable" or node.identifier == "getmetatable" or node.identifier == "pairs" or node.identifier == "ipairs" or node.identifier == "next" or node.identifier == "select" then
+		return ctx:get_global_cache(node.identifier)
 	else
 		return sanitize_cpp_identifier(node.identifier)
 	end
@@ -394,21 +419,12 @@ register_handler("binary_expression", function(ctx, node, depth)
 		local right = translate_node(ctx, node.ordered_children[2], depth + 1)
 		local right_stmts = ctx:capture_end()
 		
-		if right_stmts ~= "" then
-			-- Wrap right side in a lambda to execute statements lazily
-			if operator == "and" then
-				return "lua_logical_and(" .. left .. ", [&]() mutable { " .. right_stmts .. "return " .. right .. "; })"
-			else
-				return "lua_logical_or(" .. left .. ", [&]() mutable { " .. right_stmts .. "return " .. right .. "; })"
-			end
-		else
-			-- No side effects on right side, simple lambda
-			if operator == "and" then
-				return "lua_logical_and(" .. left .. ", [&]() { return " .. right .. "; })"
-			else
-				return "lua_logical_or(" .. left .. ", [&]() { return " .. right .. "; })"
-			end
-		end
+		local op_func = (operator == "and") and "lua_logical_and" or "lua_logical_or"
+		
+		-- Use the helper function which takes a lambda for the RHS.
+		-- This prevents duplicating the 'left' expression in the generated C++,
+		-- which was causing exponential code size growth for chained operators.
+		return op_func .. "(" .. left .. ", [&]() mutable { " .. right_stmts .. "return " .. right .. "; })"
 	end
 
 	local left = translate_node(ctx, node.ordered_children[1], depth + 1)
@@ -488,7 +504,9 @@ register_handler("member_expression", function(ctx, node, depth)
 		local cache_var = ctx:get_lib_cache(base_node.identifier, member_node.identifier)
 		return cache_var
 	else
-		return "lua_get_member(" .. base_code .. ", LuaValue(\"" .. member_node.identifier .. "\"))"
+		-- Optimization: cache member name string literal
+		local member_cache_var = ctx:get_string_cache(member_node.identifier)
+		return "lua_get_member(" .. base_code .. ", " .. member_cache_var .. ")"
 	end
 end)
 
@@ -1005,20 +1023,15 @@ local function translate_function_body(ctx, node, depth)
 		end
 	end
 	
-	-- Translate body
-	local lambda_body = translate_node(ctx, body_node, depth + 1)
+	-- Inject reusable return buffer for this function scope
+	local buffer_decl = "    std::vector<LuaValue> " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(8);\n"
 	
-	-- Check for explicit return
-	local has_explicit_return = false
-	for _, child_statement in ipairs(body_node.ordered_children) do
-		if child_statement.type == "return_statement" then
-			has_explicit_return = true
-			break
-		end
-	end
-	if not has_explicit_return then
-		lambda_body = lambda_body .. "return;\n" -- Void return
-	end
+	local saved_return_stmt = ctx.current_return_stmt
+	ctx.current_return_stmt = "return;"
+	
+	local body_code = translate_node(ctx, body_node, depth + 1)
+	
+	ctx.current_return_stmt = saved_return_stmt
 	
 	-- Capture any remaining statements in the body (should be empty if all statements flushed)
 	local body_stmts = ctx:capture_end()
@@ -1027,11 +1040,12 @@ local function translate_function_body(ctx, node, depth)
 	ctx:restore_scope(saved_scope)
 	ctx.current_function_fixed_params_count = prev_param_count
 	
-	-- Inject reusable return buffer for this function scope
-	local buffer_decl = "    std::vector<LuaValue> " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(8);\n"
-	
-	return "std::make_shared<LuaFunctionWrapper>([=](const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result) mutable -> void {\n" .. buffer_decl .. params_extraction .. body_stmts .. lambda_body .. "})"
+	return "[=](const LuaValue* args, size_t n_args, std::vector<LuaValue>& out_result) mutable -> void {\n" .. buffer_decl .. params_extraction .. body_code .. body_stmts .. "}"
 end
+
+register_handler("function_expression", function(ctx, node, depth)
+	return "std::make_shared<LuaFunctionWrapper>(" .. translate_function_body(ctx, node, depth) .. ")"
+end)
 
 register_handler("function_declaration", function(ctx, node, depth)
 	local ptr_name = nil
@@ -1054,37 +1068,31 @@ register_handler("function_declaration", function(ctx, node, depth)
 	-- Check for table member function (e.g., function M.greet(name))
 	if node.method_name ~= nil then
 		local prev_stmts = ctx:flush_statements()
-		return prev_stmts .. "get_object(LuaValue(" .. node.identifier .. "))->set(\"" .. node.method_name .. "\", " .. lambda_code .. ");"
+		return prev_stmts .. "get_object(LuaValue(" .. node.identifier .. "))->set(\"" .. node.method_name .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
 	elseif node.identifier ~= nil then
 		local prev_stmts = ctx:flush_statements()
 		if node.is_local then
 			local var_name = sanitize_cpp_identifier(node.identifier)
 			return prev_stmts .. "auto " .. ptr_name .. " = std::make_shared<LuaValue>();\n" ..
-				"*" .. ptr_name .. " = " .. lambda_code .. ";\n" ..
+				"*" .. ptr_name .. " = std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. ");\n" ..
 				"LuaValue " .. var_name .. " = *" .. ptr_name .. ";"
 		else
-			return prev_stmts .. "_G->set(\"" .. node.identifier .. "\", " .. lambda_code .. ");"
+			return prev_stmts .. "_G->set(\"" .. node.identifier .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
 		end
 	else
-		-- Anonymous function (expression context): DO NOT flush statements.
-		-- They will be flushed by the enclosing statement handler.
-		return lambda_code
+		-- Anonymous function (expression context)
+		return "std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. ")"
 	end
 end)
 
 register_handler("method_declaration", function(ctx, node, depth)
-	local func_name = node.identifier
-	if node.method_name then
-		func_name = func_name .. "_" .. node.method_name
-	end
-	
 	local lambda_code = translate_function_body(ctx, node, depth)
 	local prev_stmts = ctx:flush_statements()
 	
 	if node.method_name ~= nil then
-		return prev_stmts .. "get_object(LuaValue(" .. node.identifier .. "))->set(\"" .. node.method_name .. "\", " .. lambda_code .. ");"
+		return prev_stmts .. "get_object(LuaValue(" .. node.identifier .. "))->set(\"" .. node.method_name .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
 	else
-		return prev_stmts .. lambda_code
+		return prev_stmts .. "std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. ")"
 	end
 end)
 
@@ -1168,7 +1176,6 @@ register_handler("repeat_until_statement", function(ctx, node, depth)
 		return prev_stmts .. "do {\n" .. body .. "} while (!is_lua_truthy(" .. condition .. "));\n"
 	end
 end)
-
 register_handler("break_statement", function(ctx, node, depth)
 	return ctx:flush_statements() .. "break;\n"
 end)
@@ -1181,6 +1188,7 @@ register_handler("goto_statement", function(ctx, node, depth)
 	return ctx:flush_statements() .. "goto " .. node.value .. ";\n"
 end)
 
+
 register_handler("return_statement", function(ctx, node, depth)
 	local expr_list_node = node.ordered_children[1]
 	local cpp_code = ctx:flush_statements()
@@ -1192,7 +1200,7 @@ register_handler("return_statement", function(ctx, node, depth)
 			cpp_code = cpp_code .. stmts .. "out_result.push_back(" .. val .. ");\n"
 		end
 	end
-	return cpp_code .. "return;\n"
+	return cpp_code .. ctx.current_return_stmt .. "\n"
 end)
 
 --------------------------------------------------------------------------------
@@ -1352,14 +1360,49 @@ end)
 -- Helper function to emit cache declarations for library member accesses
 local function emit_cache_declarations(ctx)
 	local code = ""
-	for cache_key, cache_var in pairs(ctx.lib_member_caches) do
-		-- Parse cache_key back to lib.member (format: "lib_member")
-		local lib, member = cache_key:match("^([^_]+)_(.+)$")
-		if lib and member then
-			code = code .. "static const LuaValue " .. cache_var 
-				.. " = get_object(_G->get_item(\"" .. lib .. "\"))->get_item(\"" .. member .. "\");\n"
+	
+	-- 1. String Literals
+	local sorted_strings = {}
+	for s, _ in pairs(ctx.string_literals) do table.insert(sorted_strings, s) end
+	table.sort(sorted_strings)
+	for _, s in ipairs(sorted_strings) do
+		local cache_var = ctx.string_literals[s]
+		local escaped = s:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n'):gsub('\t', '\\t'):gsub('\r', '\\r')
+		code = code .. "static const LuaValue " .. cache_var .. " = std::string(\"" .. escaped .. "\");\n"
+	end
+
+	-- 2. Global Identifiers
+	local sorted_globals = {}
+	for name, _ in pairs(ctx.global_identifier_caches) do table.insert(sorted_globals, name) end
+	table.sort(sorted_globals)
+	for _, name in ipairs(sorted_globals) do
+		local cache_var = ctx.global_identifier_caches[name]
+		if name:match("^const_int_") then
+			local val = name:match("^const_int_(%d+)$")
+			code = code .. "static const LuaValue " .. cache_var .. " = LuaValue(static_cast<long long>(" .. val .. "));\n"
+		else
+			code = code .. "static const LuaValue " .. cache_var .. " = _G->get_item(\"" .. name .. "\");\n"
 		end
 	end
+
+	-- 3. Library Members
+	local sorted_lib_members = {}
+	for k, _ in pairs(ctx.lib_member_caches) do table.insert(sorted_lib_members, k) end
+	table.sort(sorted_lib_members)
+	for _, cache_key in ipairs(sorted_lib_members) do
+		local cache_var = ctx.lib_member_caches[cache_key]
+		local lib, member = cache_key:match("^([^_]+)_(.+)$")
+		if lib and member then
+			if lib == "_G" then
+				code = code .. "static const LuaValue " .. cache_var 
+					.. " = _G->get_item(\"" .. member .. "\");\n"
+			else
+				code = code .. "static const LuaValue " .. cache_var 
+					.. " = get_object(_G->get_item(\"" .. lib .. "\"))->get_item(\"" .. member .. "\");\n"
+			end
+		end
+	end
+	
 	return code
 end
 
@@ -1407,7 +1450,8 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 		else
 			-- Emit cache declarations for library member accesses
 			local cache_decls = emit_cache_declarations(ctx)
-			local buffer_decl = "    std::vector<LuaValue> " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(10);\n"
+			local buffer_decl = "    std::vector<LuaValue> out_result; out_result.reserve(10);\n" ..
+			                    "    std::vector<LuaValue> " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(10);\n"
 			local main_function_start = "int main(int argc, char* argv[]) {\n" ..
 										"init_G(argc, argv);\n" .. cache_decls .. buffer_decl
 			local main_function_end = "\n    return 0;\n}"
@@ -1475,7 +1519,8 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 			
 			-- Emit cache declarations for library member accesses at start of load function
 			local cache_decls = emit_cache_declarations(ctx)
-			local buffer_decl = "    std::vector<LuaValue> " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(10);\n"
+			local buffer_decl = "    std::vector<LuaValue> out_result; out_result.reserve(10);\n" ..
+			                    "    std::vector<LuaValue> " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(10);\n"
 			local load_function_definition = "std::vector<LuaValue> load() {\n" .. cache_decls .. buffer_decl .. load_function_body .. "}\n"
 			return header .. cpp_header .. global_var_definitions .. namespace_start .. load_function_definition .. namespace_end
 		end

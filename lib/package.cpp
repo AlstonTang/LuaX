@@ -62,8 +62,6 @@ void package_searchpath(const LuaValue* args, size_t n_args, std::vector<LuaValu
 // package.loadlib
 void package_loadlib(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	throw std::runtime_error("package.loadlib is not supported in the translated environment.");
-	out.assign({});
-	return; // Should not be reached
 }
 
 // Global tables for package.loaded and package.preload

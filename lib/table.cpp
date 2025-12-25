@@ -3,255 +3,185 @@
 #include <vector>
 #include <algorithm>
 #include <string>
-#include <map>
 
-// table.unpack
+// table.unpack(list [, i [, j]])
 void table_unpack(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	auto table = get_object(args[0]);
 	if (!table) {
 		out.assign({std::monostate{}});
 		return;
-	};
+	}
 
-	double i_double = n_args >= 2 && std::holds_alternative<double>(args[1]) ? std::get<double>(args[1]) : 1.0;
-	// Default j is #table
-	double j_double;
+	// Default i = 1, j = #list
+	long long i = (n_args >= 2) ? get_long_long(args[1]) : 1;
+	long long j;
 	if (n_args >= 3) {
-		j_double = std::get<double>(args[2]);
+		j = get_long_long(args[2]);
 	}
 	else {
-		LuaValue len_val = lua_get_length(args[0]);
-		j_double = get_double(len_val);
+		j = static_cast<long long>(table->array_part.size());
 	}
 
-	long long i = static_cast<long long>(i_double);
-	long long j = static_cast<long long>(j_double);
-
 	out.clear();
+	if (i > j) return;
+
+	// Optimization: If the range is within our current vector, use push_back directly
 	for (long long k = i; k <= j; ++k) {
-		out.push_back(table->get_item(static_cast<double>(k)));
+		if (k >= 1 && k <= static_cast<long long>(table->array_part.size())) {
+			out.push_back(table->array_part[k - 1]);
+		}
+		else {
+			// Fallback for indices outside the current vector bounds (sparse elements)
+			out.push_back(table->get_item(static_cast<double>(k)));
+		}
 	}
 }
 
-// table.sort
+// table.sort(list [, comp])
 void table_sort(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	auto table = get_object(args[0]);
-	if (!table) {
+	if (!table || table->array_part.empty()) {
 		out.assign({std::monostate{}});
 		return;
 	}
 
 	LuaValue comp_func_val = (n_args >= 2) ? args[1] : LuaValue(std::monostate{});
 	bool has_comp = std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val);
-	std::shared_ptr<LuaFunctionWrapper> comp_func = has_comp
-		                                                ? std::get<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val)
-		                                                : nullptr;
-	std::vector<LuaValue> comp_buffer;
-	comp_buffer.reserve(1);
+	auto comp_func = has_comp ? std::get<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val) : nullptr;
 
-	// 1. Standard Lua table.sort behavior: Sort items 1 to N
-	LuaValue len_val = lua_get_length(args[0]);
-	long long n = get_long_long(len_val);
-
-	if (n <= 1) {
-		out.assign({std::monostate{}});
-		return;
-	}
-
-	// Extract elements
-	std::vector<LuaValue> elements;
-	elements.reserve(n);
-	for (long long i = 1; i <= n; ++i) {
-		elements.push_back(table->get_item(static_cast<double>(i)));
-	}
-
-	// Sort
-	std::sort(elements.begin(), elements.end(),
+	// table.sort usually only sorts the array part (1 to #list)
+	// Since we are using std::vector, we sort the array_part directly.
+	std::sort(table->array_part.begin(), table->array_part.end(),
 	          [&](const LuaValue& a, const LuaValue& b) {
 		          if (has_comp) {
-			          // 1. Reset buffer
+			          thread_local std::vector<LuaValue> comp_buffer;
 			          comp_buffer.clear();
-
-			          // 2. Call Lua function with Output Parameter
 			          LuaValue func_args[] = {a, b};
 			          comp_func->func(func_args, 2, comp_buffer);
-
-			          // 3. Check Result
-			          if (comp_buffer.empty()) return false; // Default false if nil returned
-			          return is_lua_truthy(comp_buffer[0]);
+			          return !comp_buffer.empty() && is_lua_truthy(comp_buffer[0]);
 		          }
-		          else {
-			          // Default Lua comparison (<)
-			          return lua_less_than(a, b);
-		          }
+		          return lua_less_than(a, b);
 	          });
-
-	// Write back
-	for (long long i = 0; i < n; ++i) {
-		table->set_item(static_cast<double>(i + 1), elements[i]);
-	}
 
 	out.clear();
 }
 
-// table.pack
+// table.pack(...)
 void table_pack(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	auto new_table = std::make_shared<LuaObject>();
-	long long n = 0;
+
+	// Efficiently populate the vector
+	new_table->array_part.reserve(n_args);
 	for (size_t i = 0; i < n_args; ++i) {
-		LuaValue val = args[i];
-		if (std::holds_alternative<std::monostate>(val)) {
-			continue;
-		}
-		new_table->set_item(static_cast<double>(i + 1), val);
-		++n;
+		new_table->array_part.push_back(args[i]);
 	}
+
+	// Lua's table.pack also sets the "n" field to the number of arguments
 	new_table->set("n", static_cast<double>(n_args));
+
 	out.assign({new_table});
-	return;
 }
 
-// table.move
+// table.move(a1, f, e, t [, a2])
 void table_move(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	auto a1 = get_object(args[0]);
-	if (!a1) {
-		out.assign({std::monostate{}});
-		return;
-	};
+	if (!a1) return;
 
-	double f_double = get_double(args[1]);
-	double e_double = get_double(args[2]);
-	double t_double = get_double(args[3]);
-
-	auto a2 = (n_args >= 5) ? get_object(args[4]) : nullptr;
-	if (!a2) a2 = a1;
-
-	long long f = static_cast<long long>(f_double);
-	long long e = static_cast<long long>(e_double);
-	long long t = static_cast<long long>(t_double);
+	long long f = get_long_long(args[1]);
+	long long e = get_long_long(args[2]);
+	long long t = get_long_long(args[3]);
+	auto a2 = (n_args >= 5) ? get_object(args[4]) : a1;
 
 	if (f > e) {
 		out.assign({a2});
 		return;
-	};
+	}
 
-	if (t <= f || t > e) {
-		for (long long idx = f; idx <= e; ++idx) {
-			a2->set_item(static_cast<double>(t + (idx - f)), a1->get_item(static_cast<double>(idx)));
-		}
+	// To handle overlapping moves (like moving 1..3 to 2..4), we collect first
+	std::vector<LuaValue> range;
+	range.reserve(static_cast<size_t>(e - f + 1));
+	for (long long i = f; i <= e; ++i) {
+		range.push_back(a1->get_item(static_cast<double>(i)));
 	}
-	else {
-		for (long long idx = e; idx >= f; --idx) {
-			a2->set_item(static_cast<double>(t + (idx - f)), a1->get_item(static_cast<double>(idx)));
-		}
+
+	// Write back to a2
+	for (size_t i = 0; i < range.size(); ++i) {
+		a2->set_item(static_cast<double>(t + i), range[i]);
 	}
+
 	out.assign({a2});
-	return;
 }
 
-// table.concat
+// table.concat(list [, sep [, i [, j]]])
 void table_concat(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	auto table = get_object(args[0]);
-	if (!table) {
-		out.assign({""});
-		return;
-	};
+	if (!table) return;
 
-	std::string sep = n_args >= 2 && std::holds_alternative<std::string>(args[1]) ? std::get<std::string>(args[1]) : "";
-	double i_double = n_args >= 3 && std::holds_alternative<double>(args[2]) ? std::get<double>(args[2]) : 1.0;
+	std::string sep = (n_args >= 2) ? to_cpp_string(args[1]) : "";
+	long long i = (n_args >= 3) ? get_long_long(args[2]) : 1;
+	long long j = (n_args >= 4) ? get_long_long(args[3]) : static_cast<long long>(table->array_part.size());
 
-	double j_double;
-	if (n_args >= 4) {
-		j_double = get_double(args[3]);
-	}
-	else {
-		LuaValue len_val = lua_get_length(args[0]);
-		j_double = get_double(len_val);
-	}
-
-	long long i = static_cast<long long>(i_double);
-	long long j = static_cast<long long>(j_double);
-
-	std::string result = "";
-	bool first = true;
+	std::string result;
 	for (long long k = i; k <= j; ++k) {
-		LuaValue val = table->get_item(static_cast<double>(k));
-		if (!std::holds_alternative<std::monostate>(val)) {
-			if (!first) {
-				result += sep;
-			}
-			result += to_cpp_string(val);
-			first = false;
+		LuaValue val = (k >= 1 && k <= (long long)table->array_part.size())
+			               ? table->array_part[k - 1]
+			               : table->get_item(static_cast<double>(k));
+
+		if (std::holds_alternative<std::monostate>(val)) {
+			throw std::runtime_error("invalid value (nil) at index " + std::to_string(k) + " in table.concat");
 		}
+
+		if (k > i) result += sep;
+		result += to_cpp_string(val);
 	}
 	out.assign({result});
-	return;
 }
 
-// table.insert
+// table.insert([list,] [pos,] value)
 void table_insert(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
-	if (auto table = get_object(args[0])) {
-		// Check number of arguments to decide overload
-		// args has "1", "2", "3"...
-		bool has_pos = false;
-		if (n_args >= 3) {
-			has_pos = true;
-		}
+	auto table = get_object(args[0]);
+	if (!table) return;
 
-		if (has_pos) {
-			// insert(table, pos, value)
-			long long pos = get_long_long(args[1]);
-			LuaValue val = args[2];
+	if (n_args == 2) {
+		// Overload: table.insert(table, value) -> append
+		table->array_part.push_back(args[1]);
+	}
+	else if (n_args >= 3) {
+		// Overload: table.insert(table, pos, value)
+		long long pos = get_long_long(args[1]);
+		const LuaValue& val = args[2];
 
-			LuaValue len_val = lua_get_length(args[0]);
-			long long len = get_long_long(len_val);
-
-			// Shift elements up
-			for (long long i = len; i >= pos; --i) {
-				table->set_item(static_cast<double>(i + 1), table->get_item(static_cast<double>(i)));
-			}
-			table->set_item(static_cast<double>(pos), val);
+		if (pos >= 1 && pos <= static_cast<long long>(table->array_part.size() + 1)) {
+			table->array_part.insert(table->array_part.begin() + (pos - 1), val);
 		}
 		else {
-			// insert(table, value) -> append
-			LuaValue val = args[1];
-			LuaValue len_val = lua_get_length(args[0]);
-			long long len = get_long_long(len_val);
-			table->set_item(static_cast<double>(len + 1), val);
+			// Fallback for sparse insertion
+			table->set_item(args[1], val);
 		}
 	}
 	out.assign({std::monostate{}});
-	return;
 }
 
-// table.remove
+// table.remove(list [, pos])
 void table_remove(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
-	if (auto table = get_object(args[0])) {
-		LuaValue len_val = lua_get_length(args[0]);
-		long long len = get_long_long(len_val);
-
-		long long pos = len;
-		if (n_args >= 2) {
-			pos = get_long_long(args[1]);
-		}
-
-		if (pos > len || pos < 1) {
-			out.assign({std::monostate{}});
-			return;
-		};
-
-		LuaValue removed_val = table->get_item(static_cast<double>(pos));
-
-		for (long long i = pos; i < len; ++i) {
-			table->set_item(static_cast<double>(i), table->get_item(static_cast<double>(i + 1)));
-		}
-		table->set_item(static_cast<double>(len), std::monostate{}); // Remove last
-
-		out.assign({removed_val});
+	auto table = get_object(args[0]);
+	if (!table || table->array_part.empty()) {
+		out.assign({std::monostate{}});
 		return;
 	}
-	out.assign({std::monostate{}});
-	return;
+
+	long long len = static_cast<long long>(table->array_part.size());
+	long long pos = (n_args >= 2) ? get_long_long(args[1]) : len;
+
+	if (pos < 1 || pos > len) {
+		out.assign({std::monostate{}});
+		return;
+	}
+
+	LuaValue removed_val = table->array_part[pos - 1];
+	table->array_part.erase(table->array_part.begin() + (pos - 1));
+
+	out.assign({removed_val});
 }
 
 std::shared_ptr<LuaObject> create_table_library() {

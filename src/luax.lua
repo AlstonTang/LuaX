@@ -97,7 +97,7 @@ end
 local function translate_file(lua_file_path, output_file_name, is_main_entry, should_format)
 	local translate_object = cpp_translator:new()
 
-	print("Translating " .. lua_file_path .. "...")
+	print("Translating " .. lua_file_path .. " at " .. os.clock() .. "...")
 	local file = io.open(lua_file_path, "r")
 	if not file then error("Could not open " .. lua_file_path) end
 	local lua_code = file:read("*all")
@@ -108,10 +108,14 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry, sh
 	local cpp_code, hpp_code
 	if is_main_entry then
 		cpp_code = translate_object:translate_recursive(ast, output_file_name, false, nil, true)
+		print("Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 		hpp_code = translate_object:translate_recursive(ast, output_file_name, true, nil, true)
+		print("Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 	else
 		cpp_code = translate_object:translate_recursive(ast, output_file_name, false, output_file_name, false)
+		print("Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 		hpp_code = translate_object:translate_recursive(ast, output_file_name, true, output_file_name, false)
+		print("Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 	end
 
 	local cpp_output_path = BUILD_DIR .. "/" .. output_file_name .. ".cpp"
@@ -129,8 +133,10 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry, sh
 		f:close()
 	end
 
+	print("Writing transpiled output for " .. lua_file_path .. " at " .. os.clock() .. "...")
 	write_file(cpp_output_path, cpp_code)
 	write_file(hpp_output_path, hpp_code)
+	print("Done transpiling " .. lua_file_path .. " at " .. os.clock() .. "...")
 
 	return lua_file_path
 end
