@@ -27,16 +27,16 @@ inline LuaValue file_to_value(const std::shared_ptr<LuaFile>& f) {
 }
 
 // Create a shared metatable for LuaFile objects
-static std::shared_ptr<LuaObject> file_metatable = std::make_shared<LuaObject>();
+static std::shared_ptr<LuaObject> file_metatable;
 
 // Helper to create method wrappers for LuaFile
 // The lambda must return void and take the output vector reference.
 auto make_file_method = [](auto method_ptr) {
 	return std::make_shared<LuaFunctionWrapper>(
-		[method_ptr](const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+		[method_ptr](const LuaValue* args, size_t n_args, LuaValueVector& out) {
 			// The first argument (args[0]) will be the LuaFile object itself
 			if (n_args < 1) {
-				out.assign({std::monostate{}, "attempt to call method on a non-file object"});
+				out.assign({std::monostate{}, LuaValue(std::string_view("attempt to call method on a non-file object"))});
 				return;
 			}
 
@@ -48,7 +48,7 @@ auto make_file_method = [](auto method_ptr) {
 				}
 			}
 
-			out.assign({std::monostate{}, "attempt to call method on a non-file object"});
+			out.assign({std::monostate{}, LuaValue(std::string_view("attempt to call method on a non-file object"))});
 		});
 };
 
@@ -71,7 +71,7 @@ LuaFile::~LuaFile() {
 	}
 }
 
-void LuaFile::close(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void LuaFile::close(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (is_closed) {
 		out.assign({true});
 		return;
@@ -91,26 +91,26 @@ void LuaFile::close(const LuaValue* args, size_t n_args, std::vector<LuaValue>& 
 		out.assign({true});
 	}
 	else {
-		out.assign({std::monostate{}, "close failed"});
+		out.assign({std::monostate{}, LuaValue(std::string_view("close failed"))});
 	}
 }
 
-void LuaFile::flush(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const {
+void LuaFile::flush(const LuaValue* args, size_t n_args, LuaValueVector& out) const {
 	if (is_closed) {
-		out.assign({std::monostate{}, "attempt to use a closed file"});
+		out.assign({std::monostate{}, LuaValue(std::string_view("attempt to use a closed file"))});
 		return;
 	}
 	if (std::fflush(file_handle) == 0) {
 		out.assign({true});
 	}
 	else {
-		out.assign({std::monostate{}, "flush failed"});
+		out.assign({std::monostate{}, LuaValue(std::string_view("flush failed"))});
 	}
 }
 
-void LuaFile::read(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const {
+void LuaFile::read(const LuaValue* args, size_t n_args, LuaValueVector& out) const {
 	if (is_closed) {
-		out.assign({std::monostate{}, "attempt to use a closed file"});
+		out.assign({std::monostate{}, LuaValue(std::string_view("attempt to use a closed file"))});
 		return;
 	}
 
@@ -175,7 +175,7 @@ void LuaFile::read(const LuaValue* args, size_t n_args, std::vector<LuaValue>& o
 			num_bytes = std::stoll(format);
 		}
 		catch (...) {
-			out.assign({std::monostate{}, "invalid read format"});
+			out.assign({std::monostate{}, LuaValue(std::string_view("invalid read format"))});
 			return;
 		}
 
@@ -187,7 +187,7 @@ void LuaFile::read(const LuaValue* args, size_t n_args, std::vector<LuaValue>& o
 			}
 			else {
 				std::ungetc(c, file_handle);
-				out.assign({""});
+				out.assign({LuaValue(std::string_view(""))});
 			}
 			return;
 		}
@@ -204,9 +204,9 @@ void LuaFile::read(const LuaValue* args, size_t n_args, std::vector<LuaValue>& o
 	}
 }
 
-void LuaFile::seek(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const {
+void LuaFile::seek(const LuaValue* args, size_t n_args, LuaValueVector& out) const {
 	if (is_closed) {
-		out.assign({std::monostate{}, "attempt to use a closed file"});
+		out.assign({std::monostate{}, LuaValue(std::string_view("attempt to use a closed file"))});
 		return;
 	}
 
@@ -222,15 +222,15 @@ void LuaFile::seek(const LuaValue* args, size_t n_args, std::vector<LuaValue>& o
 		out.assign({pos});
 	}
 	else {
-		out.assign({std::monostate{}, "seek failed"});
+		out.assign({std::monostate{}, LuaValue(std::string_view("seek failed"))});
 	}
 }
 
-void LuaFile::setvbuf(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) const {
+void LuaFile::setvbuf(const LuaValue* args, size_t n_args, LuaValueVector& out) const {
 	out.clear();
 	if (is_closed) {
 		out.push_back(std::monostate{});
-		out.push_back("attempt to use a closed file");
+		out.push_back(LuaValue(std::string_view("attempt to use a closed file")));
 		return;
 	}
 
@@ -246,15 +246,15 @@ void LuaFile::setvbuf(const LuaValue* args, size_t n_args, std::vector<LuaValue>
 	}
 	else {
 		out.push_back(std::monostate{});
-		out.push_back("setvbuf failed");
+		out.push_back(LuaValue(std::string_view("setvbuf failed")));
 	}
 }
 
-void LuaFile::write(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void LuaFile::write(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	out.clear();
 	if (is_closed) {
 		out.push_back(std::monostate{});
-		out.push_back("attempt to use a closed file");
+		out.push_back(LuaValue(std::string_view("attempt to use a closed file")));
 		return;
 	}
 
@@ -263,22 +263,22 @@ void LuaFile::write(const LuaValue* args, size_t n_args, std::vector<LuaValue>& 
 		std::string s = to_cpp_string(args[i]);
 		if (std::fputs(s.c_str(), file_handle) == EOF) {
 			out.push_back(std::monostate{});
-			out.push_back("write failed");
+			out.push_back(LuaValue(std::string_view("write failed")));
 			return;
 		}
 	}
 	out.push_back(shared_from_this());
 }
 
-void LuaFile::lines(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void LuaFile::lines(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (is_closed) {
-		out.assign({std::monostate{}, "attempt to use a closed file"});
+		out.assign({std::monostate{}, LuaValue(std::string_view("attempt to use a closed file"))});
 		return;
 	}
 
 	// The iterator function for file:lines()
 	auto iterator_func = std::make_shared<LuaFunctionWrapper>(
-		[self_obj = shared_from_this()](const LuaValue* _, size_t __, std::vector<LuaValue>& iter_out) {
+		[self_obj = shared_from_this()](const LuaValue* _, size_t __, LuaValueVector& iter_out) {
 			// Cast self_obj to LuaFile to access file_handle
 			if (auto self = std::dynamic_pointer_cast<LuaFile>(self_obj)) {
 				if (self->is_closed) {
@@ -302,7 +302,7 @@ void LuaFile::lines(const LuaValue* args, size_t n_args, std::vector<LuaValue>& 
 
 // --- Global `io` Library Functions ---
 
-void io_open(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_open(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string filename = to_cpp_string(args[0]);
 	std::string mode = n_args >= 2 ? to_cpp_string(args[1]) : "r";
 
@@ -317,7 +317,7 @@ void io_open(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	out.assign({file_to_value(file_obj)});
 }
 
-void io_popen(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_popen(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string command = to_cpp_string(args[0]);
 	std::string mode = n_args >= 2 ? to_cpp_string(args[1]) : "r";
 
@@ -332,7 +332,7 @@ void io_popen(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	out.assign({file_to_value(file_obj)});
 }
 
-void io_tmpfile(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_tmpfile(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	FILE* f = std::tmpfile();
 	if (!f) {
 		out.assign({std::monostate{}, "tmpfile failed: " + std::string(std::strerror(errno))});
@@ -343,19 +343,19 @@ void io_tmpfile(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out)
 	out.assign({file_to_value(file_obj)});
 }
 
-void io_type(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_type(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue val = args[0];
 	if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) {
 		auto obj = std::get<std::shared_ptr<LuaObject>>(val);
 		if (auto file_handle = std::dynamic_pointer_cast<LuaFile>(obj)) {
-			out.assign({file_handle->is_closed ? "closed file" : "file"});
+			out.assign({LuaValue(std::string_view(file_handle->is_closed ? "closed file" : "file"))});
 			return;
 		}
 	}
 	out.assign({std::monostate{}});
 }
 
-void io_input(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_input(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	// io.input([file])
 	if (n_args == 0) {
 		out.assign({current_input_file});
@@ -368,8 +368,8 @@ void io_input(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	}
 	else if (std::holds_alternative<std::string>(arg)) {
 		// Open the file
-		LuaValue open_args[] = {arg, LuaValue("r")};
-		std::vector<LuaValue> res;
+		LuaValue open_args[] = {arg, LuaValue(std::string_view("r"))};
+		LuaValueVector res;
 		io_open(open_args, 2, res);
 
 		if (!res.empty() && std::holds_alternative<std::shared_ptr<LuaObject>>(res[0])) {
@@ -389,7 +389,7 @@ void io_input(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	}
 }
 
-void io_output(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_output(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	// io.output([file])
 	if (n_args == 0) {
 		out.assign({current_output_file});
@@ -401,8 +401,8 @@ void io_output(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) 
 		out.assign({current_output_file});
 	}
 	else if (std::holds_alternative<std::string>(arg)) {
-		LuaValue open_args[] = {arg, LuaValue("w")};
-		std::vector<LuaValue> res;
+		LuaValue open_args[] = {arg, LuaValue(std::string_view("w"))};
+		LuaValueVector res;
 		io_open(open_args, 2, res);
 
 		if (!res.empty() && std::holds_alternative<std::shared_ptr<LuaObject>>(res[0])) {
@@ -422,7 +422,7 @@ void io_output(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) 
 	}
 }
 
-void io_close(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_close(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	// io.close([file])
 	LuaValue file_val = n_args >= 1 ? args[0] : LuaValue(current_output_file);
 
@@ -437,36 +437,36 @@ void io_close(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 			return;
 		}
 	}
-	out.assign({std::monostate{}, "invalid file handle"});
+	out.assign({std::monostate{}, LuaValue(std::string_view("invalid file handle"))});
 }
 
-void io_read(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_read(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto read_func_val = current_input_file->get("read");
 	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(read_func_val)) {
 		auto read_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(read_func_val);
-		std::vector<LuaValue> method_args = {current_input_file};
+		LuaValueVector method_args = {current_input_file};
 		for (size_t i = 0; i < n_args; i++) method_args.push_back(args[i]);
 		out.clear();
 		read_func->func(method_args.data(), method_args.size(), out);
 		return;
 	}
-	out.assign({std::monostate{}, "input file is not readable"});
+	out.assign({std::monostate{}, LuaValue(std::string_view("input file is not readable"))});
 }
 
-void io_write(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_write(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto write_func_val = current_output_file->get("write");
 	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(write_func_val)) {
 		auto write_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(write_func_val);
-		std::vector<LuaValue> method_args = {current_output_file};
+		LuaValueVector method_args = {current_output_file};
 		for (size_t i = 0; i < n_args; i++) method_args.push_back(args[i]);
 		out.clear();
 		write_func->func(method_args.data(), method_args.size(), out);
 		return;
 	}
-	out.assign({std::monostate{}, "output file is not writable"});
+	out.assign({std::monostate{}, LuaValue(std::string_view("output file is not writable"))});
 }
 
-void io_flush(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_flush(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto flush_func_val = current_output_file->get("flush");
 	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(flush_func_val)) {
 		auto flush_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(flush_func_val);
@@ -475,10 +475,10 @@ void io_flush(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 		flush_func->func(f_args, 1, out);
 		return;
 	}
-	out.assign({std::monostate{}, "output file is not flushable"});
+	out.assign({std::monostate{}, LuaValue(std::string_view("output file is not flushable"))});
 }
 
-void io_lines(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void io_lines(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue filename_val = (n_args > 0) ? args[0] : LuaValue(std::monostate{});
 
 	if (std::holds_alternative<std::monostate>(filename_val)) {
@@ -494,8 +494,8 @@ void io_lines(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 	}
 	else {
 		// io.lines(filename) -> open file and iterate
-		LuaValue open_args[] = {filename_val, LuaValue("r")};
-		std::vector<LuaValue> open_res;
+		LuaValue open_args[] = {filename_val, LuaValue(std::string_view("r"))};
+		LuaValueVector open_res;
 		io_open(open_args, 2, open_res);
 
 		if (!open_res.empty() && std::holds_alternative<std::shared_ptr<LuaObject>>(open_res[0])) {
@@ -506,7 +506,7 @@ void io_lines(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 				auto lines_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(lines_func_val);
 
 				// Get the file iterator: file:lines() returns (iter, self, nil)
-				std::vector<LuaValue> iter_res;
+				LuaValueVector iter_res;
 				LuaValue l_args[] = {file_obj};
 				lines_func->func(l_args, 1, iter_res);
 
@@ -516,14 +516,14 @@ void io_lines(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 					// Wrap the iterator to close the file on nil
 					auto iter_wrapper = std::make_shared<LuaFunctionWrapper>(
 						[original_iter, file_obj](const LuaValue* w_args, size_t w_n_args,
-						                          std::vector<LuaValue>& w_out) {
+						                          LuaValueVector& w_out) {
 							// Call original iterator
 							original_iter->func(w_args, w_n_args, w_out);
 
 							// If returns nil, close the file
 							if (w_out.empty() || std::holds_alternative<std::monostate>(w_out[0])) {
 								if (auto f = std::dynamic_pointer_cast<LuaFile>(file_obj)) {
-									std::vector<LuaValue> ignored_out;
+									LuaValueVector ignored_out;
 									f->close(nullptr, 0, ignored_out);
 								}
 							}
@@ -547,19 +547,18 @@ std::shared_ptr<LuaObject> create_io_library() {
 	static std::shared_ptr<LuaObject> io_lib;
 	if (io_lib) return io_lib;
 
-	io_lib = std::make_shared<LuaObject>();
-
-	file_metatable->properties = {
-		{"close", make_file_method(&LuaFile::close)},
-		{"flush", make_file_method(&LuaFile::flush)},
-		{"read", make_file_method(&LuaFile::read)},
-		{"seek", make_file_method(&LuaFile::seek)},
-		{"setvbuf", make_file_method(&LuaFile::setvbuf)},
-		{"write", make_file_method(&LuaFile::write)},
-		{"lines", make_file_method(&LuaFile::lines)},
-		{"__index", file_metatable}
-	};
-
+	if (!file_metatable) {
+		file_metatable = LuaObject::create({
+			{LuaValue(std::string_view("close")), make_file_method(&LuaFile::close)},
+			{LuaValue(std::string_view("flush")), make_file_method(&LuaFile::flush)},
+			{LuaValue(std::string_view("read")), make_file_method(&LuaFile::read)},
+			{LuaValue(std::string_view("seek")), make_file_method(&LuaFile::seek)},
+			{LuaValue(std::string_view("setvbuf")), make_file_method(&LuaFile::setvbuf)},
+			{LuaValue(std::string_view("write")), make_file_method(&LuaFile::write)},
+			{LuaValue(std::string_view("lines")), make_file_method(&LuaFile::lines)}
+		});
+		file_metatable->set("__index", file_metatable);
+	}
 
 	// Set up standard file handles
 	io_stdin_handle = std::make_shared<LuaFile>(stdin, false);
@@ -574,22 +573,22 @@ std::shared_ptr<LuaObject> create_io_library() {
 	current_input_file = std::static_pointer_cast<LuaObject>(io_stdin_handle);
 	current_output_file = std::static_pointer_cast<LuaObject>(io_stdout_handle);
 
-	io_lib->properties = {
-		{"close", std::make_shared<LuaFunctionWrapper>(io_close)},
-		{"flush", std::make_shared<LuaFunctionWrapper>(io_flush)},
-		{"input", std::make_shared<LuaFunctionWrapper>(io_input)},
-		{"lines", std::make_shared<LuaFunctionWrapper>(io_lines)},
-		{"open", std::make_shared<LuaFunctionWrapper>(io_open)},
-		{"output", std::make_shared<LuaFunctionWrapper>(io_output)},
-		{"popen", std::make_shared<LuaFunctionWrapper>(io_popen)},
-		{"read", std::make_shared<LuaFunctionWrapper>(io_read)},
-		{"tmpfile", std::make_shared<LuaFunctionWrapper>(io_tmpfile)},
-		{"type", std::make_shared<LuaFunctionWrapper>(io_type)},
-		{"write", std::make_shared<LuaFunctionWrapper>(io_write)},
-		{"stdin", file_to_value(io_stdin_handle)},
-		{"stdout", file_to_value(io_stdout_handle)},
-		{"stderr", file_to_value(io_stderr_handle)}
-	};
+	io_lib = LuaObject::create({
+		{LuaValue(std::string_view("close")), std::make_shared<LuaFunctionWrapper>(io_close)},
+		{LuaValue(std::string_view("flush")), std::make_shared<LuaFunctionWrapper>(io_flush)},
+		{LuaValue(std::string_view("input")), std::make_shared<LuaFunctionWrapper>(io_input)},
+		{LuaValue(std::string_view("lines")), std::make_shared<LuaFunctionWrapper>(io_lines)},
+		{LuaValue(std::string_view("open")), std::make_shared<LuaFunctionWrapper>(io_open)},
+		{LuaValue(std::string_view("output")), std::make_shared<LuaFunctionWrapper>(io_output)},
+		{LuaValue(std::string_view("popen")), std::make_shared<LuaFunctionWrapper>(io_popen)},
+		{LuaValue(std::string_view("read")), std::make_shared<LuaFunctionWrapper>(io_read)},
+		{LuaValue(std::string_view("tmpfile")), std::make_shared<LuaFunctionWrapper>(io_tmpfile)},
+		{LuaValue(std::string_view("type")), std::make_shared<LuaFunctionWrapper>(io_type)},
+		{LuaValue(std::string_view("write")), std::make_shared<LuaFunctionWrapper>(io_write)},
+		{LuaValue(std::string_view("stdin")), file_to_value(io_stdin_handle)},
+		{LuaValue(std::string_view("stdout")), file_to_value(io_stdout_handle)},
+		{LuaValue(std::string_view("stderr")), file_to_value(io_stderr_handle)}
+	});
 
 	return io_lib;
 }

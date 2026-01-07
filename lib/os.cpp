@@ -11,7 +11,7 @@
 #include <thread>
 
 // os.execute
-void os_execute(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_execute(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string command = to_cpp_string(args[0]);
 	int result = std::system(command.c_str());
 	out.assign({static_cast<double>(result)});
@@ -19,7 +19,7 @@ void os_execute(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out)
 }
 
 // os.exit
-void os_exit(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_exit(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	double code_double = n_args >= 1 && std::holds_alternative<double>(args[0]) ? std::get<double>(args[0]) : 0.0;
 	// bool close = n_args >= 2 && std::holds_alternative<bool>(args[1]) ? std::get<bool>(args[1]) : false;
 	// Lua 5.4 close argument
@@ -38,7 +38,7 @@ void os_exit(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 }
 
 // os.getenv
-void os_getenv(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_getenv(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string varname = to_cpp_string(args[0]);
 	if (const char* value = std::getenv(varname.c_str())) {
 		out.assign({std::string(value)});
@@ -49,7 +49,7 @@ void os_getenv(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) 
 }
 
 // os.remove
-void os_remove(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_remove(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string filename = to_cpp_string(args[0]);
 	if (std::remove(filename.c_str()) == 0) {
 		out.assign({true});
@@ -60,7 +60,7 @@ void os_remove(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) 
 }
 
 // os.rename
-void os_rename(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_rename(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string oldname = to_cpp_string(args[0]);
 	std::string newname = to_cpp_string(args[1]);
 	if (std::rename(oldname.c_str(), newname.c_str()) == 0) {
@@ -72,7 +72,7 @@ void os_rename(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) 
 }
 
 // os.setlocale
-void os_setlocale(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_setlocale(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string locale_str = to_cpp_string(args[0]);
 	std::string category_str = to_cpp_string(args[1]);
 
@@ -92,7 +92,7 @@ void os_setlocale(const LuaValue* args, size_t n_args, std::vector<LuaValue>& ou
 }
 
 // os.tmpname
-void os_tmpname(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_tmpname(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	// mkstemp requires a template string like "XXXXXX"
 	std::string temp_filename_template = "/tmp/luax_temp_XXXXXX";
 	// mkstemp modifies the template string in place
@@ -111,7 +111,7 @@ void os_tmpname(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out)
 }
 
 // os.date
-void os_date(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_date(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string format = n_args >= 1 && std::holds_alternative<std::string>(args[0])
 		                     ? std::get<std::string>(args[0])
 		                     : "%c";
@@ -160,7 +160,7 @@ void os_date(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 }
 
 // os.difftime
-void os_difftime(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_difftime(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	time_t t2 = static_cast<time_t>(get_double(args[0]));
 	time_t t1 = static_cast<time_t>(get_double(args[1]));
 	out.assign({static_cast<double>(std::difftime(t2, t1))});
@@ -168,19 +168,19 @@ void os_difftime(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out
 }
 
 // os.clock
-void os_clock(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_clock(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	out.assign({static_cast<double>(std::clock()) / CLOCKS_PER_SEC});
 	return;
 }
 
 // os.time
-void os_time(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_time(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	out.assign({static_cast<double>(std::time(nullptr))});
 	return;
 }
 
 // os.sleep
-void os_sleep(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void os_sleep(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto duration = std::chrono::duration<double>(get_double(args[0]));
 	std::this_thread::sleep_for(duration);
 	out.assign({std::monostate{}});
@@ -191,21 +191,19 @@ std::shared_ptr<LuaObject> create_os_library() {
 	static std::shared_ptr<LuaObject> os_lib;
 	if (os_lib) return os_lib;
 
-	os_lib = std::make_shared<LuaObject>();
-
-	os_lib->properties = {
-		{"clock", std::make_shared<LuaFunctionWrapper>(os_clock)},
-		{"date", std::make_shared<LuaFunctionWrapper>(os_date)},
-		{"difftime", std::make_shared<LuaFunctionWrapper>(os_difftime)},
-		{"execute", std::make_shared<LuaFunctionWrapper>(os_execute)},
-		{"exit", std::make_shared<LuaFunctionWrapper>(os_exit)},
-		{"getenv", std::make_shared<LuaFunctionWrapper>(os_getenv)},
-		{"remove", std::make_shared<LuaFunctionWrapper>(os_remove)},
-		{"rename", std::make_shared<LuaFunctionWrapper>(os_rename)},
-		{"setlocale", std::make_shared<LuaFunctionWrapper>(os_setlocale)},
-		{"time", std::make_shared<LuaFunctionWrapper>(os_time)},
-		{"tmpname", std::make_shared<LuaFunctionWrapper>(os_tmpname)}
-	};
+	os_lib = LuaObject::create({
+		{LuaValue(std::string_view("clock")), std::make_shared<LuaFunctionWrapper>(os_clock)},
+		{LuaValue(std::string_view("date")), std::make_shared<LuaFunctionWrapper>(os_date)},
+		{LuaValue(std::string_view("difftime")), std::make_shared<LuaFunctionWrapper>(os_difftime)},
+		{LuaValue(std::string_view("execute")), std::make_shared<LuaFunctionWrapper>(os_execute)},
+		{LuaValue(std::string_view("exit")), std::make_shared<LuaFunctionWrapper>(os_exit)},
+		{LuaValue(std::string_view("getenv")), std::make_shared<LuaFunctionWrapper>(os_getenv)},
+		{LuaValue(std::string_view("remove")), std::make_shared<LuaFunctionWrapper>(os_remove)},
+		{LuaValue(std::string_view("rename")), std::make_shared<LuaFunctionWrapper>(os_rename)},
+		{LuaValue(std::string_view("setlocale")), std::make_shared<LuaFunctionWrapper>(os_setlocale)},
+		{LuaValue(std::string_view("time")), std::make_shared<LuaFunctionWrapper>(os_time)},
+		{LuaValue(std::string_view("tmpname")), std::make_shared<LuaFunctionWrapper>(os_tmpname)}
+	});
 
 	return os_lib;
 }

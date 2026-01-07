@@ -5,7 +5,7 @@
 #include <string>
 
 // table.unpack(list [, i [, j]])
-void table_unpack(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void table_unpack(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto table = get_object(args[0]);
 	if (!table) {
 		out.assign({std::monostate{}});
@@ -38,7 +38,7 @@ void table_unpack(const LuaValue* args, size_t n_args, std::vector<LuaValue>& ou
 }
 
 // table.sort(list [, comp])
-void table_sort(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void table_sort(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto table = get_object(args[0]);
 	if (!table || table->array_part.empty()) {
 		out.assign({std::monostate{}});
@@ -54,7 +54,7 @@ void table_sort(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out)
 	std::sort(table->array_part.begin(), table->array_part.end(),
 	          [&](const LuaValue& a, const LuaValue& b) {
 		          if (has_comp) {
-			          thread_local std::vector<LuaValue> comp_buffer;
+			          thread_local LuaValueVector comp_buffer;
 			          comp_buffer.clear();
 			          LuaValue func_args[] = {a, b};
 			          comp_func->func(func_args, 2, comp_buffer);
@@ -67,7 +67,7 @@ void table_sort(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out)
 }
 
 // table.pack(...)
-void table_pack(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void table_pack(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto new_table = std::make_shared<LuaObject>();
 
 	// Efficiently populate the vector
@@ -83,7 +83,7 @@ void table_pack(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out)
 }
 
 // table.move(a1, f, e, t [, a2])
-void table_move(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void table_move(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto a1 = get_object(args[0]);
 	if (!a1) return;
 
@@ -98,7 +98,7 @@ void table_move(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out)
 	}
 
 	// To handle overlapping moves (like moving 1..3 to 2..4), we collect first
-	std::vector<LuaValue> range;
+	LuaValueVector range;
 	range.reserve(static_cast<size_t>(e - f + 1));
 	for (long long i = f; i <= e; ++i) {
 		range.push_back(a1->get_item(static_cast<double>(i)));
@@ -113,7 +113,7 @@ void table_move(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out)
 }
 
 // table.concat(list [, sep [, i [, j]]])
-void table_concat(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void table_concat(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto table = get_object(args[0]);
 	if (!table) return;
 
@@ -132,13 +132,13 @@ void table_concat(const LuaValue* args, size_t n_args, std::vector<LuaValue>& ou
 		}
 
 		if (k > i) result += sep;
-		result += to_cpp_string(val);
+		append_to_string(val, result);
 	}
 	out.assign({result});
 }
 
 // table.insert([list,] [pos,] value)
-void table_insert(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void table_insert(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto table = get_object(args[0]);
 	if (!table) return;
 
@@ -163,7 +163,7 @@ void table_insert(const LuaValue* args, size_t n_args, std::vector<LuaValue>& ou
 }
 
 // table.remove(list [, pos])
-void table_remove(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void table_remove(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto table = get_object(args[0]);
 	if (!table || table->array_part.empty()) {
 		out.assign({std::monostate{}});
@@ -188,17 +188,15 @@ std::shared_ptr<LuaObject> create_table_library() {
 	static std::shared_ptr<LuaObject> table_lib;
 	if (table_lib) return table_lib;
 
-	table_lib = std::make_shared<LuaObject>();
-
-	table_lib->properties = {
-		{"concat", std::make_shared<LuaFunctionWrapper>(table_concat)},
-		{"insert", std::make_shared<LuaFunctionWrapper>(table_insert)},
-		{"move", std::make_shared<LuaFunctionWrapper>(table_move)},
-		{"pack", std::make_shared<LuaFunctionWrapper>(table_pack)},
-		{"remove", std::make_shared<LuaFunctionWrapper>(table_remove)},
-		{"sort", std::make_shared<LuaFunctionWrapper>(table_sort)},
-		{"unpack", std::make_shared<LuaFunctionWrapper>(table_unpack)}
-	};
+	table_lib = LuaObject::create({
+		{LuaValue(std::string_view("concat")), std::make_shared<LuaFunctionWrapper>(table_concat)},
+		{LuaValue(std::string_view("insert")), std::make_shared<LuaFunctionWrapper>(table_insert)},
+		{LuaValue(std::string_view("move")), std::make_shared<LuaFunctionWrapper>(table_move)},
+		{LuaValue(std::string_view("pack")), std::make_shared<LuaFunctionWrapper>(table_pack)},
+		{LuaValue(std::string_view("remove")), std::make_shared<LuaFunctionWrapper>(table_remove)},
+		{LuaValue(std::string_view("sort")), std::make_shared<LuaFunctionWrapper>(table_sort)},
+		{LuaValue(std::string_view("unpack")), std::make_shared<LuaFunctionWrapper>(table_unpack)}
+	});
 
 	return table_lib;
 }

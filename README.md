@@ -1,6 +1,6 @@
 # LuaX: A Lua to C++ Transpiler
 
-LuaX is a robust transpiler that converts Lua 5.4 source code into C++17, allowing you to compile Lua scripts into standalone native executables. It bridges the gap between Lua's dynamic flexibility and C++'s performance and portability.
+LuaX is a robust transpiler that converts Lua 5.4 source code into C++20, allowing you to compile Lua scripts into standalone native executables. It bridges the gap between Lua's dynamic flexibility and C++'s performance and portability.
 
 ## Features
 
@@ -20,7 +20,7 @@ LuaX is a robust transpiler that converts Lua 5.4 source code into C++17, allowi
 ## Prerequisites
 
 *   **Lua 5.4**: Required to run the transpiler script (`src/luax.lua`).
-*   **C++ Compiler**: A C++17 compliant compiler (e.g., `clang++`, `g++`).
+*   **C++ Compiler**: A C++20 compliant compiler (e.g., `clang++`, `g++`).
 *   **CMake**: For the build process.
 
 ## Quick Start

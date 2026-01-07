@@ -185,7 +185,7 @@ local function generate_cmake(output_path, generated_basenames)
 	local cmake_content = {
 		"cmake_minimum_required(VERSION 3.10)",
 		"project(LuaX_Generated_Project LANGUAGES CXX)",
-		"set(CMAKE_CXX_STANDARD 17)",
+		"set(CMAKE_CXX_STANDARD 20)",
 		"add_compile_options(-O2)",
 		"include_directories(\"" .. luax_root .. "include\")",
 		"set(LIB_SOURCES " .. table.concat(lib_srcs, "\n    ") .. ")",

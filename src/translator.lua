@@ -1,6 +1,11 @@
 local Node = require("src.node")
 local Tokenizer = require("src.tokenizer")
 
+-- Local helper for fast token access
+local function peek(parser)
+	return parser.tokens[parser.token_position]
+end
+
 -- Parser implementation
 local Parser = {}
 Parser.__index = Parser
@@ -52,9 +57,7 @@ function Parser:tokenize()
 	return self.tokens
 end
 
-function Parser:peek()
-	return self.tokens[self.token_position]
-end
+-- function Parser:peek() -> Replaced by local peek(self)
 
 local precedence = {
 	['or'] = 1,
@@ -77,7 +80,7 @@ local precedence = {
 function Parser:parse_function_call_or_member_access(base_node)
 	local current_node = base_node
 	while true do
-		local token = self:peek() -- Peek at the current token to decide what to do
+		local token = peek(self) -- Peek at the current token to decide what to do
 
 		if not token then break end -- No more tokens
 
@@ -87,13 +90,13 @@ function Parser:parse_function_call_or_member_access(base_node)
 			local call_node = Node:new("call_expression")
 			call_node:AddChildren(current_node)
 
-			while self:peek() and self:peek().value ~= ')' do
+			while peek(self) and peek(self).value ~= ')' do
 				local arg = self:parse_expression(0)
 				if arg then call_node:AddChildren(arg) else error("Expected argument") end
-				if self:peek() and self:peek().value == ',' then self.token_position = self.token_position + 1 end
+				if peek(self) and peek(self).value == ',' then self.token_position = self.token_position + 1 end
 			end
 
-			if self:peek() and self:peek().value == ')' then
+			if peek(self) and peek(self).value == ')' then
 				self.token_position = self.token_position + 1 -- consume ')'
 			else error("Expected ')'") end
 			current_node = call_node
@@ -102,7 +105,7 @@ function Parser:parse_function_call_or_member_access(base_node)
 		elseif token.type == "dot" then
 			-- Member access: base.member
 			self.token_position = self.token_position + 1 -- consume '.'
-			local member_token = self:peek()
+			local member_token = peek(self)
 			if member_token and member_token.type == "identifier" then
 				self.token_position = self.token_position + 1 -- consume identifier
 				local member_node = Node:new("member_expression")
@@ -118,21 +121,21 @@ function Parser:parse_function_call_or_member_access(base_node)
 		elseif token.type == "colon" then
 			-- Method call: base:method()
 			self.token_position = self.token_position + 1 -- consume ':'
-			local method_token = self:peek()
+			local method_token = peek(self)
 			if method_token and method_token.type == "identifier" then
 				self.token_position = self.token_position + 1 -- consume method identifier
 				local method_call_node = Node:new("method_call_expression")
 				method_call_node:AddChildren(current_node, Node:new("identifier", method_token.value, method_token.value))
 
-				local open_paren_token = self:peek()
+				local open_paren_token = peek(self)
 				if open_paren_token and open_paren_token.value == '(' then
 					self.token_position = self.token_position + 1 -- consume '('
-					while self:peek() and self:peek().value ~= ')' do
+					while peek(self) and peek(self).value ~= ')' do
 						local arg = self:parse_expression(0)
 						if arg then method_call_node:AddChildren(arg) else error("Expected argument") end
-						if self:peek() and self:peek().value == ',' then self.token_position = self.token_position + 1 end
+						if peek(self) and peek(self).value == ',' then self.token_position = self.token_position + 1 end
 					end
-					local close_paren_token = self:peek()
+					local close_paren_token = peek(self)
 					if close_paren_token and close_paren_token.value == ')' then
 						self.token_position = self.token_position + 1 -- consume ')'
 					else error("Expected ')'") end
@@ -148,7 +151,7 @@ function Parser:parse_function_call_or_member_access(base_node)
 			local index_expr = self:parse_expression(0)
 			if not index_expr then error("Expected index expression inside '[]'") end
 
-			local close_bracket_token = self:peek()
+			local close_bracket_token = peek(self)
 			if not close_bracket_token or not (close_bracket_token.type == "square_bracket" and close_bracket_token.value == ']') then
 				error("Expected ']' to close table index")
 			end
@@ -169,11 +172,11 @@ function Parser:parse_table_constructor()
 	self.token_position = self.token_position + 1 -- consume '{' 
 	local table_node = Node:new("table_constructor")
 
-	while self:peek() and self:peek().value ~= '}' do
+	while peek(self) and peek(self).value ~= '}' do
 		local key_node = nil
 		local value_node = nil
 
-		local current_token = self:peek()
+		local current_token = peek(self)
 		if current_token.type == "identifier" and self.tokens[self.token_position + 1] and self.tokens[self.token_position + 1].value == '=' then
 			-- Record-style field: identifier = expression
 			key_node = Node:new("identifier", current_token.value, current_token.value) -- Set identifier field
@@ -185,13 +188,13 @@ function Parser:parse_table_constructor()
 			key_node = self:parse_expression(0) -- Parse the key expression
 			if not key_node then error("Expected key expression inside '[]'") end
 
-			local close_bracket_token = self:peek()
+			local close_bracket_token = peek(self)
 			if not close_bracket_token or not (close_bracket_token.type == "square_bracket" and close_bracket_token.value == ']') then
 				error("Expected ']' to close table key")
 			end
 			self.token_position = self.token_position + 1 -- consume ']'
 
-			local equals_token = self:peek()
+			local equals_token = peek(self)
 			if not equals_token or equals_token.value ~= '=' then
 				error("Expected '=' after table key")
 			end
@@ -214,12 +217,12 @@ function Parser:parse_table_constructor()
 		end
 
 		-- Consume comma if present
-		if self:peek() and self:peek().value == ',' then
+		if peek(self) and peek(self).value == ',' then
 			self.token_position = self.token_position + 1
 		end
 	end
 
-	if self:peek() and self:peek().value == '}' then
+	if peek(self) and peek(self).value == '}' then
 		self.token_position = self.token_position + 1 -- consume '}'
 	else
 		error("Expected '}' in table constructor")
@@ -236,7 +239,7 @@ function Parser:parse_variable_list()
 	table.insert(variables, var_node)
 
 	-- Parse subsequent variables if separated by commas
-	while self:peek() and self:peek().type == "comma" do
+	while peek(self) and peek(self).type == "comma" do
 		self.token_position = self.token_position + 1 -- consume ','
 		var_node = self:parse_function_call_or_member_access(self:parse_primary_expression())
 		if not var_node then error("Expected variable in list after comma") end
@@ -244,8 +247,9 @@ function Parser:parse_variable_list()
 	end
 
 	local var_list_node = Node:new("variable_list")
-
-	var_list_node:AddChildren(table.unpack(variables))
+	for i=1, #variables do
+		var_list_node:AddChild(variables[i])
+	end
 	return var_list_node
 end
 
@@ -255,7 +259,7 @@ function Parser:parse_expression_list()
 		local expr_node = self:parse_expression()
 		if not expr_node then break end -- Allow empty expression list if no more expressions
 		table.insert(expressions, expr_node)
-		if self:peek() and self:peek().type == "comma" then
+		if peek(self) and peek(self).type == "comma" then
 			self.token_position = self.token_position + 1 -- consume ','
 		else
 			break
@@ -263,13 +267,13 @@ function Parser:parse_expression_list()
 	until false
 	local expr_list_node = Node:new("expression_list")
 	for i = 1, #expressions do
-		expr_list_node:AddChildren(expressions[i])
+		expr_list_node:AddChild(expressions[i])
 	end
 	return expr_list_node
 end
 
 function Parser:parse_primary_expression()
-	local token = self:peek()
+	local token = peek(self)
 	if not token then
 		return nil
 	end
@@ -279,7 +283,7 @@ function Parser:parse_primary_expression()
 		self.token_position = self.token_position + 1 -- consume '-'
 		local operand = self:parse_expression(11) -- Unary ops have high precedence
 		if not operand then 
-			local next_tok = self:peek()
+			local next_tok = peek(self)
 			local val = next_tok and next_tok.value or "nil"
 			local typ = next_tok and next_tok.type or "nil"
 			error("Expected expression after unary minus") 
@@ -313,7 +317,7 @@ function Parser:parse_primary_expression()
 	elseif token.value == '(' then
 		self.token_position = self.token_position + 1 -- consume '('
 		local expr = self:parse_expression()
-		local next_token = self:peek()
+		local next_token = peek(self)
 		if next_token and next_token.value == ')' then
 			self.token_position = self.token_position + 1 -- consume ')'
 			node = expr
@@ -342,13 +346,13 @@ function Parser:parse_expression(min_precedence)
 	min_precedence = min_precedence or 0
 	local left_expr = self:parse_primary_expression()
 	if not left_expr then 
-		error("parse_expression: parse_primary_expression returned nil. Current token: type=" .. (self:peek() and self:peek().type or "nil") .. ", value=" .. (self:peek() and self:peek().value or "nil"))
+		return nil
 	end
 
 	left_expr = self:parse_function_call_or_member_access(left_expr)
 
 	while true do
-		local operator_token = self:peek()
+		local operator_token = peek(self)
 		if not operator_token or operator_token.type ~= "operator" then
 			break
 		end
@@ -371,14 +375,14 @@ function Parser:parse_expression(min_precedence)
 end
 
 function Parser:parse_statement()
-	local current_token = self:peek()
+	local current_token = peek(self)
 	if not current_token then
 		return nil
 	end
 
 	if current_token.type == "keyword" and current_token.value == "local" then
 		self.token_position = self.token_position + 1 -- consume 'local'
-		local next_token_after_local = self:peek()
+		local next_token_after_local = peek(self)
 		if next_token_after_local and next_token_after_local.type == "keyword" and next_token_after_local.value == "function" then
 			-- Handle local function declaration
 			self.token_position = self.token_position + 1 -- consume 'function'
@@ -389,7 +393,7 @@ function Parser:parse_statement()
 			local var_list_node = self:parse_variable_list()
 			local_declaration_node:AddChildren(var_list_node)
 
-			if self:peek() and self:peek().value == '=' then
+			if peek(self) and peek(self).value == '=' then
 				self.token_position = self.token_position + 1 -- consume '='
 				local expr_list_node = self:parse_expression_list()
 				local_declaration_node:AddChildren(expr_list_node)
@@ -421,19 +425,19 @@ function Parser:parse_statement()
 		self.token_position = self.token_position + 1 -- consume 'return'
 		local return_node = Node:new("return_statement")
 		local expr_list = self:parse_expression_list() -- Return can have multiple expressions
-		if #expr_list.ordered_children > 0 then
+		if expr_list.ordered_children and #expr_list.ordered_children > 0 then
 			return_node:AddChildren(expr_list)
 		end
 		return return_node
 	elseif current_token.type == "label_delimiter" then
 		-- Label: ::label_name::
 		self.token_position = self.token_position + 1 -- consume first '::'
-		local label_name_token = self:peek()
+		local label_name_token = peek(self)
 		if not label_name_token or label_name_token.type ~= "identifier" then
 			error("Expected label name after '::'")
 		end
 		self.token_position = self.token_position + 1 -- consume label name
-		local closing_delimiter = self:peek()
+		local closing_delimiter = peek(self)
 		if not closing_delimiter or closing_delimiter.type ~= "label_delimiter" then
 			error("Expected '::' to close label")
 		end
@@ -457,7 +461,7 @@ function Parser:parse_statement()
 		
 		-- Parse the block
 		local block_node = Node:new("block")
-		while self:peek() and not (self:peek().type == "keyword" and self:peek().value == "until") do
+		while peek(self) and not (peek(self).type == "keyword" and peek(self).value == "until") do
 			local stmt = self:parse_statement()
 			if stmt then
 				block_node:AddChildren(stmt)
@@ -467,7 +471,7 @@ function Parser:parse_statement()
 		end
 		
 		-- Expect 'until'
-		local until_token = self:peek()
+		local until_token = peek(self)
 		if not until_token or until_token.value ~= "until" then
 			error("Expected 'until' to close repeat loop")
 		end
@@ -484,7 +488,7 @@ function Parser:parse_statement()
 	elseif current_token.type == "keyword" and current_token.value == "goto" then
 		-- Goto: goto label_name
 		self.token_position = self.token_position + 1 -- consume 'goto'
-		local goto_target_token = self:peek()
+		local goto_target_token = peek(self)
 		if not goto_target_token or goto_target_token.type ~= "identifier" then
 			error("Expected label name after 'goto'")
 		end
@@ -506,12 +510,12 @@ function Parser:parse_statement()
 		local lvalue_list_node = self:parse_variable_list()
 		
 		-- If nothing could be parsed as a variable/expression, it's not a statement.
-		if #lvalue_list_node.ordered_children == 0 then
+		if not lvalue_list_node.ordered_children or #lvalue_list_node.ordered_children == 0 then
 			return nil
 		end
 
 		-- Now, we check if an '=' follows the list.
-		if self:peek() and self:peek().value == '=' then
+		if peek(self) and peek(self).value == '=' then
 			-- It's an assignment statement.
 			self.token_position = self.token_position + 1 -- consume '='
 			
@@ -524,7 +528,7 @@ function Parser:parse_statement()
 		else
 			-- It's not an assignment. It must be a standalone expression statement.
 			-- This is only valid if the "variable list" we parsed contained exactly one item.
-			if #lvalue_list_node.ordered_children == 1 then
+			if lvalue_list_node.ordered_children and #lvalue_list_node.ordered_children == 1 then
 				local expression_statement_node = Node:new("expression_statement")
 				-- The single item from the list is the expression itself.
 				expression_statement_node:AddChildren(lvalue_list_node.ordered_children[1])
@@ -541,13 +545,13 @@ end
 function Parser:parse_for_statement()
 	self.token_position = self.token_position + 1 -- consume 'for'
 	
-	local first_identifier_token = self:peek()
+	local first_identifier_token = peek(self)
 	if not first_identifier_token or first_identifier_token.type ~= "identifier" then
 		error("Expected identifier after 'for'")
 	end
 	self.token_position = self.token_position + 1 -- consume first identifier
 
-	local next_token = self:peek()
+	local next_token = peek(self)
 
 	if next_token and next_token.value == '=' then
 		-- Numeric for loop: for var = start, end, [step]
@@ -561,7 +565,7 @@ function Parser:parse_for_statement()
 		if not start_expr then error("Expected start expression in numeric for loop") end
 		for_node:AddChildren(start_expr)
 
-		local comma_token = self:peek()
+		local comma_token = peek(self)
 		if not comma_token or comma_token.type ~= "comma" then
 			error("Expected ',' after numeric for loop start expression")
 		end
@@ -571,24 +575,24 @@ function Parser:parse_for_statement()
 		if not end_expr then error("Expected end expression in numeric for loop") end
 		for_node:AddChildren(end_expr)
 
-		if self:peek() and self:peek().type == "comma" then
+		if peek(self) and peek(self).type == "comma" then
 			self.token_position = self.token_position + 1 -- consume ','
 			local step_expr = self:parse_expression()
 			if not step_expr then error("Expected step expression in numeric for loop") end
 			for_node:AddChildren(step_expr)
 		end
 
-		local do_token = self:peek()
+		local do_token = peek(self)
 		if not do_token or do_token.value ~= "do" then error("Expected 'do' after numeric for loop expressions") end
 		self.token_position = self.token_position + 1 -- consume 'do'
 
 		local body_node = Node:new("block")
-		while self:peek() and self:peek().value ~= "end" do
+		while peek(self) and peek(self).value ~= "end" do
 			local statement = self:parse_statement()
 			if statement then body_node:AddChildren(statement) end
 		end
 
-		local end_token = self:peek()
+		local end_token = peek(self)
 		if not end_token or end_token.value ~= "end" then error("Expected 'end' to close numeric for statement") end
 		self.token_position = self.token_position + 1 -- consume 'end'
 
@@ -600,9 +604,9 @@ function Parser:parse_for_statement()
 		local var_list_node = Node:new("variable_list")
 		var_list_node:AddChildren(Node:new("identifier", first_identifier_token.value, first_identifier_token.value))
 
-		while self:peek() and self:peek().type == "comma" do
+		while peek(self) and peek(self).type == "comma" do
 			self.token_position = self.token_position + 1 -- consume ','
-			local identifier_token = self:peek()
+			local identifier_token = peek(self)
 			if not identifier_token or identifier_token.type ~= "identifier" then
 				error("Expected identifier in generic for loop variable list")
 			end
@@ -611,29 +615,29 @@ function Parser:parse_for_statement()
 		end
 		for_node:AddChildren(var_list_node)
 
-		local in_token = self:peek()
+		local in_token = peek(self)
 		if not in_token or in_token.value ~= "in" then
 			error("Expected 'in' after generic for loop variable list")
 		end
 		self.token_position = self.token_position + 1 -- consume 'in'
 
 		local expr_list_node = self:parse_expression_list()
-		if #expr_list_node.ordered_children == 0 then
+		if not expr_list_node.ordered_children or #expr_list_node.ordered_children == 0 then
 			error("Expected expression list after 'in' in generic for loop")
 		end
 		for_node:AddChildren(expr_list_node)
 
-		local do_token = self:peek()
+		local do_token = peek(self)
 		if not do_token or do_token.value ~= "do" then error("Expected 'do' after generic for loop expressions") end
 		self.token_position = self.token_position + 1 -- consume 'do'
 
 		local body_node = Node:new("block")
-		while self:peek() and self:peek().value ~= "end" do
+		while peek(self) and peek(self).value ~= "end" do
 			local statement = self:parse_statement()
 			if statement then body_node:AddChildren(statement) end
 		end
 
-		local end_token = self:peek()
+		local end_token = peek(self)
 		if not end_token or end_token.value ~= "end" then error("Expected 'end' to close generic for statement") end
 		self.token_position = self.token_position + 1 -- consume 'end'
 
@@ -651,17 +655,17 @@ function Parser:parse_while_statement()
 	local condition = self:parse_expression()
 	if not condition then error("Expected condition after 'while'") end
 
-	local do_token = self:peek()
+	local do_token = peek(self)
 	if not do_token or do_token.value ~= "do" then error("Expected 'do' after while condition") end
 	self.token_position = self.token_position + 1 -- consume 'do'
 
 	local body_node = Node:new("block")
-	while self:peek() and self:peek().value ~= "end" do
+	while peek(self) and peek(self).value ~= "end" do
 		local statement = self:parse_statement()
 		if statement then body_node:AddChildren(statement) end
 	end
 
-	local end_token = self:peek()
+	local end_token = peek(self)
 	self.token_position = self.token_position + 1 -- consume 'end'
 
 	while_node:AddChildren(condition, body_node)
@@ -677,12 +681,12 @@ function Parser:parse_if_statement()
 	local condition = self:parse_expression()
 	if not condition then error("Expected condition after 'if'") end
 
-	local then_token = self:peek()
+	local then_token = peek(self)
 	if not then_token or then_token.value ~= "then" then error("Expected 'then' after if condition") end
 	self.token_position = self.token_position + 1 -- consume 'then'
 
 	local body_node = Node:new("block")
-	while self:peek() and self:peek().value ~= "end" and self:peek().value ~= "elseif" and self:peek().value ~= "else" do
+	while peek(self) and peek(self).value ~= "end" and peek(self).value ~= "elseif" and peek(self).value ~= "else" do
 		local statement = self:parse_statement()
 		if statement then body_node:AddChildren(statement) end
 	end
@@ -691,17 +695,17 @@ function Parser:parse_if_statement()
 	clause_node:AddChildren(condition, body_node)
 	if_node:AddChildren(clause_node)
 
-	while self:peek() and self:peek().value == "elseif" do
+	while peek(self) and peek(self).value == "elseif" do
 		self.token_position = self.token_position + 1 -- consume 'elseif'
 		local elseif_condition = self:parse_expression()
 		if not elseif_condition then error("Expected condition after 'elseif'") end
 
-		local elseif_then_token = self:peek()
+		local elseif_then_token = peek(self)
 		if not elseif_then_token or elseif_then_token.value ~= "then" then error("Expected 'then' after elseif condition") end
 		self.token_position = self.token_position + 1 -- consume 'then'
 
 		local elseif_body_node = Node:new("block")
-		while self:peek() and self:peek().value ~= "end" and self:peek().value ~= "elseif" and self:peek().value ~= "else" do
+		while peek(self) and peek(self).value ~= "end" and peek(self).value ~= "elseif" and peek(self).value ~= "else" do
 			local statement = self:parse_statement()
 			if statement then elseif_body_node:AddChildren(statement) end
 		end
@@ -711,10 +715,10 @@ function Parser:parse_if_statement()
 		if_node:AddChildren(elseif_clause_node)
 	end
 
-	if self:peek() and self:peek().value == "else" then
+	if peek(self) and peek(self).value == "else" then
 		self.token_position = self.token_position + 1 -- consume 'else'
 		local else_body_node = Node:new("block")
-		while self:peek() and self:peek().value ~= "end" do
+		while peek(self) and peek(self).value ~= "end" do
 			local statement = self:parse_statement()
 			if statement then else_body_node:AddChildren(statement) end
 		end
@@ -723,7 +727,7 @@ function Parser:parse_if_statement()
 		if_node:AddChildren(else_clause_node)
 	end
 
-	local end_token = self:peek()
+	local end_token = peek(self)
 	if not end_token or end_token.value ~= "end" then error("Expected 'end' to close if statement") end
 	self.token_position = self.token_position + 1 -- consume 'end'
 
@@ -737,15 +741,15 @@ function Parser:parse_function_body_content()
 	table.insert(self.label_scope_stack, self.label_scope)
 	self.label_scope = {}
 
-	local open_paren = self:peek()
+	local open_paren = peek(self)
 	if not open_paren or open_paren.value ~= '(' then
 		error("Expected '(' after function keyword")
 	end
 	self.token_position = self.token_position + 1 -- consume '('
 
 	local params_node = Node:new("parameter_list")
-	while self:peek() and self:peek().value ~= ')' do
-		local param_token = self:peek()
+	while peek(self) and peek(self).value ~= ')' do
+		local param_token = peek(self)
 		if param_token and param_token.type == "identifier" then
 			self.token_position = self.token_position + 1 -- consume parameter identifier
 			params_node:AddChildren(Node:new("identifier", param_token.value, param_token.value))
@@ -755,12 +759,12 @@ function Parser:parse_function_body_content()
 		else
 			error("Expected parameter identifier, '...' or ')'")
 		end
-		if self:peek() and self:peek().value == ',' then
+		if peek(self) and peek(self).value == ',' then
 			self.token_position = self.token_position + 1 -- consume ','
 		end
 	end
 
-	local close_paren = self:peek()
+	local close_paren = peek(self)
 	if not close_paren or close_paren.value ~= ')' then
 		error("Expected ')' after parameter list")
 	end
@@ -769,7 +773,7 @@ function Parser:parse_function_body_content()
 
 	-- Parse function body (block of statements)
 	local body_node = Node:new("block")
-	while self:peek() and not (self:peek().type == "keyword" and self:peek().value == "end") do
+	while peek(self) and not (peek(self).type == "keyword" and peek(self).value == "end") do
 		local statement = self:parse_statement()
 		if statement then
 			body_node:AddChildren(statement)
@@ -779,7 +783,7 @@ function Parser:parse_function_body_content()
 		end
 	end
 
-	local end_token = self:peek()
+	local end_token = peek(self)
 	if not end_token or not (end_token.type == "keyword" and end_token.value == "end") then
 		error("Expected 'end' to close function declaration")
 	end
@@ -793,7 +797,7 @@ function Parser:parse_function_body_content()
 end
 
 function Parser:parse_function_declaration(is_local)
-	local name_token = self:peek()
+	local name_token = peek(self)
 	if name_token and name_token.type == "identifier" then
 		local function_node = Node:new("function_declaration")
 		function_node.is_local = is_local -- Store if it's a local function
@@ -802,10 +806,10 @@ function Parser:parse_function_declaration(is_local)
 		function_node.identifier = name_token.value
 
 		-- Check for method syntax (e.g., MyClass:new) or table syntax (e.g., MyClass.new)
-		if self:peek() and (self:peek().type == "colon" or self:peek().type == "dot") then
-			local separator_type = self:peek().type
+		if peek(self) and (peek(self).type == "colon" or peek(self).type == "dot") then
+			local separator_type = peek(self).type
 			self.token_position = self.token_position + 1 -- consume ':' or '.'
-			local method_name_token = self:peek()
+			local method_name_token = peek(self)
 			if method_name_token and method_name_token.type == "identifier" then
 				self.token_position = self.token_position + 1 -- consume method identifier
 				function_node.method_name = method_name_token.value -- Store method name separately
@@ -817,7 +821,11 @@ function Parser:parse_function_declaration(is_local)
 			end
 		end
 		local function_body_node = self:parse_function_body_content()
-		function_node:AddChildren(function_body_node.ordered_children[1], function_body_node.ordered_children[2])
+		if function_body_node.ordered_children and #function_body_node.ordered_children >= 2 then
+			function_node:AddChildren(function_body_node.ordered_children[1], function_body_node.ordered_children[2])
+		else
+			error("Failed to parse function body content")
+		end
 		return function_node
 	elseif name_token and name_token.value == '(' then
 		-- This is an anonymous function, directly parse its body and return the node

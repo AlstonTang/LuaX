@@ -23,8 +23,8 @@ public:
 	std::condition_variable cv_yield; // Worker -> Main
 
 	bool started;
-	std::vector<LuaValue> args; // In-bound args
-	std::vector<LuaValue> results; // Out-bound results
+	LuaValueVector args; // In-bound args
+	LuaValueVector results; // Out-bound results
 	bool error_occurred = false;
 
 	// EXTENSION: Mode flag
@@ -36,28 +36,28 @@ public:
 	void run();
 
 	// Returns immediate results for standard, empty/handle for parallel
-	void resume(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+	void resume(const LuaValue* args, size_t n_args, LuaValueVector& out);
 
 	// New: Blocks until the specific coroutine yields/returns
-	void await(std::vector<LuaValue>& out);
+	void await(LuaValueVector& out);
 
-	static void yield(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+	static void yield(const LuaValue* args, size_t n_args, LuaValueVector& out);
 };
 
 // Thread-local pointer to currently running coroutine
 extern thread_local LuaCoroutine* current_coroutine;
 
 // Lua binding functions for the coroutine library
-void coroutine_create(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-void coroutine_create_parallel(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-void coroutine_resume(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-void coroutine_await(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-void coroutine_yield(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-void coroutine_status(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-void coroutine_running(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-void coroutine_close(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-void coroutine_isyieldable(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
-void coroutine_wrap(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out);
+void coroutine_create(const LuaValue* args, size_t n_args, LuaValueVector& out);
+void coroutine_create_parallel(const LuaValue* args, size_t n_args, LuaValueVector& out);
+void coroutine_resume(const LuaValue* args, size_t n_args, LuaValueVector& out);
+void coroutine_await(const LuaValue* args, size_t n_args, LuaValueVector& out);
+void coroutine_yield(const LuaValue* args, size_t n_args, LuaValueVector& out);
+void coroutine_status(const LuaValue* args, size_t n_args, LuaValueVector& out);
+void coroutine_running(const LuaValue* args, size_t n_args, LuaValueVector& out);
+void coroutine_close(const LuaValue* args, size_t n_args, LuaValueVector& out);
+void coroutine_isyieldable(const LuaValue* args, size_t n_args, LuaValueVector& out);
+void coroutine_wrap(const LuaValue* args, size_t n_args, LuaValueVector& out);
 
 std::shared_ptr<LuaObject> create_coroutine_library();
 

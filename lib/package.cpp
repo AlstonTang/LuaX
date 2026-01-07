@@ -8,7 +8,7 @@
 #include <stdexcept>
 
 // package.searchpath
-void package_searchpath(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void package_searchpath(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string name = to_cpp_string(args[0]);
 	std::string path = to_cpp_string(args[1]);
 	std::string sep = n_args >= 3 && std::holds_alternative<std::string>(args[2])
@@ -60,7 +60,7 @@ void package_searchpath(const LuaValue* args, size_t n_args, std::vector<LuaValu
 }
 
 // package.loadlib
-void package_loadlib(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void package_loadlib(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	throw std::runtime_error("package.loadlib is not supported in the translated environment.");
 }
 
@@ -73,44 +73,36 @@ std::shared_ptr<LuaObject> create_package_library() {
 	static std::shared_ptr<LuaObject> package_lib;
 	if (package_lib) return package_lib;
 
-	package_lib = std::make_shared<LuaObject>();
-
-	package_lib->properties = {
-		{"config", LuaValue(std::string("/\n;\n?\n!\n-\n"))},
+	package_lib = LuaObject::create({
+		{LuaValue(std::string_view("config")), std::string("/\n;\n?\n!\n-\n")},
 #if defined(__linux__)
 		{
-			"cpath",
-			LuaValue(std::string(
-				"/usr/local/lib/lua/5.4/?.so;/usr/lib/x86_64-linux-gnu/lua/5.4/?.so;/usr/lib/lua/5.4/?.so;/usr/local/lib/lua/5.4/loadall.so;./?.so"))
-		}
+			LuaValue(std::string_view("cpath")),
+			std::string("/usr/local/lib/lua/5.4/?.so;/usr/lib/x86_64-linux-gnu/lua/5.4/?.so;/usr/lib/lua/5.4/?.so;/usr/local/lib/lua/5.4/loadall.so;./?.so")
+		},
 #elif defined(_WIN32)
-		{ "cpath", LuaValue(std::string(".\\?.dll;!.\\?.dll;!.\\loadall.dll")) }
+		{ LuaValue(std::string_view("cpath")), std::string(".\\?.dll;!.\\?.dll;!.\\loadall.dll") },
 #else
-		{ "cpath", LuaValue(std::string("/?.so")) }
+		{ LuaValue(std::string_view("cpath")), std::string("/?.so") },
 #endif
-		,
-		{"loaded", package_loaded_table},
-		{"loadlib", std::make_shared<LuaFunctionWrapper>(package_loadlib)},
+		{LuaValue(std::string_view("loaded")), package_loaded_table},
+		{LuaValue(std::string_view("loadlib")), std::make_shared<LuaFunctionWrapper>(package_loadlib)},
 #if defined(__linux__)
 		{
-			"path",
-			LuaValue(std::string(
-				"/usr/local/share/lua/5.4/?.lua;/usr/local/share/lua/5.4/?/init.lua;/usr/local/lib/lua/5.4/?.lua;/usr/local/lib/lua/5.4/?/init.lua;/usr/share/lua/5.4/?.lua;/usr/share/lua/5.4/?/init.lua;./?.lua;./?/init.lua"))
-		}
+			LuaValue(std::string_view("path")),
+			std::string("/usr/local/share/lua/5.4/?.lua;/usr/local/share/lua/5.4/?/init.lua;/usr/local/lib/lua/5.4/?.lua;/usr/local/lib/lua/5.4/?/init.lua;/usr/share/lua/5.4/?.lua;/usr/share/lua/5.4/?/init.lua;./?.lua;./?/init.lua")
+		},
 #elif defined(_WIN32)
 		{
-			"path", LuaValue(std::string(
-					".;.\\?.lua;!\\lua\\?.lua;!\\lua\\?\\init.lua;C:\\Program Files\\Lua\\5.4\\?.lua;C:\\Program Files\\Lua\\5.4\\?\\init.lua"))
-
-		}
+			LuaValue(std::string_view("path")), std::string(".;.\\?.lua;!\\lua\\?.lua;!\\lua\\?\\init.lua;C:\\Program Files\\Lua\\5.4\\?.lua;C:\\Program Files\\Lua\\5.4\\?\\init.lua")
+		},
 #else
-		{ "path", LuaValue(std::string("./?.lua;./?/init.lua")) }
+		{ LuaValue(std::string_view("path")), std::string("./?.lua;./?/init.lua") },
 #endif
-		,
-		{"preload", package_preload_table},
-		{"searchers", package_searchers_table},
-		{"searchpath", std::make_shared<LuaFunctionWrapper>(package_searchpath)}
-	};
+		{LuaValue(std::string_view("preload")), package_preload_table},
+		{LuaValue(std::string_view("searchers")), package_searchers_table},
+		{LuaValue(std::string_view("searchpath")), std::make_shared<LuaFunctionWrapper>(package_searchpath)}
+	});
 
 	return package_lib;
 }

@@ -81,7 +81,7 @@ int decode_utf8(const std::string& s, size_t& offset) {
 }
 
 // utf8.char (integer codepoint(s) to string)
-void utf8_char(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void utf8_char(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string result_str;
 	for (size_t i = 0; i < n_args; ++i) {
 		LuaValue cp_val = args[i];
@@ -101,13 +101,13 @@ void utf8_char(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) 
 }
 
 // utf8.charpattern
-void utf8_charpattern(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void utf8_charpattern(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	out.assign({std::string("[\0-\x7F\xC2-\xF4][\x80-\xBF]*")});
 	return;
 }
 
 // utf8.codepoint (string to integer codepoint(s))
-void utf8_codepoint(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void utf8_codepoint(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'codepoint' (string expected)");
@@ -158,7 +158,7 @@ void utf8_codepoint(const LuaValue* args, size_t n_args, std::vector<LuaValue>& 
 }
 
 // utf8.codes (iterator for codepoints)
-void utf8_codes_iterator(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void utf8_codes_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		out.assign({std::monostate{}});
@@ -190,7 +190,7 @@ void utf8_codes_iterator(const LuaValue* args, size_t n_args, std::vector<LuaVal
 	}
 }
 
-void utf8_codes(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void utf8_codes(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'codes' (string expected)");
@@ -200,7 +200,7 @@ void utf8_codes(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out)
 }
 
 // utf8.len (length of UTF-8 string)
-void utf8_len(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void utf8_len(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'len' (string expected)");
@@ -222,7 +222,7 @@ void utf8_len(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
 }
 
 // utf8.offset (byte offset of n-th character)
-void utf8_offset(const LuaValue* args, size_t n_args, std::vector<LuaValue>& out) {
+void utf8_offset(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue s_val = args[0];
 	if (!std::holds_alternative<std::string>(s_val)) {
 		throw std::runtime_error("bad argument #1 to 'offset' (string expected)");
@@ -309,16 +309,14 @@ std::shared_ptr<LuaObject> create_utf8_library() {
 	static std::shared_ptr<LuaObject> utf8_lib;
 	if (utf8_lib) return utf8_lib;
 
-	utf8_lib = std::make_shared<LuaObject>();
-
-	utf8_lib->properties = {
-		{"char", std::make_shared<LuaFunctionWrapper>(utf8_char)},
-		{"charpattern", std::make_shared<LuaFunctionWrapper>(utf8_charpattern)},
-		{"codepoint", std::make_shared<LuaFunctionWrapper>(utf8_codepoint)},
-		{"codes", std::make_shared<LuaFunctionWrapper>(utf8_codes)},
-		{"len", std::make_shared<LuaFunctionWrapper>(utf8_len)},
-		{"offset", std::make_shared<LuaFunctionWrapper>(utf8_offset)}
-	};
+	utf8_lib = LuaObject::create({
+		{LuaValue(std::string_view("char")), std::make_shared<LuaFunctionWrapper>(utf8_char)},
+		{LuaValue(std::string_view("charpattern")), std::string("[\0-\x7F\xC2-\xF4][\x80-\xBF]*")},
+		{LuaValue(std::string_view("codepoint")), std::make_shared<LuaFunctionWrapper>(utf8_codepoint)},
+		{LuaValue(std::string_view("codes")), std::make_shared<LuaFunctionWrapper>(utf8_codes)},
+		{LuaValue(std::string_view("len")), std::make_shared<LuaFunctionWrapper>(utf8_len)},
+		{LuaValue(std::string_view("offset")), std::make_shared<LuaFunctionWrapper>(utf8_offset)}
+	});
 
 	return utf8_lib;
 }
