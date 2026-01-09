@@ -67,16 +67,38 @@ local function is_whitespace(c)
 	return c == BYTE_SPACE or c == BYTE_TAB or c == BYTE_LF or c == BYTE_CR
 end
 
+-- Pre-define keyword tokens as array-style to avoid repeated creation and hashing
+-- [1] = type, [2] = value
+local KW_LOCAL    = { "keyword", "local" }
+local KW_FUNCTION = { "keyword", "function" }
+local KW_RETURN   = { "keyword", "return" }
+local KW_END      = { "keyword", "end" }
+local KW_IF       = { "keyword", "if" }
+local KW_THEN     = { "keyword", "then" }
+local KW_ELSE     = { "keyword", "else" }
+local KW_ELSEIF   = { "keyword", "elseif" }
+local KW_WHILE    = { "keyword", "while" }
+local KW_FOR      = { "keyword", "for" }
+local KW_DO       = { "keyword", "do" }
+local KW_GOTO     = { "keyword", "goto" }
+local KW_BREAK    = { "keyword", "break" }
+local KW_REPEAT   = { "keyword", "repeat" }
+local KW_UNTIL    = { "keyword", "until" }
+
+local OP_AND      = { "operator", "and" }
+local OP_OR       = { "operator", "or" }
+local OP_NOT      = { "operator", "not" }
+
 local Tokenizer = {}
 
 function Tokenizer.tokenize(parser)
 	local code = parser.code
-	local tokens = parser.tokens
+	local tokens = parser[1]
 	local len = #code
 	local sub_cache = {}
 	local function cached_sub(s, i, j)
 		if i == j then return s:sub(i, i) end
-		local key = i .. ":" .. j
+		local key = (i * 1000000) + j -- Efficient integer key
 		local res = sub_cache[key]
 		if res then return res end
 		res = s:sub(i, j)
@@ -126,7 +148,7 @@ function Tokenizer.tokenize(parser)
 					end
 					-- Convert hex string to decimal number
 					local decimal_val = tonumber(hex_val_str, 16)
-					table.insert(tokens, { type = "integer", value = decimal_val })
+					table.insert(tokens, { "integer", decimal_val })
 					token_processed = true
 				end
 			end
@@ -146,9 +168,9 @@ function Tokenizer.tokenize(parser)
 				end
 				local val = cached_sub(code, start_pos, current_pos - 1)
 				if is_float then
-					table.insert(tokens, { type = "number", value = val })
+					table.insert(tokens, { "number", val })
 				else
-					table.insert(tokens, { type = "integer", value = val })
+					table.insert(tokens, { "integer", val })
 				end
 				token_processed = true
 			end
@@ -165,23 +187,25 @@ function Tokenizer.tokenize(parser)
 				end
 			end
 			local value = cached_sub(code, start_pos, current_pos - 1)
-			if value == "local" then table.insert(tokens, { type = "keyword", value = "local" })
-			elseif value == "function" then table.insert(tokens, { type = "keyword", value = "function" })
-			elseif value == "return" then table.insert(tokens, { type = "keyword", value = "return" })
-			elseif value == "end" then table.insert(tokens, { type = "keyword", value = "end" })
-			elseif value == "if" then table.insert(tokens, { type = "keyword", value = "if" })
-			elseif value == "then" then table.insert(tokens, { type = "keyword", value = "then" })
-			elseif value == "else" then table.insert(tokens, { type = "keyword", value = "else" })
-			elseif value == "elseif" then table.insert(tokens, { type = "keyword", value = "elseif" })
-			elseif value == "while" then table.insert(tokens, { type = "keyword", value = "while" })
-			elseif value == "for" then table.insert(tokens, { type = "keyword", value = "for" })
-			elseif value == "do" then table.insert(tokens, { type = "keyword", value = "do" })
-			elseif value == "and" or value == "or" or value == "not" then table.insert(tokens, { type = "operator", value = value })
-			elseif value == "goto" then table.insert(tokens, { type = "keyword", value = "goto" })
-			elseif value == "break" then table.insert(tokens, { type = "keyword", value = "break" })
-			elseif value == "repeat" then table.insert(tokens, { type = "keyword", value = "repeat" })
-			elseif value == "until" then table.insert(tokens, { type = "keyword", value = "until" })
-			else table.insert(tokens, { type = "identifier", value = value }) end
+			if value == "local" then table.insert(tokens, KW_LOCAL)
+			elseif value == "function" then table.insert(tokens, KW_FUNCTION)
+			elseif value == "return" then table.insert(tokens, KW_RETURN)
+			elseif value == "end" then table.insert(tokens, KW_END)
+			elseif value == "if" then table.insert(tokens, KW_IF)
+			elseif value == "then" then table.insert(tokens, KW_THEN)
+			elseif value == "else" then table.insert(tokens, KW_ELSE)
+			elseif value == "elseif" then table.insert(tokens, KW_ELSEIF)
+			elseif value == "while" then table.insert(tokens, KW_WHILE)
+			elseif value == "for" then table.insert(tokens, KW_FOR)
+			elseif value == "do" then table.insert(tokens, KW_DO)
+			elseif value == "and" then table.insert(tokens, OP_AND)
+			elseif value == "or" then table.insert(tokens, OP_OR)
+			elseif value == "not" then table.insert(tokens, OP_NOT)
+			elseif value == "goto" then table.insert(tokens, KW_GOTO)
+			elseif value == "break" then table.insert(tokens, KW_BREAK)
+			elseif value == "repeat" then table.insert(tokens, KW_REPEAT)
+			elseif value == "until" then table.insert(tokens, KW_UNTIL)
+			else table.insert(tokens, { "identifier", value }) end
 			token_processed = true
 
 
@@ -245,80 +269,80 @@ function Tokenizer.tokenize(parser)
 					end
 				end
 			else
-				table.insert(tokens, { type = "operator", value = "-" })
+				table.insert(tokens, { "operator", "-" })
 				current_pos = current_pos + 1
 			end
 			token_processed = true
 		elseif char_byte == BYTE_PLUS or char_byte == BYTE_STAR or char_byte == BYTE_HASH or char_byte == BYTE_PERCENT then
 			-- Reconstruct char for value since tokens store strings
-			table.insert(tokens, { type = "operator", value = string.char(char_byte) })
+			table.insert(tokens, { "operator", string.char(char_byte) })
 			current_pos = current_pos + 1
 			token_processed = true
 		elseif char_byte == BYTE_SLASH then
 			-- Check for floor division //
 			if current_pos < len and code:byte(current_pos + 1) == BYTE_SLASH then
-				table.insert(tokens, { type = "operator", value = "//" })
+				table.insert(tokens, { "operator", "//" })
 				current_pos = current_pos + 2
 			else
-				table.insert(tokens, { type = "operator", value = "/" })
+				table.insert(tokens, { "operator", "/" })
 				current_pos = current_pos + 1
 			end
 			token_processed = true
 		elseif char_byte == BYTE_AMPERSAND then
-			table.insert(tokens, { type = "operator", value = "&" })
+			table.insert(tokens, { "operator", "&" })
 			current_pos = current_pos + 1
 			token_processed = true
 		elseif char_byte == BYTE_PIPE then
-			table.insert(tokens, { type = "operator", value = "|" })
+			table.insert(tokens, { "operator", "|" })
 			current_pos = current_pos + 1
 			token_processed = true
 		elseif char_byte == BYTE_EQUALS then
 			if current_pos < len and code:byte(current_pos + 1) == BYTE_EQUALS then
-				table.insert(tokens, { type = "operator", value = "==" })
+				table.insert(tokens, { "operator", "==" })
 				current_pos = current_pos + 2
 			else
-				table.insert(tokens, { type = "operator", value = "=" })
+				table.insert(tokens, { "operator", "=" })
 				current_pos = current_pos + 1
 			end
 			token_processed = true
 		elseif char_byte == BYTE_GT then
 			if current_pos < len and code:byte(current_pos + 1) == BYTE_EQUALS then
-				table.insert(tokens, { type = "operator", value = ">=" })
+				table.insert(tokens, { "operator", ">=" })
 				current_pos = current_pos + 2
 			elseif current_pos < len and code:byte(current_pos + 1) == BYTE_GT then
 				-- Right shift >>
-				table.insert(tokens, { type = "operator", value = ">>" })
+				table.insert(tokens, { "operator", ">>" })
 				current_pos = current_pos + 2
 			else
-				table.insert(tokens, { type = "operator", value = ">" })
+				table.insert(tokens, { "operator", ">" })
 				current_pos = current_pos + 1
 			end
 			token_processed = true
 		elseif char_byte == BYTE_LT then
 			if current_pos < len and code:byte(current_pos + 1) == BYTE_EQUALS then
-				table.insert(tokens, { type = "operator", value = "<=" })
+				table.insert(tokens, { "operator", "<=" })
 				current_pos = current_pos + 2
 			elseif current_pos < len and code:byte(current_pos + 1) == BYTE_LT then
 				-- Left shift <<
-				table.insert(tokens, { type = "operator", value = "<<" })
+				table.insert(tokens, { "operator", "<<" })
 				current_pos = current_pos + 2
 			else
-				table.insert(tokens, { type = "operator", value = "<" })
+				table.insert(tokens, { "operator", "<" })
 				current_pos = current_pos + 1
 			end
 			token_processed = true
 		elseif char_byte == BYTE_TILDE then
 			if current_pos < len and code:byte(current_pos + 1) == BYTE_EQUALS then
-				table.insert(tokens, { type = "operator", value = "~=" })
+				table.insert(tokens, { "operator", "~=" })
 				current_pos = current_pos + 2
 			else
 				-- ~ is bitwise NOT (unary) or bitwise XOR (binary) in Lua 5.3+
-				table.insert(tokens, { type = "operator", value = "~" })
+				table.insert(tokens, { "operator", "~" })
 				current_pos = current_pos + 1
 			end
 			token_processed = true
 		elseif char_byte == BYTE_LPAREN or char_byte == BYTE_RPAREN then
-			table.insert(tokens, { type = "paren", value = string.char(char_byte) })
+			table.insert(tokens, { "paren", string.char(char_byte) })
 			current_pos = current_pos + 1
 			token_processed = true
 		elseif char_byte == BYTE_DOUBLE_QUOTE or char_byte == BYTE_SINGLE_QUOTE then
@@ -353,7 +377,7 @@ function Tokenizer.tokenize(parser)
 					current_pos = current_pos + 1
 				end
 			end
-			table.insert(tokens, { type = "string", value = table.concat(buffer) })
+			table.insert(tokens, { "string", table.concat(buffer) })
 			token_processed = true
 		elseif char_byte == BYTE_LBRACKET then
 			-- Check for long string: [[ ... ]] or [=[ ... ]=]
@@ -386,7 +410,7 @@ function Tokenizer.tokenize(parser)
 							content = content:sub(3)
 						end
 
-						table.insert(tokens, { type = "string", value = content })
+						table.insert(tokens, { "string", content })
 						current_pos = current_pos + end_len
 						closing_found = true
 						break
@@ -399,43 +423,43 @@ function Tokenizer.tokenize(parser)
 				end
 			else
 				-- It's just a regular square bracket
-				table.insert(tokens, { type = "square_bracket", value = "[" })
+				table.insert(tokens, { "square_bracket", "[" })
 				current_pos = current_pos + 1
 			end
 			token_processed = true
 		elseif char_byte == BYTE_RBRACKET then
 			-- Regular square bracket
-			table.insert(tokens, { type = "square_bracket", value = "]" })
+			table.insert(tokens, { "square_bracket", "]" })
 			current_pos = current_pos + 1
 			token_processed = true
 		elseif char_byte == BYTE_LBRACE or char_byte == BYTE_RBRACE then
-			table.insert(tokens, { type = "brace", value = string.char(char_byte) })
+			table.insert(tokens, { "brace", string.char(char_byte) })
 			current_pos = current_pos + 1
 			token_processed = true
 		elseif char_byte == BYTE_COLON then
 			-- Check for label delimiter (::)
 			if current_pos + 1 <= len and code:byte(current_pos + 1) == BYTE_COLON then
-				table.insert(tokens, { type = "label_delimiter", value = "::" })
+				table.insert(tokens, { "label_delimiter", "::" })
 				current_pos = current_pos + 2
 			else
-				table.insert(tokens, { type = "colon", value = ":" })
+				table.insert(tokens, { "colon", ":" })
 				current_pos = current_pos + 1
 			end
 			token_processed = true
 		elseif char_byte == BYTE_DOT then
 			if current_pos + 2 <= len and code:sub(current_pos + 1, current_pos + 2) == '..' then
-				table.insert(tokens, { type = "varargs", value = "..." })
+				table.insert(tokens, { "varargs", "..." })
 				current_pos = current_pos + 3
 			elseif current_pos + 1 <= len and code:byte(current_pos + 1) == BYTE_DOT then
-				table.insert(tokens, { type = "operator", value = ".." })
+				table.insert(tokens, { "operator", ".." })
 				current_pos = current_pos + 2
 			else
-				table.insert(tokens, { type = "dot", value = "." })
+				table.insert(tokens, { "dot", "." })
 				current_pos = current_pos + 1
 			end
 			token_processed = true
 		elseif char_byte == BYTE_COMMA then
-			table.insert(tokens, { type = "comma", value = "," })
+			table.insert(tokens, { "comma", "," })
 			current_pos = current_pos + 1
 			token_processed = true
 		else

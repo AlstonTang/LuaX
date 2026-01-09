@@ -241,19 +241,7 @@ std::string get_string(const LuaValue& v) {
 	}, v);
 }
 
-// Cache for single-character strings to avoid repeated allocations (e.g., in tokenizers)
-static char static_chars[256];
-static LuaValue single_char_cache[256];
-static bool char_cache_initialized = false;
-
-static void ensure_char_cache() {
-	if (char_cache_initialized) return;
-	for (int i = 0; i < 256; ++i) {
-		static_chars[i] = static_cast<char>(i);
-		single_char_cache[i] = std::string_view(&static_chars[i], 1);
-	}
-	char_cache_initialized = true;
-}
+// No longer needed, using LuaObject::get_single_char instead
 
 // Helper to extract captures directly into the output vector
 void get_captures(const LuaPattern::MatchState& ms, LuaValueVector& out) {
@@ -279,24 +267,10 @@ void get_captures(const LuaPattern::MatchState& ms, LuaValueVector& out) {
 // string.byte
 void string_byte(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (n_args == 0) return;
-	std::string_view s = get_sv(args[0]);
-	long long len = static_cast<long long>(s.length());
 	long long i = (n_args >= 2) ? static_cast<long long>(get_double(args[1])) : 1;
 	long long j = (n_args >= 3) ? static_cast<long long>(get_double(args[2])) : i;
 
-	if (i < 0) i += len + 1;
-	if (j < 0) j += len + 1;
-	i = std::max(1LL, i);
-	j = std::min(len, j);
-
-	out.clear();
-	if (i > j) return;
-
-	size_t count = static_cast<size_t>(j - i + 1);
-	out.resize(count);
-	for (size_t k = 0; k < count; ++k) {
-		out[k] = static_cast<double>(static_cast<unsigned char>(s[i + k - 1]));
-	}
+    lua_string_byte(args[0], i, j, out);
 }
 
 
@@ -695,28 +669,12 @@ void string_reverse(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	out.assign({s});
 }
 
-// string.sub
 void string_sub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	std::string_view s = get_sv(args[0]);
-	long long len = s.length();
+	if (n_args < 2) return;
 	long long i = (n_args >= 2) ? static_cast<long long>(get_double(args[1])) : 1;
 	long long j = (n_args >= 3) ? static_cast<long long>(get_double(args[2])) : -1;
 
-	if (i < 0) i += len + 1;
-	if (j < 0) j += len + 1;
-	i = std::max(1LL, i);
-	j = std::min(len, j);
-
-	if (i <= j) {
-		size_t sub_len = static_cast<size_t>(j - i + 1);
-		if (sub_len == 1) {
-			ensure_char_cache();
-			out.assign({single_char_cache[static_cast<unsigned char>(s[i - 1])]});
-		} else {
-			out.assign({std::string(s.substr(i - 1, sub_len))});
-		}
-	}
-	else out.assign({LuaValue(std::string_view(""))});
+    out.assign({lua_string_sub(args[0], i, j)});
 }
 
 // string.unpack (Stub)
@@ -747,10 +705,39 @@ void lua_string_gsub(const LuaValue& str, const LuaValue& pattern, const LuaValu
 	string_gsub(args, 3, out);
 }
 
+void lua_string_byte(const LuaValue& str, long long i, long long j, LuaValueVector& out) {
+    std::string_view s = get_sv(str);
+    long long len = static_cast<long long>(s.length());
+    if (i < 0) i += len + 1;
+    if (j < 0) j += len + 1;
+    i = std::max(1LL, i);
+    j = std::min(len, j);
+
+    out.clear();
+    if (i > j) return;
+
+    size_t count = static_cast<size_t>(j - i + 1);
+    out.resize(count);
+    for (size_t k = 0; k < count; ++k) {
+        out[k] = static_cast<double>(static_cast<unsigned char>(s[i + k - 1]));
+    }
+}
+
+LuaValue lua_string_sub(const LuaValue& str, long long i, long long j) {
+    std::string_view s = get_sv(str);
+    long long len = static_cast<long long>(s.length());
+    if (i < 0) i += len + 1;
+    if (j < 0) j += len + 1;
+    i = std::max(1LL, i);
+    j = std::min(len, j);
+
+    if (i > j) return std::string("");
+    return std::string(s.substr(i - 1, j - i + 1));
+}
+
 // --- Library Creation ---
 
 std::shared_ptr<LuaObject> create_string_library() {
-	ensure_char_cache();
 	static std::shared_ptr<LuaObject> lib;
 	if (lib) return lib;
 

@@ -37,20 +37,25 @@ enum LuaTypeIndex {
 };
 
 // Custom hasher for LuaValue to support heterogeneous lookup with string_view
+// Custom hasher for LuaValue to support heterogeneous lookup with string_view
 struct LuaValueHash {
 	using is_transparent = void;
 
 	size_t operator()(const LuaValue& v) const {
-		switch (v.index()) {
+        size_t idx = v.index();
+        switch (idx) {
 			case INDEX_NIL: return 0;
 			case INDEX_BOOLEAN: return std::hash<bool>{}(std::get<bool>(v));
-			case INDEX_DOUBLE: return std::hash<double>{}(std::get<double>(v));
-			case INDEX_INTEGER: return std::hash<long long>{}(std::get<long long>(v));
+			case INDEX_DOUBLE: 
+            case INDEX_INTEGER: {
+                double d = (idx == INDEX_DOUBLE) ? std::get<double>(v) : static_cast<double>(std::get<long long>(v));
+                return std::hash<double>{}(d);
+            }
 			case INDEX_STRING: return std::hash<std::string_view>{}(std::get<std::string>(v));
 			case INDEX_STRING_VIEW: return std::hash<std::string_view>{}(std::get<std::string_view>(v));
-			case INDEX_OBJECT: return std::hash<void*>{}(std::get<std::shared_ptr<LuaObject>>(v).get());
-			case INDEX_FUNCTION: return std::hash<void*>{}(std::get<std::shared_ptr<LuaFunctionWrapper>>(v).get());
-			case INDEX_COROUTINE: return std::hash<void*>{}(std::get<std::shared_ptr<LuaCoroutine>>(v).get());
+			case INDEX_OBJECT: return std::hash<void*>{}(std::get<INDEX_OBJECT>(v).get());
+			case INDEX_FUNCTION: return std::hash<void*>{}(std::get<INDEX_FUNCTION>(v).get());
+			case INDEX_COROUTINE: return std::hash<void*>{}(std::get<INDEX_COROUTINE>(v).get());
 			default: return 0;
 		}
 	}
@@ -69,43 +74,51 @@ struct LuaValueEq {
 	using is_transparent = void;
 
 	bool operator()(const LuaValue& lhs, const LuaValue& rhs) const {
-		if (lhs.index() == INDEX_STRING_VIEW && rhs.index() == INDEX_STRING_VIEW) {
-			auto sv1 = std::get<INDEX_STRING_VIEW>(lhs);
-			auto sv2 = std::get<INDEX_STRING_VIEW>(rhs);
-			if (sv1.data() == sv2.data() && sv1.size() == sv2.size()) [[likely]] return true;
-			return sv1 == sv2;
-		}
-		if (lhs.index() == INDEX_STRING && rhs.index() == INDEX_STRING_VIEW) {
-			return std::get<std::string>(lhs) == std::get<std::string_view>(rhs);
-		}
-		if (lhs.index() == INDEX_STRING_VIEW && rhs.index() == INDEX_STRING) {
-			return std::get<std::string_view>(lhs) == std::get<std::string>(rhs);
-		}
-		return lhs == rhs;
+        size_t lidx = lhs.index();
+        size_t ridx = rhs.index();
+        
+        if (lidx == ridx) {
+            if (lidx == INDEX_STRING_VIEW) {
+                auto sv1 = std::get<INDEX_STRING_VIEW>(lhs);
+                auto sv2 = std::get<INDEX_STRING_VIEW>(rhs);
+                if (sv1.data() == sv2.data() && sv1.size() == sv2.size()) [[likely]] return true;
+                return sv1 == sv2;
+            }
+            return lhs == rhs;
+        }
+
+        // Cross-type string comparison
+        if (lidx == INDEX_STRING && ridx == INDEX_STRING_VIEW)
+            return std::get<INDEX_STRING>(lhs) == std::get<INDEX_STRING_VIEW>(rhs);
+        if (lidx == INDEX_STRING_VIEW && ridx == INDEX_STRING)
+            return std::get<INDEX_STRING_VIEW>(lhs) == std::get<INDEX_STRING>(rhs);
+
+        // Cross-type numeric comparison
+        if ((lidx == INDEX_DOUBLE || lidx == INDEX_INTEGER) && 
+            (ridx == INDEX_DOUBLE || ridx == INDEX_INTEGER)) {
+            double d1 = (lidx == INDEX_DOUBLE) ? std::get<double>(lhs) : (double)std::get<long long>(lhs);
+            double d2 = (ridx == INDEX_DOUBLE) ? std::get<double>(rhs) : (double)std::get<long long>(rhs);
+            return d1 == d2;
+        }
+
+        return false;
 	}
 
 	bool operator()(const LuaValue& lhs, std::string_view rhs) const {
-		if (lhs.index() == INDEX_STRING_VIEW) {
+        size_t idx = lhs.index();
+		if (idx == INDEX_STRING_VIEW) {
 			auto sv = std::get<INDEX_STRING_VIEW>(lhs);
 			if (sv.data() == rhs.data() && sv.size() == rhs.size()) [[likely]] return true;
 			return sv == rhs;
 		}
-		if (lhs.index() == INDEX_STRING) {
+		if (idx == INDEX_STRING) {
 			return std::get<INDEX_STRING>(lhs) == rhs;
 		}
 		return false;
 	}
 
 	bool operator()(std::string_view lhs, const LuaValue& rhs) const {
-		if (rhs.index() == INDEX_STRING_VIEW) {
-			auto sv = std::get<INDEX_STRING_VIEW>(rhs);
-			if (sv.data() == lhs.data() && sv.size() == lhs.size()) [[likely]] return true;
-			return lhs == sv;
-		}
-		if (rhs.index() == INDEX_STRING) {
-			return lhs == std::get<INDEX_STRING>(rhs);
-		}
-		return false;
+		return (*this)(rhs, lhs);
 	}
 
 	bool operator()(const LuaValue& lhs, const char* rhs) const {
@@ -113,7 +126,7 @@ struct LuaValueEq {
 	}
 
 	bool operator()(const char* lhs, const LuaValue& rhs) const {
-		return (*this)(std::string_view(lhs), rhs);
+		return (*this)(rhs, std::string_view(lhs));
 	}
 };
 

@@ -149,14 +149,14 @@ public:
 	void set_item(const char* key, const LuaValue& value) { set_item(std::string_view(key), value); }
 	void set_item(const LuaValue& key, const LuaValueVector& value);
 
+    // General high-performance helpers (Phase 2)
+    void table_insert(const LuaValue& value);
+    void table_insert(long long pos, const LuaValue& value);
+
 	// Metamethod and property cache
 	LuaValue* cached_index = nullptr;
 	LuaValue* cached_newindex = nullptr;
 	bool metamethods_initialized = false;
-	
-	const void* last_key_ptr = nullptr;
-	LuaValue* last_value_ptr = nullptr;
-
 	void ensure_metamethods() {
 		if (metamethods_initialized) return;
 		if (metatable) {
@@ -171,8 +171,6 @@ public:
 
 	void invalidate_metamethods() {
 		metamethods_initialized = false;
-		last_key_ptr = nullptr;
-		last_value_ptr = nullptr;
 	}
 
 	// Internal property accessors
@@ -186,6 +184,7 @@ public:
 	void set_metatable(const std::shared_ptr<LuaObject>& mt);
 
 	static std::string_view intern(std::string_view sv);
+    static const LuaValue& get_single_char(unsigned char c);
 };
 
 extern std::shared_ptr<LuaObject> _G;
@@ -323,9 +322,18 @@ inline LuaValue lua_get_member(const std::shared_ptr<LuaObject>& base, const cha
 
 inline LuaValue lua_get_member(LuaObject* base, const std::string& key) { return lua_get_member(base, std::string_view(key)); }
 inline LuaValue lua_get_member(LuaObject* base, const char* key) { return lua_get_member(base, std::string_view(key)); }
-LuaValue lua_get_length(const LuaValue& val); // Returns single value, handles buffer internally
+LuaValue lua_get_length(const LuaValue& val); 
+
+// General High-Performance Helpers (Phase 2)
+// These are designed for broad usage, not just transpiler tailoring.
+void lua_table_insert(const LuaValue& t, const LuaValue& v);
+void lua_table_insert(const LuaValue& t, long long pos, const LuaValue& v);
+void lua_string_byte(const LuaValue& str, long long i, long long j, LuaValueVector& out);
+LuaValue lua_string_sub(const LuaValue& str, long long i, long long j);
 
 inline bool is_lua_truthy(bool val) { return val; }
+inline bool is_lua_truthy(long long val) { return val != -1; } // -1 is sentinel for nil in raw byte ops
+inline bool is_lua_truthy(double val) { return true; } // Numbers are always truthy in Lua (except sentinel)
 inline bool is_lua_truthy(const LuaValue& val) {
 	auto idx = val.index();
 	if (idx == INDEX_NIL) [[unlikely]] return false;
@@ -339,14 +347,14 @@ inline bool is_lua_truthy(const LuaValue& val) {
 // ==========================================
 
 inline char lua_get_char(const LuaValue& v) {
+	if (const auto* i = std::get_if<long long>(&v)) [[likely]] {
+		return static_cast<char>(*i);
+	}
 	if (const auto* sv = std::get_if<std::string_view>(&v)) {
 		return sv->size() == 1 ? (*sv)[0] : '\0';
 	}
 	if (const auto* s = std::get_if<std::string>(&v)) {
 		return s->size() == 1 ? (*s)[0] : '\0';
-	}
-	if (const auto* i = std::get_if<long long>(&v)) {
-		return static_cast<char>(*i);
 	}
 	if (const auto* d = std::get_if<double>(&v)) {
 		return static_cast<char>(*d);
@@ -354,29 +362,42 @@ inline char lua_get_char(const LuaValue& v) {
 	return '\0';
 }
 
+// Character predicates (primitive overloads for performance)
+inline bool lua_is_digit(unsigned char c) { return c >= '0' && c <= '9'; }
+inline bool lua_is_alpha(unsigned char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_'; }
+inline bool lua_is_whitespace(unsigned char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
+inline bool lua_is_hex_digit(unsigned char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
+inline bool lua_is_alnum(unsigned char c) { return lua_is_digit(c) || lua_is_alpha(c); }
+
+inline bool lua_is_digit(long long c) { return c != -1 && lua_is_digit(static_cast<unsigned char>(c)); }
+inline bool lua_is_alpha(long long c) { return c != -1 && lua_is_alpha(static_cast<unsigned char>(c)); }
+inline bool lua_is_whitespace(long long c) { return c != -1 && lua_is_whitespace(static_cast<unsigned char>(c)); }
+inline bool lua_is_hex_digit(long long c) { return c != -1 && lua_is_hex_digit(static_cast<unsigned char>(c)); }
+inline bool lua_is_alnum(long long c) { return c != -1 && lua_is_alnum(static_cast<unsigned char>(c)); }
+
 inline bool lua_is_digit(const LuaValue& v) {
 	char c = lua_get_char(v);
-	return c >= '0' && c <= '9';
+	return lua_is_digit(static_cast<unsigned char>(c));
 }
 
 inline bool lua_is_alpha(const LuaValue& v) {
 	char c = lua_get_char(v);
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+	return lua_is_alpha(static_cast<unsigned char>(c));
 }
 
 inline bool lua_is_whitespace(const LuaValue& v) {
 	char c = lua_get_char(v);
-	return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+	return lua_is_whitespace(static_cast<unsigned char>(c));
 }
 
 inline bool lua_is_hex_digit(const LuaValue& v) {
 	char c = lua_get_char(v);
-	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+	return lua_is_hex_digit(static_cast<unsigned char>(c));
 }
 
 inline bool lua_is_alnum(const LuaValue& v) {
 	char c = lua_get_char(v);
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || (c >= '0' && c <= '9');
+	return lua_is_alnum(static_cast<unsigned char>(c));
 }
 
 bool operator<=(const LuaValue& lhs, const LuaValue& rhs);
@@ -407,31 +428,30 @@ bool lua_greater_equals(const LuaValue& a, const LuaValue& b);
 
 
 // Optimized Single-Character Access (replaces str:sub(i, i))
-inline LuaValue lua_string_char_at(const LuaValue& str, const LuaValue& pos) {
-	long long i = 0;
-	if (std::holds_alternative<long long>(pos)) i = std::get<long long>(pos);
-	else if (std::holds_alternative<double>(pos)) i = static_cast<long long>(std::get<double>(pos));
-	else return LuaValue(std::string("")); // Invalid index type
-
+inline const LuaValue& lua_string_char_at(const LuaValue& str, long long i) {
 	if (const auto* s = std::get_if<std::string>(&str)) {
 		if (i >= 1 && i <= static_cast<long long>(s->size())) {
-			return LuaValue(std::string(1, (*s)[i - 1]));
+			return LuaObject::get_single_char(static_cast<unsigned char>((*s)[i - 1]));
 		}
 	} else if (const auto* sv = std::get_if<std::string_view>(&str)) {
 		if (i >= 1 && i <= static_cast<long long>(sv->size())) {
-			return LuaValue(std::string(1, (*sv)[i - 1]));
+			return LuaObject::get_single_char(static_cast<unsigned char>((*sv)[i - 1]));
 		}
 	}
-	return LuaValue(std::string(""));
+    static const LuaValue empty_str{std::string("")};
+	return empty_str;
+}
+
+inline const LuaValue& lua_string_char_at(const LuaValue& str, const LuaValue& pos) {
+	long long i = 0;
+	if (const auto* l = std::get_if<long long>(&pos)) i = *l;
+	else if (const auto* d = std::get_if<double>(&pos)) i = static_cast<long long>(*d);
+	else { static const LuaValue empty_str{std::string("")}; return empty_str; }
+    return lua_string_char_at(str, i);
 }
 
 // Optimized Byte Access (replaces str:byte(i))
-inline LuaValue lua_string_byte_at(const LuaValue& str, const LuaValue& pos) {
-	long long i = 0;
-	if (std::holds_alternative<long long>(pos)) i = std::get<long long>(pos);
-	else if (std::holds_alternative<double>(pos)) i = static_cast<long long>(std::get<double>(pos));
-	else return std::monostate{}; 
-
+inline long long lua_string_byte_at_raw(const LuaValue& str, long long i) {
 	if (const auto* s = std::get_if<std::string>(&str)) {
 		if (i >= 1 && i <= static_cast<long long>(s->size())) {
 			return static_cast<long long>(static_cast<unsigned char>((*s)[i - 1]));
@@ -441,7 +461,29 @@ inline LuaValue lua_string_byte_at(const LuaValue& str, const LuaValue& pos) {
 			return static_cast<long long>(static_cast<unsigned char>((*sv)[i - 1]));
 		}
 	}
-	return std::monostate{};
+	return -1; // Indicate nil/out of bounds
+}
+
+inline long long lua_string_byte_at_raw(const LuaValue& str, const LuaValue& pos) {
+    long long i = 0;
+    if (const auto* l = std::get_if<long long>(&pos)) i = *l;
+    else if (const auto* d = std::get_if<double>(&pos)) i = static_cast<long long>(*d);
+    else return -1;
+    return lua_string_byte_at_raw(str, i);
+}
+
+inline LuaValue lua_string_byte_at(const LuaValue& str, long long i) {
+    long long b = lua_string_byte_at_raw(str, i);
+    if (b == -1) return std::monostate{};
+    return b;
+}
+
+inline LuaValue lua_string_byte_at(const LuaValue& str, const LuaValue& pos) {
+	long long i = 0;
+	if (const auto* l = std::get_if<long long>(&pos)) i = *l;
+	else if (const auto* d = std::get_if<double>(&pos)) i = static_cast<long long>(*d);
+	else return std::monostate{}; 
+    return lua_string_byte_at(str, i);
 }
 
 // Optimized String View Overloads
@@ -739,9 +781,8 @@ inline LuaValue lua_get_member(const LuaValue& base, const LuaValue& key) {
 	}
 	case INDEX_STRING:
 	case INDEX_STRING_VIEW: {
-		// Using a cached reference to the string metatable is critical
-		static const auto& string_lib = _G->get_item("string");
-		return std::get<INDEX_OBJECT>(string_lib)->get_item(key);
+		static LuaObject* string_lib_obj = std::get<std::shared_ptr<LuaObject>>(_G->get_item("string")).get();
+		return string_lib_obj->get_item(key);
 	}
 	default:
 		throw std::runtime_error("attempt to index a " + get_lua_type_name(base) + " value");
@@ -755,8 +796,8 @@ inline LuaValue lua_get_member(const LuaValue& base, std::string_view key) {
 	}
 	case INDEX_STRING:
 	case INDEX_STRING_VIEW: {
-		static const auto& string_lib = _G->get_item("string");
-		return std::get<INDEX_OBJECT>(string_lib)->get_item(key);
+		static LuaObject* string_lib_obj = std::get<std::shared_ptr<LuaObject>>(_G->get_item("string")).get();
+		return string_lib_obj->get_item(key);
 	}
 	default:
 		throw std::runtime_error("attempt to index a " + get_lua_type_name(base) + " value");

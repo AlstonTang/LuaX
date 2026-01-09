@@ -186,7 +186,7 @@ local function translate_node(ctx, node, depth, opts)
 	opts = opts or {}
 	
 	if depth > 50 then
-		print("ERROR: Recursion limit exceeded in translate_node. Node type: " .. (node and node.type or "nil"))
+		print("ERROR: Recursion limit exceeded in translate_node. Node type: " .. (node and node[1] or "nil"))
 		os.exit(1)
 	end
 	
@@ -194,17 +194,17 @@ local function translate_node(ctx, node, depth, opts)
 		return ""
 	end
 	
-	if not node.type then
+	if not node[1] then
 		print("ERROR: Node has no type field:", node)
 		return "/* ERROR: Node with no type */"
 	end
 	
-	local handler = NodeHandlers[node.type]
+	local handler = NodeHandlers[node[1]]
 	if handler then
 		return handler(ctx, node, depth, opts)
 	else
-		print("WARNING: Unhandled node type: " .. node.type)
-		return "/* UNHANDLED_NODE_TYPE: " .. node.type .. " */"
+		print("WARNING: Unhandled node type: " .. node[1])
+		return "/* UNHANDLED_NODE_TYPE: " .. node[1] .. " */"
 	end
 end
 
@@ -213,12 +213,12 @@ end
 --------------------------------------------------------------------------------
 
 local function is_table_unpack_call(node)
-	if node.type == "call_expression" then
-		local call_func = node.ordered_children[1]
-		if call_func.type == "member_expression" then
-			local base = call_func.ordered_children[1]
-			local member = call_func.ordered_children[2]
-			if base.identifier == "table" and member.identifier == "unpack" then
+	if node[1] == "call_expression" then
+		local call_func = node[5][1]
+		if call_func[1] == "member_expression" then
+			local base = call_func[5][1]
+			local member = call_func[5][2]
+			if base[3] == "table" and member[3] == "unpack" then
 				return true
 			end
 		end
@@ -231,9 +231,9 @@ end
 --------------------------------------------------------------------------------
 
 local function is_multiret(node)
-	return node.type == "call_expression" or 
-		   node.type == "method_call_expression" or
-		   node.type == "varargs"
+	return node[1] == "call_expression" or 
+		   node[1] == "method_call_expression" or
+		   node[1] == "varargs"
 end
 
 --------------------------------------------------------------------------------
@@ -242,7 +242,7 @@ end
 --------------------------------------------------------------------------------
 
 local function build_args_code(ctx, node, start_index, depth, self_arg)
-	local children = node.ordered_children
+	local children = node[5]
 	local count = #children
 	local has_complex_args = false
 	
@@ -300,30 +300,30 @@ end
 --------------------------------------------------------------------------------
 
 local function translate_assignment_target(ctx, var_node, value_code, depth)
-	if var_node.type == "member_expression" then
-		local base_node = var_node.ordered_children[1]
-		local member_node = var_node.ordered_children[2]
+	if var_node[1] == "member_expression" then
+		local base_node = var_node[5][1]
+		local member_node = var_node[5][2]
 		local translated_base = translate_node(ctx, base_node, depth + 1)
-		local member_name = member_node.identifier
+		local member_name = member_node[3]
 		local member_cache_var = ctx:get_string_cache(member_name)
 		return "get_object(" .. translated_base .. ")->set(" .. member_cache_var .. ", " .. value_code .. ");\n"
-	elseif var_node.type == "table_index_expression" then
-		local base_node = var_node.ordered_children[1]
-		local index_node = var_node.ordered_children[2]
+	elseif var_node[1] == "table_index_expression" then
+		local base_node = var_node[5][1]
+		local index_node = var_node[5][2]
 		local translated_base = translate_node(ctx, base_node, depth + 1)
 		local translated_index = translate_node(ctx, index_node, depth + 1)
 		return "get_object(" .. translated_base .. ")->set_item(" .. translated_index .. ", " .. value_code .. ");\n"
 	else
 		local var_code
 		local declaration_prefix = ""
-		if var_node.type == "identifier" and not ctx:is_declared(var_node.identifier) then
-			ctx:declare_variable(var_node.identifier)
+		if var_node[1] == "identifier" and not ctx:is_declared(var_node[3]) then
+			ctx:declare_variable(var_node[3])
 			if ctx.is_main_script then
 				declaration_prefix = "LuaValue "
 			else
-				ctx:add_module_global_var(var_node.identifier)
+				ctx:add_module_global_var(var_node[3])
 			end
-			var_code = sanitize_cpp_identifier(var_node.identifier)
+			var_code = sanitize_cpp_identifier(var_node[3])
 		else
 			var_code = translate_node(ctx, var_node, depth + 1)
 		end
@@ -336,12 +336,12 @@ end
 --------------------------------------------------------------------------------
 
 register_handler("string", function(ctx, node, depth)
-	local s = node.value
+	local s = node[2]
 	return ctx:get_string_cache(s)
 end)
 
 register_handler("number", function(ctx, node, depth)
-	local num_str = tostring(node.value)
+	local num_str = tostring(node[2])
 	if not string.find(num_str, "%.") then
 		return num_str .. "LL"
 	else
@@ -350,15 +350,15 @@ register_handler("number", function(ctx, node, depth)
 end)
 
 register_handler("integer", function(ctx, node, depth)
-	local val = tonumber(node.value)
+	local val = tonumber(node[2])
 	if val and val >= 0 and val <= 10 then
 		return ctx:get_global_cache("const_int_" .. val)
 	end
-	return tostring(node.value) .. "LL"
+	return tostring(node[2]) .. "LL"
 end)
 
 register_handler("boolean", function(ctx, node, depth)
-	return "LuaValue(" .. tostring(node.value) .. ")"
+	return "LuaValue(" .. tostring(node[2]) .. ")"
 end)
 
 --------------------------------------------------------------------------------
@@ -366,23 +366,23 @@ end)
 --------------------------------------------------------------------------------
 
 register_handler("identifier", function(ctx, node, depth)
-	local decl_info = ctx:is_declared(node.identifier)
+	local decl_info = ctx:is_declared(node[3])
 	if decl_info then
 		if type(decl_info) == "table" and decl_info.is_ptr then
 			return "(*" .. decl_info.ptr_name .. ")"
 		end
-		return sanitize_cpp_identifier(node.identifier)
+		return sanitize_cpp_identifier(node[3])
 	end
 	
-	if node.identifier == "nil" then
+	if node[3] == "nil" then
 		return "std::monostate{}"
-	elseif lua_global_libraries[node.identifier] then
+	elseif lua_global_libraries[node[3]] then
 		-- Cache standard library objects
-		return "get_object(" .. ctx:get_global_cache(node.identifier) .. ")"
-	elseif node.identifier == "type" or node.identifier == "print" or node.identifier == "error" or node.identifier == "tonumber" or node.identifier == "tostring" or node.identifier == "setmetatable" or node.identifier == "getmetatable" or node.identifier == "pairs" or node.identifier == "ipairs" or node.identifier == "next" or node.identifier == "select" or node.identifier == "rawget" or node.identifier == "rawset" or node.identifier == "rawequal" or node.identifier == "pcall" or node.identifier == "xpcall" or node.identifier == "require" or node.identifier == "loadfile" or node.identifier == "dofile" or node.identifier == "load" or node.identifier == "assert" or node.identifier == "collectgarbage" or node.identifier == "_VERSION" or node.identifier == "_G" then
-		return ctx:get_global_cache(node.identifier)
+		return "get_object(" .. ctx:get_global_cache(node[3]) .. ")"
+	elseif node[3] == "type" or node[3] == "print" or node[3] == "error" or node[3] == "tonumber" or node[3] == "tostring" or node[3] == "setmetatable" or node[3] == "getmetatable" or node[3] == "pairs" or node[3] == "ipairs" or node[3] == "next" or node[3] == "select" or node[3] == "rawget" or node[3] == "rawset" or node[3] == "rawequal" or node[3] == "pcall" or node[3] == "xpcall" or node[3] == "require" or node[3] == "loadfile" or node[3] == "dofile" or node[3] == "load" or node[3] == "assert" or node[3] == "collectgarbage" or node[3] == "_VERSION" or node[3] == "_G" then
+		return ctx:get_global_cache(node[3])
 	else
-		return sanitize_cpp_identifier(node.identifier)
+		return sanitize_cpp_identifier(node[3])
 	end
 end)
 
@@ -392,7 +392,7 @@ end)
 
 register_handler("Root", function(ctx, node, depth)
 	local cpp_code = ""
-	for _, child in ipairs(node.ordered_children or empty_table) do
+	for _, child in ipairs(node[5] or empty_table) do
 		cpp_code = cpp_code .. translate_node(ctx, child, depth + 1) .. "\n"
 	end
 	return cpp_code
@@ -402,7 +402,7 @@ register_handler("block", function(ctx, node, depth, opts)
 	local block_code = (opts and opts.no_braces) and "" or "{\n"
 	local saved_scope = ctx:save_scope()
 	
-	for _, child in ipairs(node.ordered_children or empty_table) do
+	for _, child in ipairs(node[5] or empty_table) do
 		block_code = block_code .. translate_node(ctx, child, depth + 1)
 	end
 	
@@ -416,11 +416,11 @@ end)
 --------------------------------------------------------------------------------
 
 register_handler("binary_expression", function(ctx, node, depth)
-	local operator = node.value
+	local operator = node[2]
 	
 	-- Special handling for logical operators to preserve short-circuiting
 	if (operator == "and" or operator == "or") then
-		local left = translate_node(ctx, node.ordered_children[1], depth + 1)
+		local left = translate_node(ctx, node[5][1], depth + 1)
 		local left_stmts = ctx:flush_statements()
 		local temp_var = "logic_res_" .. ctx:get_unique_id()
 		
@@ -434,7 +434,7 @@ register_handler("binary_expression", function(ctx, node, depth)
 		end
 		
 		ctx:capture_start()
-		local right = translate_node(ctx, node.ordered_children[2], depth + 1)
+		local right = translate_node(ctx, node[5][2], depth + 1)
 		local right_stmts = ctx:capture_end()
 		ctx:add_statement(right_stmts)
 		ctx:add_statement("    " .. temp_var .. " = " .. right .. ";\n")
@@ -443,8 +443,8 @@ register_handler("binary_expression", function(ctx, node, depth)
 		return temp_var
 	end
 
-	local left = translate_node(ctx, node.ordered_children[1], depth + 1)
-	local right = translate_node(ctx, node.ordered_children[2], depth + 1)
+	local left = translate_node(ctx, node[5][1], depth + 1)
+	local right = translate_node(ctx, node[5][2], depth + 1)
 	
 	-- Arithmetic operators
 	if operator == "+" then
@@ -494,8 +494,8 @@ register_handler("binary_expression", function(ctx, node, depth)
 end)
 
 register_handler("unary_expression", function(ctx, node, depth)
-	local operator = node.value
-	local translated_operand = translate_node(ctx, node.ordered_children[1], depth + 1)
+	local operator = node[2]
+	local translated_operand = translate_node(ctx, node[5][1], depth + 1)
 	
 	if operator == "-" then
 		return "(-" .. translated_operand .. ")"
@@ -511,24 +511,24 @@ register_handler("unary_expression", function(ctx, node, depth)
 end)
 
 register_handler("member_expression", function(ctx, node, depth)
-	local base_node = node.ordered_children[1]
-	local member_node = node.ordered_children[2]
+	local base_node = node[5][1]
+	local member_node = node[5][2]
 	local base_code = translate_node(ctx, base_node, depth + 1)
 	
-	if base_node.type == "identifier" and lua_global_libraries[base_node.identifier] then
+	if base_node[1] == "identifier" and lua_global_libraries[base_node[3]] then
 		-- Use cached access for global library members
-		local cache_var = ctx:get_lib_cache(base_node.identifier, member_node.identifier)
+		local cache_var = ctx:get_lib_cache(base_node[3], member_node[3])
 		return cache_var
 	else
 		-- Optimization: cache member name string literal
-		local member_cache_var = ctx:get_string_cache(member_node.identifier)
+		local member_cache_var = ctx:get_string_cache(member_node[3])
 		return "lua_get_member(" .. base_code .. ", " .. member_cache_var .. ")"
 	end
 end)
 
 register_handler("table_index_expression", function(ctx, node, depth)
-	local base_node = node.ordered_children[1]
-	local index_node = node.ordered_children[2]
+	local base_node = node[5][1]
+	local index_node = node[5][2]
 	local translated_base = translate_node(ctx, base_node, depth + 1)
 	local translated_index = translate_node(ctx, index_node, depth + 1)
 	return "lua_get_member(" .. translated_base .. ", " .. translated_index .. ")"
@@ -536,7 +536,7 @@ end)
 
 register_handler("expression_list", function(ctx, node, depth)
 	local return_values = {}
-	for _, expr_node in ipairs(node.ordered_children or empty_table) do
+	for _, expr_node in ipairs(node[5] or empty_table) do
 		table.insert(return_values, translate_node(ctx, expr_node, depth + 1))
 	end
 	return "{" .. table.concat(return_values, ", ") .. "}"
@@ -545,8 +545,8 @@ end)
 register_handler("expression_statement", function(ctx, node, depth)
 	-- Expression statements (like function calls) are just expressions where we ignore the result
 	-- However, since we hoist side effects, we need to flush them.
-	local expr_node = node.ordered_children[1]
-	local is_call = (expr_node.type == "call_expression" or expr_node.type == "method_call_expression")
+	local expr_node = node[5][1]
+	local is_call = (expr_node[1] == "call_expression" or expr_node[1] == "method_call_expression")
 	
 	-- Pass multiret=true for calls to write directly to buffer, avoiding temp vars
 	local code = translate_node(ctx, expr_node, depth + 1, { multiret = is_call })
@@ -608,14 +608,14 @@ register_handler("table_constructor", function(ctx, node, depth)
 	local list_index = 1
 
 	for _, field_node in ipairs(fields) do
-		local key_child = field_node.ordered_children[1]
-		local value_child = field_node.ordered_children[2]
+		local key_child = field_node[5][1]
+		local value_child = field_node[5][2]
 
 		if value_child then
 			-- Explicit key-value pair
 			local key_part
-			if key_child.type == "identifier" then
-				key_part = "{" .. ctx:get_string_cache(key_child.identifier) .. ", "
+			if key_child[1] == "identifier" then
+				key_part = "{" .. ctx:get_string_cache(key_child[3]) .. ", "
 			else
 				key_part = "{" .. translate_node(ctx, key_child, depth + 1) .. ", "
 			end
@@ -624,10 +624,10 @@ register_handler("table_constructor", function(ctx, node, depth)
 		else
 			-- Implicit integer key (list-style)
 			value_child = key_child
-			if value_child.type == "varargs" then
+			if value_child[1] == "varargs" then
 				has_complex = true
 				-- We will handle varargs after initial construction
-				table.insert(complex_statements, { type = "varargs", node = value_child, index = list_index })
+				table.insert(complex_statements, { "varargs", value_child, list_index })
 			else
 				local value_part = translate_node(ctx, value_child, depth + 1)
 				table.insert(array, value_part)
@@ -646,10 +646,10 @@ register_handler("table_constructor", function(ctx, node, depth)
 
 	if has_complex then
 		for _, stmt in ipairs(complex_statements) do
-			if stmt.type == "varargs" then
-				local varargs_buf = translate_node(ctx, stmt.node, depth + 1, { multiret = true })
+			if stmt[1] == "varargs" then
+				local varargs_buf = translate_node(ctx, stmt[2], depth + 1, { multiret = true })
 				ctx:add_statement("for (size_t i = 0; i < " .. varargs_buf .. ".size(); ++i) {\n")
-				ctx:add_statement("  " .. temp_table_var .. "->set_item(LuaValue(static_cast<long long>(" .. stmt.index .. " + i)), " .. varargs_buf .. "[i]);\n")
+				ctx:add_statement("  " .. temp_table_var .. "->set_item(LuaValue(static_cast<long long>(" .. stmt[3] .. " + i)), " .. varargs_buf .. "[i]);\n")
 				ctx:add_statement("}\n")
 			end
 		end
@@ -666,7 +666,7 @@ end)
 local BuiltinCallHandlers = {}
 
 BuiltinCallHandlers["print"] = function(ctx, node, depth, opts)
-	local children = node.ordered_children
+	local children = node[5]
 	local count = #children
 	
 	for i = 2, count do
@@ -697,10 +697,28 @@ BuiltinCallHandlers["print"] = function(ctx, node, depth, opts)
 	end
 end
 
+BuiltinCallHandlers["table.insert"] = function(ctx, node, depth, opts)
+	local children = node[5]
+	local count = #children -- Includes the function node at index 1
+	if count == 3 then -- table.insert(t, v)
+		local table_code = translate_node(ctx, children[2], depth + 1)
+		local value_code = translate_node(ctx, children[3], depth + 1)
+		ctx:add_statement("lua_table_insert(" .. table_code .. ", " .. value_code .. ");\n")
+		return "std::monostate{}"
+	elseif count == 4 then -- table.insert(t, pos, v)
+		local table_code = translate_node(ctx, children[2], depth + 1)
+		local pos_code = translate_node(ctx, children[3], depth + 1)
+		local value_code = translate_node(ctx, children[4], depth + 1)
+        ctx:add_statement("lua_table_insert(" .. table_code .. ", get_long_long(" .. pos_code .. "), " .. value_code .. ");\n")
+		return "std::monostate{}"
+	end
+	return nil
+end
+
 BuiltinCallHandlers["require"] = function(ctx, node, depth, opts)
-	local module_name_node = node.ordered_children[2]
-	if module_name_node and module_name_node.type == "string" then
-		local module_name = module_name_node.value
+	local module_name_node = node[5][2]
+	if module_name_node and module_name_node[1] == "string" then
+		local module_name = module_name_node[2]
 		ctx:add_required_module(module_name)
 		local sanitized_module_name = module_name:gsub("%.", "_")
 		
@@ -718,8 +736,8 @@ BuiltinCallHandlers["require"] = function(ctx, node, depth, opts)
 end
 
 BuiltinCallHandlers["setmetatable"] = function(ctx, node, depth, opts)
-	local table_node = node.ordered_children[2]
-	local metatable_node = node.ordered_children[3]
+	local table_node = node[5][2]
+	local metatable_node = node[5][3]
 	local translated_table = translate_node(ctx, table_node, depth + 1)
 	local translated_metatable = translate_node(ctx, metatable_node, depth + 1)
 	
@@ -739,8 +757,8 @@ local StringMethodHandlers = {}
 local function handle_string_method(method_name, ctx, node, base_node, depth, opts)
 	-- Don't use build_args_code here to avoid duplication of side-effects for manually handled args.
 	local base_code = translate_node(ctx, base_node, depth + 1)
-	local pattern_code = translate_node(ctx, node.ordered_children[3], depth + 1)
-	local replacement_code = (method_name == "gsub") and translate_node(ctx, node.ordered_children[4], depth + 1) or nil
+	local pattern_code = translate_node(ctx, node[5][3], depth + 1)
+	local replacement_code = (method_name == "gsub") and translate_node(ctx, node[5][4], depth + 1) or nil
 	
 	local call_stmt = ""
 	if method_name == "match" then
@@ -768,23 +786,29 @@ StringMethodHandlers["find"] = function(ctx, node, base_node, depth, opts) retur
 StringMethodHandlers["gsub"] = function(ctx, node, base_node, depth, opts) return handle_string_method("gsub", ctx, node, base_node, depth, opts) end
 
 register_handler("call_expression", function(ctx, node, depth, opts)
-	local func_node = node.ordered_children[1]
+	local func_node = node[5][1]
 	
 	-- Check for string library methods via member expression
-	if func_node.type == "member_expression" then
-		local base = func_node.ordered_children[1]
-		local member = func_node.ordered_children[2]
-		if base.identifier == "string" then
-			local handler = StringMethodHandlers[member.identifier]
+	if func_node[1] == "member_expression" then
+		local base = func_node[5][1]
+		local member = func_node[5][2]
+		if base[3] == "string" then
+			local handler = StringMethodHandlers[member[3]]
 			if handler then
-				return handler(ctx, node, node.ordered_children[2], depth, opts)
+				return handler(ctx, node, node[5][2], depth, opts)
+			end
+		end
+		if base[3] == "table" then
+			local handler = BuiltinCallHandlers["table." .. member[3]]
+			if handler then
+				return handler(ctx, node, depth, opts)
 			end
 		end
 	end
 	
 	-- Check for built-in functions
-	if func_node.type == "identifier" then
-		local handler = BuiltinCallHandlers[func_node.identifier]
+	if func_node[1] == "identifier" then
+		local handler = BuiltinCallHandlers[func_node[3]]
 		if handler then
 			return handler(ctx, node, depth, opts)
 		end
@@ -800,11 +824,11 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 		is_alnum = "lua_is_alnum"
 	}
 	
-	if func_node.type == "identifier" then
-		local inline_func = InlineLocalFunctions[func_node.identifier]
-		if inline_func and ctx:is_declared(func_node.identifier) then
+	if func_node[1] == "identifier" then
+		local inline_func = InlineLocalFunctions[func_node[3]]
+		if inline_func and ctx:is_declared(func_node[3]) then
 			-- This is a local function with a known inline equivalent
-			local arg_node = node.ordered_children[2]
+			local arg_node = node[5][2]
 			if arg_node then
 				local arg_code = translate_node(ctx, arg_node, depth + 1)
 				-- Return the inline C++ call directly (returns bool)
@@ -824,16 +848,23 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	
 	-- 2. Resolve function
 	local translated_func_access
-	if func_node.type == "identifier" then
-		local decl_info = ctx:is_declared(func_node.identifier)
+	if func_node[1] == "identifier" then
+		local decl_info = ctx:is_declared(func_node[3])
 		if decl_info then
 			if type(decl_info) == "table" and decl_info.is_ptr then
 				translated_func_access = "(*" .. decl_info.ptr_name .. ")"
 			else
-				translated_func_access = sanitize_cpp_identifier(func_node.identifier)
+				translated_func_access = sanitize_cpp_identifier(func_node[3])
 			end
+		elseif func_node[3] == "insert" and ctx:is_declared("table") then
+            -- Check if it's table.insert(t, v) or t:insert(v)
+            -- This is tricky because we don't always know if 'table' is the global lib
+            -- But if it's not declared as a local, it's likely the global.
+            -- However, the handler above handles table.insert via BuiltinCallHandlers if it's a member expression.
+		    local func_cache_var = ctx:get_string_cache(func_node[3])
+			translated_func_access = "_G->get(" .. func_cache_var .. ")"
 		else
-			local func_cache_var = ctx:get_string_cache(func_node.identifier)
+			local func_cache_var = ctx:get_string_cache(func_node[3])
 			translated_func_access = "_G->get(" .. func_cache_var .. ")"
 		end
 	else
@@ -870,11 +901,14 @@ MethodCallHandlers["match"] = function(ctx, node, base_node, depth, opts) return
 MethodCallHandlers["find"] = function(ctx, node, base_node, depth, opts) return handle_string_method("find", ctx, node, base_node, depth, opts) end
 MethodCallHandlers["gsub"] = function(ctx, node, base_node, depth, opts) return handle_string_method("gsub", ctx, node, base_node, depth, opts) end
 
+StringMethodHandlers["byte"] = function(ctx, node, base_node, depth, opts) return MethodCallHandlers["byte"](ctx, node, base_node, depth, opts) end
+StringMethodHandlers["sub"] = function(ctx, node, base_node, depth, opts) return MethodCallHandlers["sub"](ctx, node, base_node, depth, opts) end
+
 MethodCallHandlers["byte"] = function(ctx, node, base_node, depth, opts)
 	-- Check for str:byte(i) or str:byte(i, i) pattern -> lua_string_byte_at(str, i)
-	local arg1 = node.ordered_children[3]
-	local arg2 = node.ordered_children[4]
-	local arg3 = node.ordered_children[5]
+	local arg1 = node[5][3]
+	local arg2 = node[5][4]
+	local arg3 = node[5][5]
 	
 	if arg1 and not arg2 then
 		-- str:byte(i) single char
@@ -882,34 +916,55 @@ MethodCallHandlers["byte"] = function(ctx, node, base_node, depth, opts)
 		local base_code = translate_node(ctx, base_node, depth + 1)
 		
 		if opts.multiret then
-			ctx:add_statement(RET_BUF_NAME .. ".clear(); " .. RET_BUF_NAME .. ".push_back(lua_string_byte_at(" .. base_code .. ", " .. arg1_code .. "));\n")
+			ctx:add_statement("lua_string_byte(" .. base_code .. ", " .. arg1_code .. ", " .. arg1_code .. ", " .. RET_BUF_NAME .. ");\n")
 			return RET_BUF_NAME
 		else
-			return "lua_string_byte_at(" .. base_code .. ", " .. arg1_code .. ")"
+			return "lua_string_byte_at_raw(" .. base_code .. ", " .. arg1_code .. ")"
 		end
 	elseif arg1 and arg2 and not arg3 then
-		-- str:byte(i, i) single char
+		-- str:byte(i, j)
 		local arg1_code = translate_node(ctx, arg1, depth + 1)
 		local arg2_code = translate_node(ctx, arg2, depth + 1)
 		
 		if arg1_code == arg2_code then
 			local base_code = translate_node(ctx, base_node, depth + 1)
 			if opts.multiret then
-				ctx:add_statement(RET_BUF_NAME .. ".clear(); " .. RET_BUF_NAME .. ".push_back(lua_string_byte_at(" .. base_code .. ", " .. arg1_code .. "));\n")
+				ctx:add_statement("lua_string_byte(" .. base_code .. ", " .. arg1_code .. ", " .. arg1_code .. ", " .. RET_BUF_NAME .. ");\n")
 				return RET_BUF_NAME
 			else
-				return "lua_string_byte_at(" .. base_code .. ", " .. arg1_code .. ")"
+				return "lua_string_byte_at_raw(" .. base_code .. ", " .. arg1_code .. ")"
 			end
 		end
 	end
+    
+    -- Fallback to the general library call if possible
+    local base_code = translate_node(ctx, base_node, depth + 1)
+    local args_code, is_vector = build_args_code(ctx, node, 3, depth, base_code)
+    -- We can't easily call the library method here without risking the same overhead we're trying to avoid.
+    -- But since this is a method call, it will normally fall through to the generic method call handler below.
 	return nil
+end
+
+MethodCallHandlers["insert"] = function(ctx, node, base_node, depth, opts)
+    local arg1 = node[5][3]
+    local arg2 = node[5][4]
+    local arg3 = node[5][5]
+    
+    if arg1 and not arg2 then
+        -- t:insert(v)
+        local base_code = translate_node(ctx, base_node, depth + 1)
+        local value_code = translate_node(ctx, arg1, depth + 1)
+        ctx:add_statement("lua_table_insert(" .. base_code .. ", " .. value_code .. ");\n")
+        return "std::monostate{}"
+    end
+    return nil
 end
 
 MethodCallHandlers["sub"] = function(ctx, node, base_node, depth, opts)
 	-- Check for str:sub(i, i) pattern -> lua_string_char_at(str, i)
-	local arg1 = node.ordered_children[3]
-	local arg2 = node.ordered_children[4]
-	local arg3 = node.ordered_children[5]
+	local arg1 = node[5][3]
+	local arg2 = node[5][4]
+	local arg3 = node[5][5]
 	
 	if arg1 and arg2 and not arg3 then
 		-- We optimize if we can prove args are identical, or just simple vars
@@ -926,14 +981,20 @@ MethodCallHandlers["sub"] = function(ctx, node, base_node, depth, opts)
 				return "lua_string_char_at(" .. base_code .. ", " .. arg1_code .. ")"
 			end
 		end
+        
+        -- Optimization for general sub(i, j)
+        local base_code = translate_node(ctx, base_node, depth + 1)
+        if not opts.multiret then
+            return "lua_string_sub(" .. base_code .. ", get_long_long(" .. arg1_code .. "), get_long_long(" .. arg2_code .. "))"
+        end
 	end
 	return nil
 end
 
 register_handler("method_call_expression", function(ctx, node, depth, opts)
-	local base_node = node.ordered_children[1]
-	local method_node = node.ordered_children[2]
-	local method_name = method_node.identifier
+	local base_node = node[5][1]
+	local method_node = node[5][2]
+	local method_name = method_node[3]
 	local translated_base = translate_node(ctx, base_node, depth + 1)
 	
 	-- Check for special method handlers
@@ -974,20 +1035,20 @@ end)
 --------------------------------------------------------------------------------
 
 register_handler("local_declaration", function(ctx, node, depth)
-	local var_list_node = node.ordered_children[1]
-	local expr_list_node = node.ordered_children[2]
+	local var_list_node = node[5][1]
+	local expr_list_node = node[5][2]
 	
-	local num_vars = #(var_list_node.ordered_children or empty_table)
-	local num_exprs = expr_list_node and #(expr_list_node.ordered_children or empty_table) or 0
+	local num_vars = #(var_list_node[5] or empty_table)
+	local num_exprs = expr_list_node and #(expr_list_node[5] or empty_table) or 0
 	
 	local cpp_code = ctx:flush_statements() -- Flush any previous statements
 	
 	-- Optimization: Single variable, single function call
 	if num_vars == 1 and num_exprs == 1 then
-		local expr_node = expr_list_node.ordered_children[1]
-		if expr_node.type == "call_expression" or expr_node.type == "method_call_expression" then
-			local var_node = var_list_node.ordered_children[1]
-			local var_name = sanitize_cpp_identifier(var_node.identifier)
+		local expr_node = expr_list_node[5][1]
+		if expr_node[1] == "call_expression" or expr_node[1] == "method_call_expression" then
+			local var_node = var_list_node[5][1]
+			local var_name = sanitize_cpp_identifier(var_node[3])
 			
 			-- Translate call with multiret=false
 			local val = translate_node(ctx, expr_node, depth + 1, { multiret = false })
@@ -995,7 +1056,7 @@ register_handler("local_declaration", function(ctx, node, depth)
 			
 			cpp_code = cpp_code .. stmts
 			cpp_code = cpp_code .. "LuaValue " .. var_name .. " = " .. val .. ";\n"
-			ctx:declare_variable(var_node.identifier)
+			ctx:declare_variable(var_node[3])
 			return cpp_code
 		end
 	end
@@ -1007,8 +1068,8 @@ register_handler("local_declaration", function(ctx, node, depth)
 	
 	-- Check if we need to handle a multi-ret function call
 	for i = 1, num_exprs do
-		local expr_node = expr_list_node.ordered_children[i]
-		if (expr_node.type == "call_expression" or expr_node.type == "method_call_expression") and i == num_exprs and num_vars > i then
+		local expr_node = expr_list_node[5][i]
+		if (expr_node[1] == "call_expression" or expr_node[1] == "method_call_expression") and i == num_exprs and num_vars > i then
 			has_function_call_expr = true
 			first_call_expr_index = i
 			break
@@ -1019,7 +1080,7 @@ register_handler("local_declaration", function(ctx, node, depth)
 	
 	-- Translate expressions
 	for i = 1, num_exprs do
-		local expr_node = expr_list_node.ordered_children[i]
+		local expr_node = expr_list_node[5][i]
 		if has_function_call_expr and i == first_call_expr_index then
 			-- This is the last expression and it's a call, capture the buffer
 			local ret_buf = translate_node(ctx, expr_node, depth + 1, { multiret = true })
@@ -1039,8 +1100,8 @@ register_handler("local_declaration", function(ctx, node, depth)
 	
 	-- Declare variables
 	for i = 1, num_vars do
-		local var_node = var_list_node.ordered_children[i]
-		local var_name = sanitize_cpp_identifier(var_node.identifier)
+		local var_node = var_list_node[5][i]
+		local var_name = sanitize_cpp_identifier(var_node[3])
 		local initial_value_code = "std::monostate{}"
 		
 		if i < first_call_expr_index or (not has_function_call_expr and i <= num_exprs) then
@@ -1051,18 +1112,18 @@ register_handler("local_declaration", function(ctx, node, depth)
 		end
 		
 		cpp_code = cpp_code .. "LuaValue " .. var_name .. " = " .. initial_value_code .. ";\n"
-		ctx:declare_variable(var_node.identifier)
+		ctx:declare_variable(var_node[3])
 	end
 	
 	return cpp_code
 end)
 
 register_handler("assignment", function(ctx, node, depth)
-	local var_list_node = node.ordered_children[1]
-	local expr_list_node = node.ordered_children[2]
+	local var_list_node = node[5][1]
+	local expr_list_node = node[5][2]
 	
-	local num_vars = #(var_list_node.ordered_children or empty_table)
-	local num_exprs = #(expr_list_node.ordered_children or empty_table)
+	local num_vars = #(var_list_node[5] or empty_table)
+	local num_exprs = #(expr_list_node[5] or empty_table)
 	
 	local cpp_code = ctx:flush_statements()
 	
@@ -1072,8 +1133,8 @@ register_handler("assignment", function(ctx, node, depth)
 	local first_call_expr_index = -1
 	
 	for i = 1, num_exprs do
-		local expr_node = expr_list_node.ordered_children[i]
-		if (expr_node.type == "call_expression" or expr_node.type == "method_call_expression") and i == num_exprs and num_vars > i then
+		local expr_node = expr_list_node[5][i]
+		if (expr_node[1] == "call_expression" or expr_node[1] == "method_call_expression") and i == num_exprs and num_vars > i then
 			has_function_call_expr = true
 			first_call_expr_index = i
 			break
@@ -1083,7 +1144,7 @@ register_handler("assignment", function(ctx, node, depth)
 	local values = {}
 	
 	for i = 1, num_exprs do
-		local expr_node = expr_list_node.ordered_children[i]
+		local expr_node = expr_list_node[5][i]
 		if has_function_call_expr and i == first_call_expr_index then
 			local ret_buf = translate_node(ctx, expr_node, depth + 1, { multiret = true })
 			local stmts = ctx:flush_statements()
@@ -1098,7 +1159,7 @@ register_handler("assignment", function(ctx, node, depth)
 	end
 	
 	for i = 1, num_vars do
-		local var_node = var_list_node.ordered_children[i]
+		local var_node = var_list_node[5][i]
 		local value_code = "std::monostate{}"
 		
 		if i < first_call_expr_index or (not has_function_call_expr and i <= num_exprs) then
@@ -1122,8 +1183,8 @@ local function translate_function_body(ctx, node, depth)
 	-- Start capturing statements for the function body to isolate them from outer scope
 	ctx:capture_start()
 
-	local params_node = node.ordered_children[1]
-	local body_node = node.ordered_children[2]
+	local params_node = node[5][1]
+	local body_node = node[5][2]
 	
 	local prev_param_count = ctx.current_function_fixed_params_count
 	ctx.current_function_fixed_params_count = 0
@@ -1135,7 +1196,7 @@ local function translate_function_body(ctx, node, depth)
 	local param_index_offset = 0
 	
 	-- Handle method 'self' parameter
-	if node.type == "method_declaration" or node.is_method then
+	if node[1] == "method_declaration" or node.is_method then
 		params_extraction = params_extraction .. "    LuaValue self = (n_args > 0 ? args[0] : LuaValue(std::monostate{}));\n"
 		ctx:declare_variable("self")
 		param_index_offset = 1
@@ -1144,10 +1205,10 @@ local function translate_function_body(ctx, node, depth)
 	ctx.current_function_fixed_params_count = param_index_offset
 	
 	-- Extract parameters
-	for i, param_node in ipairs(params_node.ordered_children or empty_table) do
-		if param_node.type == "identifier" then
+	for i, param_node in ipairs(params_node[5] or empty_table) do
+		if param_node[1] == "identifier" then
 			ctx.current_function_fixed_params_count = ctx.current_function_fixed_params_count + 1
-			local param_name = param_node.identifier
+			local param_name = param_node[3]
 			local vector_idx = i + param_index_offset - 1
 			params_extraction = params_extraction .. "    LuaValue " .. param_name .. " = (n_args > " .. vector_idx .. " ? args[" .. vector_idx .. "] : LuaValue(std::monostate{}));\n"
 			ctx:declare_variable(param_name)
@@ -1182,33 +1243,33 @@ register_handler("function_declaration", function(ctx, node, depth)
 	local ptr_name = nil
 	
 	-- Handle local recursive function with pointer
-	if node.is_local and node.identifier then
-		ptr_name = node.identifier .. "_ptr_" .. ctx:get_unique_id()
-		local sanitized_var_name = sanitize_cpp_identifier(node.identifier)
+	if node[6] and node[3] then
+		ptr_name = node[3] .. "_ptr_" .. ctx:get_unique_id()
+		local sanitized_var_name = sanitize_cpp_identifier(node[3])
 		ctx:declare_variable(sanitized_var_name, { is_ptr = true, ptr_name = ptr_name })
 	end
 	
 	local lambda_code = translate_function_body(ctx, node, depth)
 	
 	-- Restore variable declaration for non-pointer access
-	if node.is_local and node.identifier then
-		local var_name = sanitize_cpp_identifier(node.identifier)
-		ctx:declare_variable(node.identifier)
+	if node[6] and node[3] then
+		local var_name = sanitize_cpp_identifier(node[3])
+		ctx:declare_variable(node[3])
 	end
 	
 	-- Check for table member function (e.g., function M.greet(name))
-	if node.method_name ~= nil then
+	if node[7] ~= nil then
 		local prev_stmts = ctx:flush_statements()
-		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node.identifier) .. ")->set(\"" .. node.method_name .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
-	elseif node.identifier ~= nil then
+		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node[7] .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
+	elseif node[3] ~= nil then
 		local prev_stmts = ctx:flush_statements()
-		if node.is_local then
-			local var_name = sanitize_cpp_identifier(node.identifier)
+		if node[6] then
+			local var_name = sanitize_cpp_identifier(node[3])
 			return prev_stmts .. "auto " .. ptr_name .. " = std::make_shared<LuaValue>();\n" ..
 				"*" .. ptr_name .. " = std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. ");\n" ..
 				"LuaValue " .. var_name .. " = *" .. ptr_name .. ";"
 		else
-			return prev_stmts .. "_G->set(\"" .. node.identifier .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
+			return prev_stmts .. "_G->set(\"" .. node[3] .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
 		end
 	else
 		-- Anonymous function (expression context)
@@ -1220,8 +1281,8 @@ register_handler("method_declaration", function(ctx, node, depth)
 	local lambda_code = translate_function_body(ctx, node, depth)
 	local prev_stmts = ctx:flush_statements()
 	
-	if node.method_name ~= nil then
-		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node.identifier) .. ")->set(\"" .. node.method_name .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
+	if node[7] ~= nil then
+		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node[7] .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
 	else
 		return prev_stmts .. "std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. ")"
 	end
@@ -1235,12 +1296,12 @@ register_handler("if_statement", function(ctx, node, depth)
 	local cpp_code = ctx:flush_statements()
 	local open_count = 0
 	
-	for i, clause in ipairs(node.ordered_children or empty_table) do
-		if clause.type == "if_clause" then
+	for i, clause in ipairs(node[5] or empty_table) do
+		if clause[1] == "if_clause" then
 			ctx:capture_start()
-			local cond = translate_node(ctx, clause.ordered_children[1], depth + 1)
+			local cond = translate_node(ctx, clause[5][1], depth + 1)
 			local pre = ctx:capture_end()
-			local body = translate_node(ctx, clause.ordered_children[2], depth + 1, { no_braces = true })
+			local body = translate_node(ctx, clause[5][2], depth + 1, { no_braces = true })
 			
 			if pre ~= "" then
 				cpp_code = cpp_code .. "{\n" .. pre .. "if (is_lua_truthy(" .. cond .. ")) {\n" .. body .. "}"
@@ -1248,11 +1309,11 @@ register_handler("if_statement", function(ctx, node, depth)
 			else
 				cpp_code = cpp_code .. "if (is_lua_truthy(" .. cond .. ")) {\n" .. body .. "}"
 			end
-		elseif clause.type == "elseif_clause" then
+		elseif clause[1] == "elseif_clause" then
 			ctx:capture_start()
-			local cond = translate_node(ctx, clause.ordered_children[1], depth + 1)
+			local cond = translate_node(ctx, clause[5][1], depth + 1)
 			local pre = ctx:capture_end()
-			local body = translate_node(ctx, clause.ordered_children[2], depth + 1, { no_braces = true })
+			local body = translate_node(ctx, clause[5][2], depth + 1, { no_braces = true })
 			
 			if pre ~= "" then
 				cpp_code = cpp_code .. " else {\n" .. pre .. "if (is_lua_truthy(" .. cond .. ")) {\n" .. body .. "}"
@@ -1260,8 +1321,8 @@ register_handler("if_statement", function(ctx, node, depth)
 			else
 				cpp_code = cpp_code .. " else if (is_lua_truthy(" .. cond .. ")) {\n" .. body .. "}"
 			end
-		elseif clause.type == "else_clause" then
-			local body = translate_node(ctx, clause.ordered_children[1], depth + 1, { no_braces = true })
+		elseif clause[1] == "else_clause" then
+			local body = translate_node(ctx, clause[5][1], depth + 1, { no_braces = true })
 			cpp_code = cpp_code .. " else {\n" .. body .. "}"
 		end
 	end
@@ -1277,10 +1338,10 @@ register_handler("while_statement", function(ctx, node, depth)
 	local prev_stmts = ctx:flush_statements()
 	
 	ctx:capture_start()
-	local condition = translate_node(ctx, node.ordered_children[1], depth + 1)
+	local condition = translate_node(ctx, node[5][1], depth + 1)
 	local pre_stmts = ctx:capture_end()
 	
-	local body = translate_node(ctx, node.ordered_children[2], depth + 1, { no_braces = true })
+	local body = translate_node(ctx, node[5][2], depth + 1, { no_braces = true })
 	
 	if pre_stmts ~= "" then
 		return prev_stmts .. "while (true) {\n" .. pre_stmts .. "if (!is_lua_truthy(" .. condition .. ")) break;\n" .. body .. "}\n"
@@ -1292,8 +1353,8 @@ end)
 register_handler("repeat_until_statement", function(ctx, node, depth)
 	local prev_stmts = ctx:flush_statements()
 	
-	local block_node = node.ordered_children[1]
-	local condition_node = node.ordered_children[2]
+	local block_node = node[5][1]
+	local condition_node = node[5][2]
 	
 	local body = translate_node(ctx, block_node, depth + 1, { no_braces = true })
 	
@@ -1312,20 +1373,20 @@ register_handler("break_statement", function(ctx, node, depth)
 end)
 
 register_handler("label_statement", function(ctx, node, depth)
-	return ctx:flush_statements() .. node.value .. ":;\n"
+	return ctx:flush_statements() .. node[2] .. ":;\n"
 end)
 
 register_handler("goto_statement", function(ctx, node, depth)
-	return ctx:flush_statements() .. "goto " .. node.value .. ";\n"
+	return ctx:flush_statements() .. "goto " .. node[2] .. ";\n"
 end)
 
 
 register_handler("return_statement", function(ctx, node, depth)
-	local expr_list_node = node.ordered_children and node.ordered_children[1]
+	local expr_list_node = node[5] and node[5][1]
 	local cpp_code = ctx:flush_statements()
 	
-	if expr_list_node and #(expr_list_node.ordered_children or empty_table) > 0 then
-		for _, expr_node in ipairs(expr_list_node.ordered_children or empty_table) do
+	if expr_list_node and #(expr_list_node[5] or empty_table) > 0 then
+		for _, expr_node in ipairs(expr_list_node[5] or empty_table) do
 			local val = translate_node(ctx, expr_node, depth + 1)
 			local stmts = ctx:flush_statements()
 			cpp_code = cpp_code .. stmts .. "out_result.push_back(" .. val .. ");\n"
@@ -1341,9 +1402,9 @@ end)
 register_handler("for_numeric_statement", function(ctx, node, depth)
 	local prev_stmts = ctx:flush_statements()
 	
-	local var_name = sanitize_cpp_identifier(node.ordered_children[1].identifier)
-	local start_node = node.ordered_children[2]
-	local end_node = node.ordered_children[3]
+	local var_name = sanitize_cpp_identifier(node[5][1][3])
+	local start_node = node[5][2]
+	local end_node = node[5][3]
 	
 	-- Hoist start/end/step calculations to ensure order of evaluation (start -> end -> step)
 	-- and to catch any function calls passed as arguments.
@@ -1358,44 +1419,44 @@ register_handler("for_numeric_statement", function(ctx, node, depth)
 	local step_node = nil
 	local step_stmts = ""
 	
-	if #(node.ordered_children or empty_table) == 5 then
-		step_node = node.ordered_children[4]
+	if #(node[5] or empty_table) == 5 then
+		step_node = node[5][4]
 		step_expr_code = translate_node(ctx, step_node, depth + 1)
 		step_stmts = ctx:flush_statements()
-		body_node = node.ordered_children[5]
+		body_node = node[5][5]
 	else
 		step_expr_code = nil
-		body_node = node.ordered_children[4]
+		body_node = node[5][4]
 	end
 	
-	ctx:declare_variable(node.ordered_children[1].identifier)
+	ctx:declare_variable(node[5][1][3])
 	
 	-- Optimization for integer loops (literals only)
-	local all_integers = (start_node.type == "integer") and (end_node.type == "integer")
-	local step_is_one = (step_node == nil) or (step_node.type == "integer" and tonumber(step_node.value) == 1)
-	local step_is_neg_one = (step_node and step_node.type == "integer" and tonumber(step_node.value) == -1)
-	local step_is_integer = (step_node == nil) or (step_node.type == "integer")
+	local all_integers = (start_node[1] == "integer") and (end_node[1] == "integer")
+	local step_is_one = (step_node == nil) or (step_node[1] == "integer" and tonumber(step_node[2]) == 1)
+	local step_is_neg_one = (step_node and step_node[1] == "integer" and tonumber(step_node[2]) == -1)
+	local step_is_integer = (step_node == nil) or (step_node[1] == "integer")
 	
 	-- Combine hoisted statements (side effects of the expressions)
 	local setup_code = prev_stmts .. "{\n" .. start_stmts .. end_stmts .. step_stmts
 	
 	if all_integers and step_is_one then
-		local start_val = tostring(start_node.value)
-		local end_val = tostring(end_node.value)
+		local start_val = tostring(start_node[2])
+		local end_val = tostring(end_node[2])
 		-- Direct long long iteration, no inner LuaValue casting
 		return setup_code .. "for (long long " .. var_name .. " = " .. start_val .. "LL; " .. var_name .. " <= " .. end_val .. "LL; ++" .. var_name .. ") {\n" ..
 			translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "}}\n"
 
 	elseif all_integers and step_is_neg_one then
-		local start_val = tostring(start_node.value)
-		local end_val = tostring(end_node.value)
+		local start_val = tostring(start_node[2])
+		local end_val = tostring(end_node[2])
 		return setup_code .. "for (long long " .. var_name .. " = " .. start_val .. "LL; " .. var_name .. " >= " .. end_val .. "LL; --" .. var_name .. ") {\n" ..
 			translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "}}\n"
 
 	elseif all_integers and step_is_integer then
-		local start_val = tostring(start_node.value)
-		local end_val = tostring(end_node.value)
-		local step_val = tostring(step_node.value)
+		local start_val = tostring(start_node[2])
+		local end_val = tostring(end_node[2])
+		local step_val = tostring(step_node[2])
 		local condition = "(" .. step_val .. " >= 0 ? " .. var_name .. " <= " .. end_val .. "LL : " .. var_name .. " >= " .. end_val .. "LL)"
 		return setup_code .. "for (long long " .. var_name .. " = " .. start_val .. "LL; " .. condition .. "; " .. var_name .. " += " .. step_val .. "LL) {\n" ..
 			translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "}}\n"
@@ -1424,15 +1485,15 @@ end)
 register_handler("for_generic_statement", function(ctx, node, depth)
 	local prev_stmts = ctx:flush_statements()
 	
-	local var_list_node = node.ordered_children[1]
-	local expr_list_node = node.ordered_children[2]
-	local body_node = node.ordered_children[3]
+	local var_list_node = node[5][1]
+	local expr_list_node = node[5][2]
+	local body_node = node[5][3]
 	local loop_vars = {}
 	
-	for _, var_node in ipairs(var_list_node.ordered_children or empty_table) do
-		local sanitized_var = sanitize_cpp_identifier(var_node.identifier)
+	for _, var_node in ipairs(var_list_node[5] or empty_table) do
+		local sanitized_var = sanitize_cpp_identifier(var_node[3])
 		table.insert(loop_vars, sanitized_var)
-		ctx:declare_variable(var_node.identifier)
+		ctx:declare_variable(var_node[3])
 	end
 	
 	local iter_func_var = "iter_func_" .. ctx:get_unique_id()
@@ -1443,8 +1504,8 @@ register_handler("for_generic_statement", function(ctx, node, depth)
 	
 	local cpp_code = prev_stmts .. "{\n" -- Open block for loop scope
 	
-	if #(expr_list_node.ordered_children or empty_table) == 1 and (expr_list_node.ordered_children[1].type == "call_expression" or expr_list_node.ordered_children[1].type == "method_call_expression") then
-		local iterator_call_buf = translate_node(ctx, expr_list_node.ordered_children[1], depth + 1, { multiret = true })
+	if #(expr_list_node[5] or empty_table) == 1 and (expr_list_node[5][1][1] == "call_expression" or expr_list_node[5][1][1] == "method_call_expression") then
+		local iterator_call_buf = translate_node(ctx, expr_list_node[5][1], depth + 1, { multiret = true })
 		local stmts = ctx:flush_statements()
 		cpp_code = cpp_code .. stmts
 		cpp_code = cpp_code .. "const LuaValueVector& " .. results_var .. " = " .. iterator_call_buf .. ";\n"
@@ -1616,17 +1677,17 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 			local explicit_return_found = false
 			local explicit_return_value = "LuaObject::create()"
 			
-			for _, child in ipairs(ast_root.ordered_children or empty_table) do
-				if child.type == "local_declaration" and #(child.ordered_children or empty_table) >= 2 and child.ordered_children[1].type == "variable" and child.ordered_children[2].type == "table_constructor" then
-					module_identifier = child.ordered_children[1].identifier
+			for _, child in ipairs(ast_root[5] or empty_table) do
+				if child[1] == "local_declaration" and #(child[5] or empty_table) >= 2 and child[5][1][1] == "variable" and child[5][2][1] == "table_constructor" then
+					module_identifier = child[5][1][3]
 					module_body_code = module_body_code .. translate_node(ctx, child, 0) .. "\n"
-				elseif child.type == "return_statement" then
+				elseif child[1] == "return_statement" then
 					explicit_return_found = true
-					local return_expr_node = child.ordered_children[1]
+					local return_expr_node = child[5][1]
 					if return_expr_node then
-						if return_expr_node.type == "expression_list" then
+						if return_expr_node[1] == "expression_list" then
 							local return_values = {}
-							for _, expr_node in ipairs(return_expr_node.ordered_children or empty_table) do
+							for _, expr_node in ipairs(return_expr_node[5] or empty_table) do
 								table.insert(return_values, translate_node(ctx, expr_node, 0))
 							end
 							explicit_return_value = table.concat(return_values, ", ")

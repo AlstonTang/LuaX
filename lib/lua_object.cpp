@@ -15,8 +15,19 @@
 // String Intern Pool
 // ==========================================
 
-static std::unordered_set<std::string>& get_string_pool() {
-    static std::unordered_set<std::string> pool;
+struct TransparentStringHash {
+    using is_transparent = void;
+    size_t operator()(std::string_view sv) const { return std::hash<std::string_view>{}(sv); }
+    size_t operator()(const std::string& s) const { return std::hash<std::string>{}(s); }
+};
+
+struct TransparentStringEq {
+    using is_transparent = void;
+    bool operator()(std::string_view lhs, std::string_view rhs) const { return lhs == rhs; }
+};
+
+static std::unordered_set<std::string, TransparentStringHash, TransparentStringEq>& get_string_pool() {
+    static std::unordered_set<std::string, TransparentStringHash, TransparentStringEq> pool;
     return pool;
 }
 
@@ -26,15 +37,35 @@ static std::mutex& get_pool_mutex() {
 }
 
 std::string_view LuaObject::intern(std::string_view sv) {
+    if (sv.empty()) return "";
+    
+    // Fast MRU (Most Recently Used) thread-local cache
+    struct CacheEntry {
+        std::string_view key;
+        std::string_view val;
+    };
+    constexpr size_t CACHE_SIZE = 64; 
+    thread_local CacheEntry cache[CACHE_SIZE] = {};
+    
+    size_t h = std::hash<std::string_view>{}(sv);
+    size_t idx = h % CACHE_SIZE;
+    if (cache[idx].key == sv) [[likely]] return cache[idx].val;
+
     auto& pool = get_string_pool();
     auto& mtx = get_pool_mutex();
     std::lock_guard<std::mutex> lock(mtx);
-    auto it = pool.find(std::string(sv));
-    if (it != pool.end()) {
-        return *it;
+    
+    auto it_pool = pool.find(sv);
+    if (it_pool != pool.end()) {
+        std::string_view pooled_view = *it_pool;
+        cache[idx] = {pooled_view, pooled_view}; // Use the stable view for both key and val
+        return pooled_view;
     }
+    
     auto [inserted_it, success] = pool.insert(std::string(sv));
-    return *inserted_it;
+    std::string_view pooled_view = *inserted_it;
+    cache[idx] = {pooled_view, pooled_view};
+    return pooled_view;
 }
 
 // ==========================================
@@ -60,6 +91,24 @@ std::string value_to_key_string(const LuaValue& key) {
 // ==========================================
 // LuaObject Class Implementation
 // ==========================================
+
+static char static_chars[256];
+static LuaValue single_char_cache[256];
+static bool char_cache_initialized = false;
+
+static void ensure_char_cache() {
+    if (char_cache_initialized) return;
+    for (int i = 0; i < 256; ++i) {
+        static_chars[i] = static_cast<char>(i);
+        single_char_cache[i] = std::string_view(&static_chars[i], 1);
+    }
+    char_cache_initialized = true;
+}
+
+const LuaValue& LuaObject::get_single_char(unsigned char c) {
+    ensure_char_cache();
+    return single_char_cache[c];
+}
 
 LuaValue LuaObject::get(std::string_view key) {
 	return get_item(key);
@@ -192,7 +241,6 @@ LuaValue LuaObject::get_item(std::string_view key) {
 }
 
 void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
-	last_key_ptr = nullptr;
 	long long idx = -1;
 	bool is_int = false;
 
@@ -247,7 +295,7 @@ void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
 }
 
 void LuaObject::set_item(std::string_view key, const LuaValue& value) {
-	last_key_ptr = nullptr;
+    // Simplified set_item
 	bool key_exists = find_prop(key) != nullptr;
 
 	if (!key_exists) {
@@ -273,7 +321,7 @@ void LuaObject::set_item(std::string_view key, const LuaValue& value) {
 }
 
 void LuaObject::set_item(long long idx, const LuaValue& value) {
-	last_key_ptr = nullptr;
+    // Simplified set_item
 	if (idx >= 1) {
 		if (idx <= (long long)array_part.size()) {
 			array_part[idx - 1] = value;
@@ -351,7 +399,8 @@ void LuaObject::set_item(long long idx, const LuaValue& value) {
 LuaValue* LuaObject::find_prop(const LuaValue& key) {
 	if (properties) {
 		auto it = properties->find(key);
-		return it != properties->end() ? &it->second : nullptr;
+		if (it != properties->end()) return &it->second;
+		return nullptr;
 	}
 	for (auto& p : small_props) {
 		if (LuaValueEq{}(p.first, key)) return &p.second;
@@ -472,6 +521,28 @@ void LuaObject::set_prop(std::string_view key, const LuaValue& value) {
 
 void LuaObject::set_item(const LuaValue& key, const LuaValueVector& value) {
 	set_item(key, value.empty() ? LuaValue(std::monostate{}) : value[0]);
+}
+
+void LuaObject::table_insert(const LuaValue& value) {
+    array_part.push_back(value);
+}
+
+void LuaObject::table_insert(long long pos, const LuaValue& value) {
+    if (pos >= 1 && pos <= static_cast<long long>(array_part.size() + 1)) {
+        array_part.insert(array_part.begin() + (pos - 1), value);
+    }
+}
+
+void lua_table_insert(const LuaValue& t, const LuaValue& v) {
+    if (auto obj = std::get_if<std::shared_ptr<LuaObject>>(&t)) {
+        (*obj)->table_insert(v);
+    }
+}
+
+void lua_table_insert(const LuaValue& t, long long pos, const LuaValue& v) {
+    if (auto obj = std::get_if<std::shared_ptr<LuaObject>>(&t)) {
+        (*obj)->table_insert(pos, v);
+    }
 }
 
 // ==========================================
@@ -1042,10 +1113,17 @@ void lua_tonumber(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		return;
 	}
 
+	std::string_view s;
 	if (const std::string* pStr = std::get_if<std::string>(&val)) {
-		const std::string& s = *pStr;
+		s = *pStr;
+	} else if (const std::string_view* pSV = std::get_if<std::string_view>(&val)) {
+		s = *pSV;
+	} else {
+		out.assign({std::monostate{}});
+		return;
+	}
 
-		if (s.empty()) return out.assign({0.0});
+	if (s.empty()) return out.assign({std::monostate{}});
 
 		// 3. Use std::from_chars (C++17).
 		// It does not allocate, does not throw, and ignores locale.
@@ -1061,7 +1139,6 @@ void lua_tonumber(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 			out.assign({result});
 			return;
 		}
-	}
 
 	out.assign({std::monostate{}});
 	return; // nil
