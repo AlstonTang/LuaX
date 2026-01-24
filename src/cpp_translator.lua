@@ -75,8 +75,7 @@ function TranslatorContext:new(translator, for_header, current_module_object_nam
 	ctx.string_literals = {}
 	ctx.global_identifier_caches = {}
 	ctx.current_return_stmt = is_main_script and "return 0;" or "return out_result;"
-	
-	-- Stack of statement lists for hoisting side effects
+	ctx.uses_ret_buf = false
 	ctx.stmt_stack = {{}} 
 	return ctx
 end
@@ -276,22 +275,25 @@ local function build_args_code(ctx, node, start_index, depth, self_arg)
 			end
 		end
 		
-		return vec_var, true -- Return variable name and True indicating it's a vector
+		return vec_var, true, (count - start_index + 1 + (self_arg and 1 or 0)) -- Return variable name, True, and Count
 	else
 		-- Simple comma-separated list
 		local arg_list = {}
+		local arg_count = 0
 		
 		if self_arg then
 			table.insert(arg_list, self_arg)
+			arg_count = arg_count + 1
 		end
 		
 		for i = start_index, count do
 			-- Normal translation returns a temporary variable name or literal
 			local arg_val = translate_node(ctx, children[i], depth + 1)
 			table.insert(arg_list, arg_val)
+			arg_count = arg_count + 1
 		end
 		
-		return table.concat(arg_list, ", "), false -- Return list string and False
+		return table.concat(arg_list, ", "), false, arg_count -- Return list string, False, and Count
 	end
 end
 
@@ -844,7 +846,7 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	
 	-- Generic function call
 	-- 1. Build arguments (this hoists arg evaluation statements)
-	local args_code, is_vector = build_args_code(ctx, node, 2, depth, nil)
+	local args_code, is_vector, num_args = build_args_code(ctx, node, 2, depth, nil)
 	
 	-- 2. Resolve function
 	local translated_func_access
@@ -857,10 +859,6 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 				translated_func_access = sanitize_cpp_identifier(func_node[3])
 			end
 		elseif func_node[3] == "insert" and ctx:is_declared("table") then
-            -- Check if it's table.insert(t, v) or t:insert(v)
-            -- This is tricky because we don't always know if 'table' is the global lib
-            -- But if it's not declared as a local, it's likely the global.
-            -- However, the handler above handles table.insert via BuiltinCallHandlers if it's a member expression.
 		    local func_cache_var = ctx:get_string_cache(func_node[3])
 			translated_func_access = "_G->get(" .. func_cache_var .. ")"
 		else
@@ -872,10 +870,19 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	end
 	
 	-- 3. Emit Call Statement
-	if is_vector then
+	if not opts.multiret and not is_vector and num_args <= 3 then
+		-- Fast path: Direct call returning single value
+		ctx.uses_ret_buf = true
+		local temp_var = "call_res_" .. ctx:get_unique_id()
+		local call_expr = "lua_call" .. num_args .. "(" .. translated_func_access .. ", " .. RET_BUF_NAME .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
+		ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
+		return temp_var
+	elseif is_vector then
 		-- args_code is the name of a vector variable
+		ctx.uses_ret_buf = true
 		ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. args_code .. ".data(), " .. args_code .. ".size(), " .. RET_BUF_NAME .. ");\n")
 	else
+		ctx.uses_ret_buf = true
 		if args_code == "" then
 			ctx:add_statement("call_lua_value(" .. translated_func_access .. ", {}, 0, " .. RET_BUF_NAME .. ");\n")
 		else
@@ -884,7 +891,7 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 		end
 	end
 	
-	-- 4. Return Result
+	-- 4. Return Result (for cases where we didn't use the fast path)
 	if opts.multiret then
 		return RET_BUF_NAME
 	else
@@ -1010,14 +1017,23 @@ register_handler("method_call_expression", function(ctx, node, depth, opts)
 	local method_cache_var = ctx:get_string_cache(method_name)
 	
 	-- 2. Build arguments (this hoists arg evaluation statements)
-	local args_code, is_vector = build_args_code(ctx, node, 3, depth, base_code)
+	local args_code, is_vector, num_args = build_args_code(ctx, node, 3, depth, base_code)
 	
 	-- 3. Emit Call Statement
-	if is_vector then
+	if not opts.multiret and not is_vector and num_args <= 3 then
+		-- Fast path: Direct call returning single value
+		ctx.uses_ret_buf = true
+		local temp_var = "mcall_res_" .. ctx:get_unique_id()
+		local call_expr = "lua_call" .. num_args .. "(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. RET_BUF_NAME .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
+		ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
+		return temp_var
+	elseif is_vector then
 		-- args_code is the name of a vector variable
+		ctx.uses_ret_buf = true
 		ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. args_code .. ".data(), " .. args_code .. ".size(), " .. RET_BUF_NAME .. ");\n")
 	else
 		-- Single/Simple args optimization
+		ctx.uses_ret_buf = true
 		ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. RET_BUF_NAME .. ", " .. args_code .. ");\n")
 	end
 	
@@ -1194,12 +1210,14 @@ local function translate_function_body(ctx, node, depth)
 	
 	local params_extraction = ""
 	local param_index_offset = 0
+	local param_names = {}
 	
 	-- Handle method 'self' parameter
 	if node[1] == "method_declaration" or node.is_method then
 		params_extraction = params_extraction .. "    LuaValue self = (n_args > 0 ? args[0] : LuaValue(std::monostate{}));\n"
 		ctx:declare_variable("self")
 		param_index_offset = 1
+		table.insert(param_names, "self")
 	end
 	
 	ctx.current_function_fixed_params_count = param_index_offset
@@ -1212,31 +1230,81 @@ local function translate_function_body(ctx, node, depth)
 			local vector_idx = i + param_index_offset - 1
 			params_extraction = params_extraction .. "    LuaValue " .. param_name .. " = (n_args > " .. vector_idx .. " ? args[" .. vector_idx .. "] : LuaValue(std::monostate{}));\n"
 			ctx:declare_variable(param_name)
+			table.insert(param_names, param_name)
 		end
 	end
 	
-	-- Inject reusable return buffer for this function scope
-	local buffer_decl = "    LuaValueVector " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(8);\n"
-	
-	local saved_return_stmt = ctx.current_return_stmt
-	ctx.current_return_stmt = "return;"
-	
-	local body_code = translate_node(ctx, body_node, depth + 1, { no_braces = true })
-	
-	ctx.current_return_stmt = saved_return_stmt
-	
-	-- Capture any remaining statements in the body (should be empty if all statements flushed)
-	local body_stmts = ctx:capture_end()
+	local arity = ctx.current_function_fixed_params_count
+	local has_vararg = false
+	if params_node[5] then
+        for _, p in ipairs(params_node[5]) do if p[1] == "varargs" then has_vararg = true break end end
+    end
 
-	-- Restore scope
+	local saved_return_stmt = ctx.current_return_stmt
+	local saved_specialized_mode = ctx.specialized_return_mode
+	
+	-- 1. Variadic Mode Translation
+	local saved_uses_ret_buf = ctx.uses_ret_buf
+	ctx.uses_ret_buf = false
+	ctx.specialized_return_mode = false
+	ctx.current_return_stmt = "return;"
+	local body_code = translate_node(ctx, body_node, depth + 1, { no_braces = true })
+	local body_stmts = ctx:capture_end()
+	
+	-- Inject reusable return buffer for this function scope if needed
+	local buffer_decl = ctx.uses_ret_buf and ("    LuaValueVector " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(8);\n") or ""
+	local var_lambda = "[=](const LuaValue* args, size_t n_args, LuaValueVector& out_result) mutable -> void {\n" .. buffer_decl .. params_extraction .. body_code .. body_stmts .. "}"
+	
+	-- 2. Specialized Mode Translation (if possible)
+	local spec_lambda = nil
+	-- HEURISTIC: Only double-translate if function is extremely simple (exactly one return)
+	-- This captures hot loop functions like 'add' without slowing down the transpiler on large files.
+	local body_children = body_node[5] or empty_table
+	local is_simple_return = (#body_children == 1 and body_children[1][1] == "return_statement")
+	if arity <= 3 and not has_vararg and is_simple_return then
+		ctx:restore_scope(saved_scope) -- Reset scope for second pass
+		ctx:capture_start()
+		-- Re-declare parameters in scope
+		for _, name in ipairs(param_names) do ctx:declare_variable(name) end
+		
+		ctx.uses_ret_buf = false -- Reset for second pass
+		ctx.specialized_return_mode = true
+		ctx.current_return_stmt = "return LuaValue(std::monostate{});"
+		
+		local spec_params_list = ""
+		local spec_params_extraction = ""
+		for i = 1, arity do
+			spec_params_list = spec_params_list .. (i > 1 and ", " or "") .. "const LuaValue& a" .. i
+			spec_params_extraction = spec_params_extraction .. "    LuaValue " .. param_names[i] .. " = a" .. i .. ";\n"
+		end
+		
+		local spec_body_code = translate_node(ctx, body_node, depth + 1, { no_braces = true })
+		local spec_body_stmts = ctx:capture_end()
+		
+		local spec_buffer_decl = ctx.uses_ret_buf and ("    LuaValueVector " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(8);\n") or ""
+		
+		-- FIX: Ensure terminal return for non-void function
+		local terminal_return = "\n    return LuaValue(std::monostate{});\n"
+		spec_lambda = "[=](" .. spec_params_list .. ") mutable -> LuaValue {\n" .. spec_buffer_decl .. spec_params_extraction .. spec_body_code .. spec_body_stmts .. terminal_return .. "}"
+	end
+
+	-- Restore context
+	ctx.uses_ret_buf = saved_uses_ret_buf
+	ctx.specialized_return_mode = saved_specialized_mode
+	ctx.current_return_stmt = saved_return_stmt
 	ctx:restore_scope(saved_scope)
 	ctx.current_function_fixed_params_count = prev_param_count
 	
-	return "[=](const LuaValue* args, size_t n_args, LuaValueVector& out_result) mutable -> void {\n" .. buffer_decl .. params_extraction .. body_code .. body_stmts .. "}"
+	return var_lambda, spec_lambda, arity
 end
 
 register_handler("function_expression", function(ctx, node, depth)
-	return "std::make_shared<LuaFunctionWrapper>(" .. translate_function_body(ctx, node, depth) .. ")"
+	local var_lambda, spec_lambda, arity = translate_function_body(ctx, node, depth)
+	if spec_lambda then
+		return "make_specialized_callable<" .. arity .. ">(" .. var_lambda .. ", " .. spec_lambda .. ")"
+	else
+		return "make_lua_callable(" .. var_lambda .. ")"
+	end
 end)
 
 register_handler("function_declaration", function(ctx, node, depth)
@@ -1249,7 +1317,13 @@ register_handler("function_declaration", function(ctx, node, depth)
 		ctx:declare_variable(sanitized_var_name, { is_ptr = true, ptr_name = ptr_name })
 	end
 	
-	local lambda_code = translate_function_body(ctx, node, depth)
+	local var_lambda, spec_lambda, arity = translate_function_body(ctx, node, depth)
+	local callable_expr
+	if spec_lambda then
+		callable_expr = "make_specialized_callable<" .. arity .. ">(" .. var_lambda .. ", " .. spec_lambda .. ")"
+	else
+		callable_expr = "make_lua_callable(" .. var_lambda .. ")"
+	end
 	
 	-- Restore variable declaration for non-pointer access
 	if node[6] and node[3] then
@@ -1260,31 +1334,38 @@ register_handler("function_declaration", function(ctx, node, depth)
 	-- Check for table member function (e.g., function M.greet(name))
 	if node[7] ~= nil then
 		local prev_stmts = ctx:flush_statements()
-		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node[7] .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
+		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node[7] .. "\", " .. callable_expr .. ");"
 	elseif node[3] ~= nil then
 		local prev_stmts = ctx:flush_statements()
 		if node[6] then
 			local var_name = sanitize_cpp_identifier(node[3])
 			return prev_stmts .. "auto " .. ptr_name .. " = std::make_shared<LuaValue>();\n" ..
-				"*" .. ptr_name .. " = std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. ");\n" ..
+				"*" .. ptr_name .. " = " .. callable_expr .. ";\n" ..
 				"LuaValue " .. var_name .. " = *" .. ptr_name .. ";"
 		else
-			return prev_stmts .. "_G->set(\"" .. node[3] .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
+			return prev_stmts .. "_G->set(\"" .. node[3] .. "\", " .. callable_expr .. ");"
 		end
 	else
 		-- Anonymous function (expression context)
-		return "std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. ")"
+		return callable_expr
 	end
 end)
 
 register_handler("method_declaration", function(ctx, node, depth)
-	local lambda_code = translate_function_body(ctx, node, depth)
+	local var_lambda, spec_lambda, arity = translate_function_body(ctx, node, depth)
+	local callable_expr
+	if spec_lambda then
+		callable_expr = "make_specialized_callable<" .. arity .. ">(" .. var_lambda .. ", " .. spec_lambda .. ")"
+	else
+		callable_expr = "make_lua_callable(" .. var_lambda .. ")"
+	end
+	
 	local prev_stmts = ctx:flush_statements()
 	
 	if node[7] ~= nil then
-		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node[7] .. "\", std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. "));"
+		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node[7] .. "\", " .. callable_expr .. ");"
 	else
-		return prev_stmts .. "std::make_shared<LuaFunctionWrapper>(" .. lambda_code .. ")"
+		return prev_stmts .. callable_expr
 	end
 end)
 
@@ -1386,10 +1467,18 @@ register_handler("return_statement", function(ctx, node, depth)
 	local cpp_code = ctx:flush_statements()
 	
 	if expr_list_node and #(expr_list_node[5] or empty_table) > 0 then
-		for _, expr_node in ipairs(expr_list_node[5] or empty_table) do
+		if ctx.specialized_return_mode then
+			-- Specialized mode only supports single return value for now
+			local expr_node = expr_list_node[5][1]
 			local val = translate_node(ctx, expr_node, depth + 1)
 			local stmts = ctx:flush_statements()
-			cpp_code = cpp_code .. stmts .. "out_result.push_back(" .. val .. ");\n"
+			return cpp_code .. stmts .. "return " .. val .. ";\n"
+		else
+			for _, expr_node in ipairs(expr_list_node[5] or empty_table) do
+				local val = translate_node(ctx, expr_node, depth + 1)
+				local stmts = ctx:flush_statements()
+				cpp_code = cpp_code .. stmts .. "out_result.push_back(" .. val .. ");\n"
+			end
 		end
 	end
 	return cpp_code .. ctx.current_return_stmt .. "\n"

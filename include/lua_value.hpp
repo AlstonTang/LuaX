@@ -8,7 +8,7 @@
 
 // Forward declarations for types used in LuaValue
 class LuaObject;
-struct LuaFunctionWrapper;
+struct LuaCallable;
 class LuaCoroutine;
 
 // Define LuaValue using forward declarations for recursive types
@@ -20,7 +20,7 @@ using LuaValue = std::variant<
 	std::string,
 	std::string_view,
 	std::shared_ptr<LuaObject>,
-	std::shared_ptr<LuaFunctionWrapper>,
+	std::shared_ptr<LuaCallable>,
 	std::shared_ptr<LuaCoroutine>
 >;
 

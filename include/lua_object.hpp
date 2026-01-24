@@ -17,21 +17,91 @@
 
 // Forward declaration
 class LuaObject;
-// 1. Refactored Wrapper: Returns void, takes Output Parameter
-struct LuaFunctionWrapper {
-	// Function signature definition
-	using FuncSignature = std::function<void(const LuaValue*, size_t, LuaValueVector&)>;
+// Virtual Base Class for all callable entities (Functions, Closures, C++ built-ins)
+struct LuaCallable {
+	virtual ~LuaCallable() = default;
+	
+	// Core signature for variadic/multi-return calls
+	virtual void call(const LuaValue* args, size_t n_args, LuaValueVector& out_result) = 0;
 
+	// Optimization: Direct overloads for single-return calls
+	virtual LuaValue call0();
+	virtual LuaValue call1(const LuaValue& a1);
+	virtual LuaValue call2(const LuaValue& a1, const LuaValue& a2);
+	virtual LuaValue call3(const LuaValue& a1, const LuaValue& a2, const LuaValue& a3);
+};
+
+// Compatible wrapper for std::function (used by library functions and generic lambdas)
+struct LuaFunctionWrapper : public LuaCallable {
+	using FuncSignature = std::function<void(const LuaValue*, size_t, LuaValueVector&)>;
 	FuncSignature func;
 
-	// Default constructor
 	LuaFunctionWrapper() = default;
 
-	// Template constructor: Accepts raw function pointers, lambdas, or std::function
-	// This fixes the "no matching function" error with std::make_shared
 	template <typename F>
 	LuaFunctionWrapper(F&& f) : func(std::forward<F>(f)) {}
+
+	void call(const LuaValue* args, size_t n_args, LuaValueVector& out_result) override {
+		func(args, n_args, out_result);
+	}
 };
+
+// Generic template to wrap ANY lambda/callable without std::function overhead
+template <typename F>
+struct LuaLambdaCallable : public LuaCallable {
+	F func;
+	LuaLambdaCallable(F&& f) : func(std::forward<F>(f)) {}
+
+	void call(const LuaValue* args, size_t n_args, LuaValueVector& out_result) override {
+		func(args, n_args, out_result);
+	}
+};
+
+template <typename F>
+inline std::shared_ptr<LuaCallable> make_lua_callable(F&& f) {
+	return std::allocate_shared<LuaLambdaCallable<F>>(PoolAllocator<LuaLambdaCallable<F>>{}, std::forward<F>(f));
+}
+
+// Specialized templates for functions with known arity to provide direct overrides
+template <size_t Arity, typename FVar, typename... FExt>
+struct LuaSpecializedCallable;
+
+template <typename FVar, typename F0>
+struct LuaSpecializedCallable<0, FVar, F0> : public LuaCallable {
+	FVar f_var; F0 f0;
+	LuaSpecializedCallable(FVar&& v, F0&& s) : f_var(std::forward<FVar>(v)), f0(std::forward<F0>(s)) {}
+	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
+	LuaValue call0() override { return f0(); }
+};
+
+template <typename FVar, typename F1>
+struct LuaSpecializedCallable<1, FVar, F1> : public LuaCallable {
+	FVar f_var; F1 f1;
+	LuaSpecializedCallable(FVar&& v, F1&& s) : f_var(std::forward<FVar>(v)), f1(std::forward<F1>(s)) {}
+	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
+	LuaValue call1(const LuaValue& a1) override { return f1(a1); }
+};
+
+template <typename FVar, typename F2>
+struct LuaSpecializedCallable<2, FVar, F2> : public LuaCallable {
+	FVar f_var; F2 f2;
+	LuaSpecializedCallable(FVar&& v, F2&& s) : f_var(std::forward<FVar>(v)), f2(std::forward<F2>(s)) {}
+	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
+	LuaValue call2(const LuaValue& a1, const LuaValue& a2) override { return f2(a1, a2); }
+};
+
+template <typename FVar, typename F3>
+struct LuaSpecializedCallable<3, FVar, F3> : public LuaCallable {
+	FVar f_var; F3 f3;
+	LuaSpecializedCallable(FVar&& v, F3&& s) : f_var(std::forward<FVar>(v)), f3(std::forward<F3>(s)) {}
+	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
+	LuaValue call3(const LuaValue& a1, const LuaValue& a2, const LuaValue& a3) override { return f3(a1, a2, a3); }
+};
+
+template <size_t Arity, typename FVar, typename FSpec>
+inline std::shared_ptr<LuaCallable> make_specialized_callable(FVar&& v, FSpec&& s) {
+	return std::allocate_shared<LuaSpecializedCallable<Arity, FVar, FSpec>>(PoolAllocator<LuaSpecializedCallable<Arity, FVar, FSpec>>{}, std::forward<FVar>(v), std::forward<FSpec>(s));
+}
 
 // LuaObject Definition
 class LuaObject : public std::enable_shared_from_this<LuaObject> {
@@ -255,6 +325,63 @@ inline const std::shared_ptr<LuaObject>& get_object(const LuaValue& value) {
 
 inline const std::shared_ptr<LuaObject>& get_object(const std::shared_ptr<LuaObject>& obj) {
 	return obj;
+}
+
+// Forward declarations for inline helpers
+std::string get_lua_type_name(const LuaValue& val);
+void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args, LuaValueVector& out_result);
+
+inline LuaCallable* get_callable(const LuaValue& value) {
+	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&value)) [[likely]] {
+		return callable_ptr->get();
+	}
+	throw std::runtime_error("attempt to call a " + get_lua_type_name(value) + " value");
+}
+
+inline LuaValue lua_call0(const LuaValue& callable, LuaValueVector& out) {
+	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) [[likely]] {
+		out.clear();
+		(*callable_ptr)->call(nullptr, 0, out);
+		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+	}
+	call_lua_value(callable, nullptr, 0, out);
+	return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+}
+
+inline LuaValue lua_call1(const LuaValue& callable, LuaValueVector& out, const LuaValue& a1) {
+	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) [[likely]] {
+		out.clear();
+		const LuaValue args[] = {a1};
+		(*callable_ptr)->call(args, 1, out);
+		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+	}
+	const LuaValue args[] = {a1};
+	call_lua_value(callable, args, 1, out);
+	return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+}
+
+inline LuaValue lua_call2(const LuaValue& callable, LuaValueVector& out, const LuaValue& a1, const LuaValue& a2) {
+	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) [[likely]] {
+		out.clear();
+		const LuaValue args[] = {a1, a2};
+		(*callable_ptr)->call(args, 2, out);
+		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+	}
+	const LuaValue args[] = {a1, a2};
+	call_lua_value(callable, args, 2, out);
+	return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+}
+
+inline LuaValue lua_call3(const LuaValue& callable, LuaValueVector& out, const LuaValue& a1, const LuaValue& a2, const LuaValue& a3) {
+	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) [[likely]] {
+		out.clear();
+		const LuaValue args[] = {a1, a2, a3};
+		(*callable_ptr)->call(args, 3, out);
+		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+	}
+	const LuaValue args[] = {a1, a2, a3};
+	call_lua_value(callable, args, 3, out);
+	return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
 }
 
 // Helpers

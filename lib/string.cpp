@@ -533,7 +533,7 @@ void string_gsub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 					}
 				}
 			}
-			else if (auto* r_func = std::get_if<std::shared_ptr<LuaFunctionWrapper>>(&repl)) {
+			else if (auto* r_func = std::get_if<std::shared_ptr<LuaCallable>>(&repl)) {
 				// Function replacement
 				callback_args.clear();
 				if (ms.level == 0) callback_args.push_back(std::string(curr, res - curr));
@@ -542,7 +542,7 @@ void string_gsub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 						callback_args.push_back(std::string(ms.capture[i].init, ms.capture[i].len));
 				}
 				LuaValueVector cb_res;
-				(*r_func)->func(callback_args.data(), callback_args.size(), cb_res);
+				(*r_func)->call(callback_args.data(), callback_args.size(), cb_res);
 				if (!cb_res.empty() && !std::holds_alternative<std::monostate>(cb_res[0]))
 					result.append(fast_get_string(cb_res[0]));
 				else

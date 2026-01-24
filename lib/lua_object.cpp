@@ -163,12 +163,12 @@ LuaValue LuaObject::get_item(const LuaValue& key) {
 			if (!current_obj) break;
 			continue;
 		}
-		if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaFunctionWrapper>>(idx_meta)) {
+		if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(idx_meta)) {
 			LuaValue args[] = {current_obj->shared_from_this(), key};
 			thread_local LuaValueVector results;
 			results.clear();
 			if (results.capacity() < 1) results.reserve(1);
-			(*func_ptr)->func(args, 2, results);
+			(*func_ptr)->call(args, 2, results);
 			return results.empty() ? LuaValue(std::monostate{}) : std::move(results[0]);
 		}
 		break;
@@ -196,11 +196,11 @@ LuaValue LuaObject::get_item(long long idx) {
 		if (const auto* obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&res)) {
 			return (*obj_ptr)->get_item(idx);
 		}
-		if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaFunctionWrapper>>(&res)) {
+		if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&res)) {
 			LuaValue args[] = {shared_from_this(), key};
 			thread_local LuaValueVector results;
 			results.clear();
-			(*func_ptr)->func(args, 2, results);
+			(*func_ptr)->call(args, 2, results);
 			return results.empty() ? LuaValue(std::monostate{}) : std::move(results[0]);
 		}
 	}
@@ -226,13 +226,13 @@ LuaValue LuaObject::get_item(std::string_view key) {
 			if (!current_obj) break;
 			continue;
 		}
-		if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaFunctionWrapper>>(idx_meta)) {
+		if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(idx_meta)) {
 			LuaValue key_val = key;
 			LuaValue args[] = {current_obj->shared_from_this(), key_val};
 			thread_local LuaValueVector results;
 			results.clear();
 			if (results.capacity() < 1) results.reserve(1);
-			(*func_ptr)->func(args, 2, results);
+			(*func_ptr)->call(args, 2, results);
 			return results.empty() ? LuaValue(std::monostate{}) : std::move(results[0]);
 		}
 		break;
@@ -281,11 +281,11 @@ void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
 				(*next_obj_ptr)->set_item(key, value);
 				return;
 			}
-			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaFunctionWrapper>>(next_meta)) {
+			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(next_meta)) {
 				LuaValue args[] = {shared_from_this(), key, value};
 				thread_local LuaValueVector results;
 				results.clear();
-				(*func_ptr)->func(args, 3, results);
+				(*func_ptr)->call(args, 3, results);
 				return;
 			}
 		}
@@ -306,12 +306,12 @@ void LuaObject::set_item(std::string_view key, const LuaValue& value) {
 				(*next_obj_ptr)->set_item(key, value);
 				return;
 			}
-			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaFunctionWrapper>>(next_meta)) {
+			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(next_meta)) {
 				LuaValue key_val = key; // Use std::string_view directly
 				LuaValue args[] = {shared_from_this(), key_val, value};
 				thread_local LuaValueVector results;
 				results.clear();
-				(*func_ptr)->func(args, 3, results);
+				(*func_ptr)->call(args, 3, results);
 				return;
 			}
 		}
@@ -356,11 +356,11 @@ void LuaObject::set_item(long long idx, const LuaValue& value) {
 				(*obj_ptr)->set_item(key, value);
 				return;
 			}
-			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaFunctionWrapper>>(ni_meta)) {
+			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(ni_meta)) {
 				LuaValue args[] = {shared_from_this(), key, value};
 				thread_local LuaValueVector results;
 				results.clear();
-				(*func_ptr)->func(args, 3, results);
+				(*func_ptr)->call(args, 3, results);
 				return;
 			}
 		}
@@ -598,7 +598,7 @@ std::string get_lua_type_name(const LuaValue& val) {
 	if (std::holds_alternative<double>(val) || std::holds_alternative<long long>(val)) return "number";
 	if (std::holds_alternative<std::string>(val) || std::holds_alternative<std::string_view>(val)) return "string";
 	if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) return "table";
-	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(val)) return "function";
+	if (std::holds_alternative<std::shared_ptr<LuaCallable>>(val)) return "function";
 	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) return "thread";
 	return "userdata";
 }
@@ -1049,9 +1049,9 @@ void lua_pairs(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 	if (table->metatable) {
 		auto m = table->metatable->get_item("__pairs");
-		if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(m)) {
+		if (std::holds_alternative<std::shared_ptr<LuaCallable>>(m)) {
 			LuaValue arg_val = table;
-			std::get<std::shared_ptr<LuaFunctionWrapper>>(m)->func(&arg_val, 1, out);
+			std::get<std::shared_ptr<LuaCallable>>(m)->call(&arg_val, 1, out);
 			return;
 		}
 	}
@@ -1086,9 +1086,9 @@ void lua_ipairs(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 	if (table->metatable) {
 		auto m = table->metatable->get_item("__ipairs");
-		if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(m)) {
+		if (std::holds_alternative<std::shared_ptr<LuaCallable>>(m)) {
 			LuaValue arg_val = table;
-			std::get<std::shared_ptr<LuaFunctionWrapper>>(m)->func(&arg_val, 1, out);
+			std::get<std::shared_ptr<LuaCallable>>(m)->call(&arg_val, 1, out);
 			return;
 		}
 	}
@@ -1148,12 +1148,39 @@ void lua_tonumber(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 // Runtime Execution Helpers
 // ==========================================
 
+LuaValue LuaCallable::call0() {
+	LuaValueVector res;
+	call(nullptr, 0, res);
+	return res.empty() ? LuaValue(std::monostate{}) : res[0];
+}
+
+LuaValue LuaCallable::call1(const LuaValue& a1) {
+	LuaValueVector res;
+	const LuaValue args[] = {a1};
+	call(args, 1, res);
+	return res.empty() ? LuaValue(std::monostate{}) : res[0];
+}
+
+LuaValue LuaCallable::call2(const LuaValue& a1, const LuaValue& a2) {
+	LuaValueVector res;
+	const LuaValue args[] = {a1, a2};
+	call(args, 2, res);
+	return res.empty() ? LuaValue(std::monostate{}) : res[0];
+}
+
+LuaValue LuaCallable::call3(const LuaValue& a1, const LuaValue& a2, const LuaValue& a3) {
+	LuaValueVector res;
+	const LuaValue args[] = {a1, a2, a3};
+	call(args, 3, res);
+	return res.empty() ? LuaValue(std::monostate{}) : res[0];
+}
+
 inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args,
                            LuaValueVector& out_result) {
 	out_result.clear();
 
-	if (const auto* wrapper = std::get_if<std::shared_ptr<LuaFunctionWrapper>>(&callable)) {
-		(*wrapper)->func(args, n_args, out_result);
+	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) {
+		(*callable_ptr)->call(args, n_args, out_result);
 		return;
 	}
 
@@ -1198,10 +1225,10 @@ void lua_xpcall(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		out.clear();
 		out.push_back(false);
 
-		if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(errh)) {
+		if (std::holds_alternative<std::shared_ptr<LuaCallable>>(errh)) {
 			LuaValue err_msg = std::string(e.what());
 			LuaValueVector err_res;
-			std::get<std::shared_ptr<LuaFunctionWrapper>>(errh)->func(&err_msg, 1, err_res);
+			std::get<std::shared_ptr<LuaCallable>>(errh)->call(&err_msg, 1, err_res);
 			out.push_back(err_res.empty() ? LuaValue(std::monostate{}) : err_res[0]);
 		}
 		else {

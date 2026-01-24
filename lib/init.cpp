@@ -78,9 +78,9 @@ static std::shared_ptr<LuaObject> create_initial_global() {
 		if (n_args < 1) throw std::runtime_error("bad argument #1 to 'pcall' (value expected)");
 		out.clear();
 		try {
-			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaFunctionWrapper>>(&args[0])) {
+			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&args[0])) {
 				LuaValueVector call_res;
-				(*func_ptr)->func(args + 1, n_args - 1, call_res);
+				(*func_ptr)->call(args + 1, n_args - 1, call_res);
 				out.push_back(true);
 				out.insert(out.end(), call_res.begin(), call_res.end());
 				return;

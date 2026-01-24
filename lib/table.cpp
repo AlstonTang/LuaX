@@ -46,8 +46,8 @@ void table_sort(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	}
 
 	LuaValue comp_func_val = (n_args >= 2) ? args[1] : LuaValue(std::monostate{});
-	bool has_comp = std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val);
-	auto comp_func = has_comp ? std::get<std::shared_ptr<LuaFunctionWrapper>>(comp_func_val) : nullptr;
+	bool has_comp = std::holds_alternative<std::shared_ptr<LuaCallable>>(comp_func_val);
+	auto comp_func = has_comp ? std::get<std::shared_ptr<LuaCallable>>(comp_func_val) : nullptr;
 
 	// table.sort usually only sorts the array part (1 to #list)
 	// Since we are using std::vector, we sort the array_part directly.
@@ -57,7 +57,7 @@ void table_sort(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 			          thread_local LuaValueVector comp_buffer;
 			          comp_buffer.clear();
 			          LuaValue func_args[] = {a, b};
-			          comp_func->func(func_args, 2, comp_buffer);
+			          comp_func->call(func_args, 2, comp_buffer);
 			          return !comp_buffer.empty() && is_lua_truthy(comp_buffer[0]);
 		          }
 		          return lua_less_than(a, b);

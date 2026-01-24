@@ -13,7 +13,7 @@ class LuaCoroutine {
 public:
 	enum class Status : std::uint8_t { SUSPENDED, RUNNING, DEAD };
 
-	std::shared_ptr<LuaFunctionWrapper> func;
+	std::shared_ptr<LuaCallable> func;
 	Status status;
 	std::thread worker;
 
@@ -30,7 +30,7 @@ public:
 	// EXTENSION: Mode flag
 	bool is_parallel = false;
 
-	LuaCoroutine(const std::shared_ptr<LuaFunctionWrapper>& f, bool parallel = false);
+	LuaCoroutine(const std::shared_ptr<LuaCallable>& f, bool parallel = false);
 	~LuaCoroutine();
 
 	void run();

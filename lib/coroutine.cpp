@@ -5,7 +5,7 @@
 // thread_local ensures every thread (Main or Worker) knows its own active coroutine.
 thread_local LuaCoroutine* current_coroutine = nullptr;
 
-LuaCoroutine::LuaCoroutine(const std::shared_ptr<LuaFunctionWrapper>& f, bool parallel)
+LuaCoroutine::LuaCoroutine(const std::shared_ptr<LuaCallable>& f, bool parallel)
 	: func(f),
 	  status(Status::SUSPENDED),
 	  started(false),
@@ -50,7 +50,7 @@ void LuaCoroutine::run() {
 
 		// Call the Lua function using the Output Parameter signature
 		// Note: We use args.data() which was populated by resume() before we woke up.
-		func->func(args.data(), args.size(), execution_results);
+		func->call(args.data(), args.size(), execution_results);
 
 		// 3. Completion Phase
 		{
@@ -167,8 +167,8 @@ void LuaCoroutine::yield(const LuaValue* yield_args, size_t n_args, LuaValueVect
 // --- Lua Bindings (Updated for Void/Out Architecture) ---
 
 void coroutine_create(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(args[0])) {
-		auto func = std::get<std::shared_ptr<LuaFunctionWrapper>>(args[0]);
+	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCallable>>(args[0])) {
+		auto func = std::get<std::shared_ptr<LuaCallable>>(args[0]);
 		auto co = std::make_shared<LuaCoroutine>(func, false);
 		out.push_back(LuaValue(co));
 		return;
@@ -177,8 +177,8 @@ void coroutine_create(const LuaValue* args, size_t n_args, LuaValueVector& out) 
 }
 
 void coroutine_create_parallel(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(args[0])) {
-		auto func = std::get<std::shared_ptr<LuaFunctionWrapper>>(args[0]);
+	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCallable>>(args[0])) {
+		auto func = std::get<std::shared_ptr<LuaCallable>>(args[0]);
 		auto co = std::make_shared<LuaCoroutine>(func, true);
 		out.push_back(LuaValue(co));
 		return;

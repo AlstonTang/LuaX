@@ -428,12 +428,12 @@ void io_close(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 	if (auto file_obj = get_object(file_val)) {
 		auto close_func_val = file_obj->get("close");
-		if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(close_func_val)) {
-			auto close_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(close_func_val);
+		if (std::holds_alternative<std::shared_ptr<LuaCallable>>(close_func_val)) {
+			auto close_func = std::get<std::shared_ptr<LuaCallable>>(close_func_val);
 			LuaValue args_to_pass[] = {file_obj};
 			// Forward call with our output buffer
 			out.clear();
-			close_func->func(args_to_pass, 1, out);
+			close_func->call(args_to_pass, 1, out);
 			return;
 		}
 	}
@@ -442,12 +442,12 @@ void io_close(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 void io_read(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto read_func_val = current_input_file->get("read");
-	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(read_func_val)) {
-		auto read_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(read_func_val);
+	if (std::holds_alternative<std::shared_ptr<LuaCallable>>(read_func_val)) {
+		auto read_func = std::get<std::shared_ptr<LuaCallable>>(read_func_val);
 		LuaValueVector method_args = {current_input_file};
 		for (size_t i = 0; i < n_args; i++) method_args.push_back(args[i]);
 		out.clear();
-		read_func->func(method_args.data(), method_args.size(), out);
+		read_func->call(method_args.data(), method_args.size(), out);
 		return;
 	}
 	out.assign({std::monostate{}, LuaValue(std::string_view("input file is not readable"))});
@@ -455,12 +455,12 @@ void io_read(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 void io_write(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto write_func_val = current_output_file->get("write");
-	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(write_func_val)) {
-		auto write_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(write_func_val);
+	if (std::holds_alternative<std::shared_ptr<LuaCallable>>(write_func_val)) {
+		auto write_func = std::get<std::shared_ptr<LuaCallable>>(write_func_val);
 		LuaValueVector method_args = {current_output_file};
 		for (size_t i = 0; i < n_args; i++) method_args.push_back(args[i]);
 		out.clear();
-		write_func->func(method_args.data(), method_args.size(), out);
+		write_func->call(method_args.data(), method_args.size(), out);
 		return;
 	}
 	out.assign({std::monostate{}, LuaValue(std::string_view("output file is not writable"))});
@@ -468,11 +468,11 @@ void io_write(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 void io_flush(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto flush_func_val = current_output_file->get("flush");
-	if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(flush_func_val)) {
-		auto flush_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(flush_func_val);
+	if (std::holds_alternative<std::shared_ptr<LuaCallable>>(flush_func_val)) {
+		auto flush_func = std::get<std::shared_ptr<LuaCallable>>(flush_func_val);
 		LuaValue f_args[] = {current_output_file};
 		out.clear();
-		flush_func->func(f_args, 1, out);
+		flush_func->call(f_args, 1, out);
 		return;
 	}
 	out.assign({std::monostate{}, LuaValue(std::string_view("output file is not flushable"))});
@@ -484,11 +484,11 @@ void io_lines(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (std::holds_alternative<std::monostate>(filename_val)) {
 		// io.lines() -> read from default input
 		auto lines_func_val = current_input_file->get("lines");
-		if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(lines_func_val)) {
-			auto lines_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(lines_func_val);
+		if (std::holds_alternative<std::shared_ptr<LuaCallable>>(lines_func_val)) {
+			auto lines_func = std::get<std::shared_ptr<LuaCallable>>(lines_func_val);
 			LuaValue l_args[] = {current_input_file};
 			out.clear();
-			lines_func->func(l_args, 1, out);
+			lines_func->call(l_args, 1, out);
 			return;
 		}
 	}
@@ -502,23 +502,23 @@ void io_lines(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 			auto file_obj = std::get<std::shared_ptr<LuaObject>>(open_res[0]);
 			auto lines_func_val = file_obj->get("lines");
 
-			if (std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(lines_func_val)) {
-				auto lines_func = std::get<std::shared_ptr<LuaFunctionWrapper>>(lines_func_val);
+			if (std::holds_alternative<std::shared_ptr<LuaCallable>>(lines_func_val)) {
+				auto lines_func = std::get<std::shared_ptr<LuaCallable>>(lines_func_val);
 
 				// Get the file iterator: file:lines() returns (iter, self, nil)
 				LuaValueVector iter_res;
 				LuaValue l_args[] = {file_obj};
-				lines_func->func(l_args, 1, iter_res);
+				lines_func->call(l_args, 1, iter_res);
 
-				if (!iter_res.empty() && std::holds_alternative<std::shared_ptr<LuaFunctionWrapper>>(iter_res[0])) {
-					auto original_iter = std::get<std::shared_ptr<LuaFunctionWrapper>>(iter_res[0]);
+				if (!iter_res.empty() && std::holds_alternative<std::shared_ptr<LuaCallable>>(iter_res[0])) {
+					auto original_iter = std::get<std::shared_ptr<LuaCallable>>(iter_res[0]);
 
 					// Wrap the iterator to close the file on nil
 					auto iter_wrapper = std::make_shared<LuaFunctionWrapper>(
 						[original_iter, file_obj](const LuaValue* w_args, size_t w_n_args,
 						                          LuaValueVector& w_out) {
 							// Call original iterator
-							original_iter->func(w_args, w_n_args, w_out);
+							original_iter->call(w_args, w_n_args, w_out);
 
 							// If returns nil, close the file
 							if (w_out.empty() || std::holds_alternative<std::monostate>(w_out[0])) {
