@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <random>
 #include <chrono>
+#include <thread>
 #include <charconv>
 #include <string>
 
@@ -12,7 +13,16 @@
 constexpr double PI = 3.14159265358979323846;
 
 // Global random number generator
-std::default_random_engine generator;
+thread_local std::default_random_engine generator;
+thread_local bool generator_seeded = false;
+
+static void ensure_seeded() {
+	if (!generator_seeded) {
+		generator.seed(std::chrono::system_clock::now().time_since_epoch().count() + 
+		              std::hash<std::thread::id>{}(std::this_thread::get_id()));
+		generator_seeded = true;
+	}
+}
 
 // Helper function to get a number from a LuaValue
 double get_number(const LuaValue& v) {
@@ -44,6 +54,7 @@ double get_number(const LuaValue& v) {
 
 // math.randomseed
 void math_randomseed(const LuaValue* args, size_t n_args, LuaValueVector& out) {
+	ensure_seeded();
 	long long seed = static_cast<long long>(get_number(args[0]));
 	generator.seed(seed);
 	out.assign({std::monostate{}});
@@ -52,6 +63,7 @@ void math_randomseed(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 // math.random
 void math_random(const LuaValue* args, size_t n_args, LuaValueVector& out) {
+	ensure_seeded();
 	LuaValue arg1 = n_args >= 1 ? args[0] : std::monostate{};
 	LuaValue arg2 = n_args >= 2 ? args[1] : std::monostate{};
 

@@ -11,6 +11,7 @@ void table_unpack(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		out.assign({std::monostate{}});
 		return;
 	}
+	std::lock_guard<std::recursive_mutex> lock(table->mtx);
 
 	// Default i = 1, j = #list
 	long long i = (n_args >= 2) ? get_long_long(args[1]) : 1;
@@ -44,6 +45,7 @@ void table_sort(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		out.assign({std::monostate{}});
 		return;
 	}
+	std::lock_guard<std::recursive_mutex> lock(table->mtx);
 
 	LuaValue comp_func_val = (n_args >= 2) ? args[1] : LuaValue(std::monostate{});
 	bool has_comp = std::holds_alternative<std::shared_ptr<LuaCallable>>(comp_func_val);
@@ -54,7 +56,7 @@ void table_sort(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::sort(table->array_part.begin(), table->array_part.end(),
 	          [&](const LuaValue& a, const LuaValue& b) {
 		          if (has_comp) {
-			          thread_local LuaValueVector comp_buffer;
+			          LuaValueVector comp_buffer;
 			          comp_buffer.clear();
 			          LuaValue func_args[] = {a, b};
 			          comp_func->call(func_args, 2, comp_buffer);
@@ -92,6 +94,19 @@ void table_move(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	long long t = get_long_long(args[3]);
 	auto a2 = (n_args >= 5) ? get_object(args[4]) : a1;
 
+	// Thread safety: Lock both tables. To avoid deadlocks, lock in address order.
+	std::unique_lock<std::recursive_mutex> lock1(a1->mtx, std::defer_lock);
+	std::unique_lock<std::recursive_mutex> lock2(a2->mtx, std::defer_lock);
+	if (a1 == a2) {
+		lock1.lock();
+	} else if (a1.get() < a2.get()) {
+		lock1.lock();
+		lock2.lock();
+	} else {
+		lock2.lock();
+		lock1.lock();
+	}
+
 	if (f > e) {
 		out.assign({a2});
 		return;
@@ -116,6 +131,7 @@ void table_move(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 void table_concat(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto table = get_object(args[0]);
 	if (!table) return;
+	std::lock_guard<std::recursive_mutex> lock(table->mtx);
 
 	std::string sep = (n_args >= 2) ? to_cpp_string(args[1]) : "";
 	long long i = (n_args >= 3) ? get_long_long(args[2]) : 1;
@@ -141,6 +157,7 @@ void table_concat(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 void table_insert(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto table = get_object(args[0]);
 	if (!table) return;
+	std::lock_guard<std::recursive_mutex> lock(table->mtx);
 
 	if (n_args == 2) {
 		// Overload: table.insert(table, value) -> append
@@ -169,6 +186,7 @@ void table_remove(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		out.assign({std::monostate{}});
 		return;
 	}
+	std::lock_guard<std::recursive_mutex> lock(table->mtx);
 
 	long long len = static_cast<long long>(table->array_part.size());
 	long long pos = (n_args >= 2) ? get_long_long(args[1]) : len;

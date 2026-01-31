@@ -12,6 +12,7 @@
 #include "lua_value.hpp"
 #include "pool_allocator.hpp"
 #include <cmath>
+#include <mutex>
 #include <algorithm>
 #include <iostream>
 
@@ -106,6 +107,7 @@ inline std::shared_ptr<LuaCallable> make_specialized_callable(FVar&& v, FSpec&& 
 // LuaObject Definition
 class LuaObject : public std::enable_shared_from_this<LuaObject> {
 public:
+	mutable std::recursive_mutex mtx;
 	virtual ~LuaObject() = default;
 	
 	// Hybrid storage: small vector for few properties, map for many.
@@ -224,17 +226,25 @@ public:
     void table_insert(long long pos, const LuaValue& value);
 
 	// Metamethod and property cache
-	LuaValue* cached_index = nullptr;
-	LuaValue* cached_newindex = nullptr;
+	LuaValue cached_index;
+	LuaValue cached_newindex;
 	bool metamethods_initialized = false;
+	std::pair<LuaValue, LuaValue> get_cached_metamethods() {
+		if (!metamethods_initialized) ensure_metamethods();
+		std::lock_guard<std::recursive_mutex> lock(mtx);
+		return {cached_index, cached_newindex};
+	}
+
 	void ensure_metamethods() {
 		if (metamethods_initialized) return;
+		std::lock_guard<std::recursive_mutex> lock(mtx);
+		if (metamethods_initialized) return;
 		if (metatable) {
-			cached_index = metatable->find_prop("__index");
-			cached_newindex = metatable->find_prop("__newindex");
+			cached_index = metatable->get_prop("__index");
+			cached_newindex = metatable->get_prop("__newindex");
 		} else {
-			cached_index = nullptr;
-			cached_newindex = nullptr;
+			cached_index = std::monostate{};
+			cached_newindex = std::monostate{};
 		}
 		metamethods_initialized = true;
 	}
@@ -247,6 +257,10 @@ public:
 	LuaValue* find_prop(const LuaValue& key);
 	LuaValue* find_prop(std::string_view key);
 	LuaValue* find_prop(const char* key) { return find_prop(std::string_view(key)); }
+
+	LuaValue get_prop(const LuaValue& key);
+	LuaValue get_prop(std::string_view key);
+
 	void set_prop(const LuaValue& key, const LuaValue& value);
 	void set_prop(std::string_view key, const LuaValue& value);
 	void set_prop(const char* key, const LuaValue& value) { set_prop(std::string_view(key), value); }
@@ -888,6 +902,7 @@ inline LuaValue lua_get_length(const LuaValue& val) {
 	if (auto* sv = std::get_if<std::string_view>(&val)) return static_cast<double>(sv->length());
 	if (auto* obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&val)) {
 		auto& obj = *obj_ptr;
+		std::lock_guard<std::recursive_mutex> lock(obj->mtx);
 		if (obj->metatable) {
 			auto len_meta = obj->metatable->get_item("__len");
 			if (!std::holds_alternative<std::monostate>(len_meta)) {

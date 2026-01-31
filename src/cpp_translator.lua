@@ -80,6 +80,11 @@ function TranslatorContext:new(translator, for_header, current_module_object_nam
 	return ctx
 end
 
+function TranslatorContext:use_ret_buf()
+	self.uses_ret_buf = true
+	return RET_BUF_NAME
+end
+
 function TranslatorContext:get_unique_id()
 	return self.translator:get_unique_id()
 end
@@ -184,9 +189,8 @@ local function translate_node(ctx, node, depth, opts)
 	depth = depth or 0
 	opts = opts or {}
 	
-	if depth > 50 then
-		print("ERROR: Recursion limit exceeded in translate_node. Node type: " .. (node and node[1] or "nil"))
-		os.exit(1)
+	if depth > 1000 then
+		error("Recursion limit exceeded in translate_node. Node type: " .. (node and node[1] or "nil"))
 	end
 	
 	if not node then
@@ -556,7 +560,7 @@ register_handler("expression_statement", function(ctx, node, depth)
 	
 	if stmts ~= "" then
 		-- If code is just the return buffer name or the monostate literal, don't emit it as a statement
-		if code == RET_BUF_NAME or code == "std::monostate{}" then
+		if code == ctx:use_ret_buf() or code == "std::monostate{}" then
 			return stmts
 		else
 			return stmts .. code .. ";\n"
@@ -578,9 +582,9 @@ register_handler("varargs", function(ctx, node, depth, opts)
 	
 	if opts.multiret then
 		-- Populate RET_BUF_NAME directly
-		ctx:add_statement(RET_BUF_NAME .. ".clear();\n")
-		ctx:add_statement("if(n_args > " .. start_index .. ") " .. RET_BUF_NAME .. ".insert(" .. RET_BUF_NAME .. ".end(), args + " .. start_index .. ", args + n_args);\n")
-		return RET_BUF_NAME
+		ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
+		ctx:add_statement("if(n_args > " .. start_index .. ") " .. ctx:use_ret_buf() .. ".insert(" .. ctx:use_ret_buf() .. ".end(), args + " .. start_index .. ", args + n_args);\n")
+		return ctx:use_ret_buf()
 	else
 		-- Return a temporary vector or single value?
 		-- Varargs in scalar context returns the first vararg
@@ -692,8 +696,8 @@ BuiltinCallHandlers["print"] = function(ctx, node, depth, opts)
 	
 	if opts.multiret then
 		-- print returns nothing (nil), so clear the buffer
-		ctx:add_statement(RET_BUF_NAME .. ".clear();\n")
-		return RET_BUF_NAME
+		ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
+		return ctx:use_ret_buf()
 	else
 		return "std::monostate{}"
 	end
@@ -725,8 +729,8 @@ BuiltinCallHandlers["require"] = function(ctx, node, depth, opts)
 		local sanitized_module_name = module_name:gsub("%.", "_")
 		
 		if opts.multiret then
-			ctx:add_statement(RET_BUF_NAME .. " = " .. sanitized_module_name .. "::load();\n")
-			return RET_BUF_NAME
+			ctx:add_statement(ctx:use_ret_buf() .. " = " .. sanitized_module_name .. "::load();\n")
+			return ctx:use_ret_buf()
 		else
 			local temp_var = "req_res_" .. ctx:get_unique_id()
 			ctx:add_statement("LuaValueVector " .. temp_var .. "_vec = " .. sanitized_module_name .. "::load();\n")
@@ -746,8 +750,8 @@ BuiltinCallHandlers["setmetatable"] = function(ctx, node, depth, opts)
 	ctx:add_statement("get_object(" .. translated_table .. ")->set_metatable(get_object(" .. translated_metatable .. "));\n")
 	
 	if opts.multiret then
-		ctx:add_statement(RET_BUF_NAME .. ".clear(); " .. RET_BUF_NAME .. ".push_back(" .. translated_table .. ");\n")
-		return RET_BUF_NAME
+		ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. translated_table .. ");\n")
+		return ctx:use_ret_buf()
 	else
 		return translated_table
 	end
@@ -764,21 +768,21 @@ local function handle_string_method(method_name, ctx, node, base_node, depth, op
 	
 	local call_stmt = ""
 	if method_name == "match" then
-		call_stmt = "lua_string_match("..base_code..", "..pattern_code..", " .. RET_BUF_NAME .. ");\n"
+		call_stmt = "lua_string_match("..base_code..", "..pattern_code..", " .. ctx:use_ret_buf() .. ");\n"
 	elseif method_name == "find" then
-		call_stmt = "lua_string_find("..base_code..", "..pattern_code..", " .. RET_BUF_NAME .. ");\n"
+		call_stmt = "lua_string_find("..base_code..", "..pattern_code..", " .. ctx:use_ret_buf() .. ");\n"
 	elseif method_name == "gsub" then
-		call_stmt = "lua_string_gsub("..base_code..", "..pattern_code..", "..replacement_code..", " .. RET_BUF_NAME .. ");\n"
+		call_stmt = "lua_string_gsub("..base_code..", "..pattern_code..", "..replacement_code..", " .. ctx:use_ret_buf() .. ");\n"
 	end
 	
-	ctx:add_statement(RET_BUF_NAME .. ".clear();\n")
+	ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 	ctx:add_statement(call_stmt)
 	
 	if opts.multiret then
-		return RET_BUF_NAME
+		return ctx:use_ret_buf()
 	else
 		local temp_var = "str_res_" .. ctx:get_unique_id()
-		ctx:add_statement("LuaValue " .. temp_var .. " = get_return_value(" .. RET_BUF_NAME .. ", 0);\n")
+		ctx:add_statement("LuaValue " .. temp_var .. " = get_return_value(" .. ctx:use_ret_buf() .. ", 0);\n")
 		return temp_var
 	end
 end
@@ -835,8 +839,8 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 				local arg_code = translate_node(ctx, arg_node, depth + 1)
 				-- Return the inline C++ call directly (returns bool)
 				if opts.multiret then
-					ctx:add_statement(RET_BUF_NAME .. ".clear(); " .. RET_BUF_NAME .. ".push_back(LuaValue(" .. inline_func .. "(" .. arg_code .. ")));\\n")
-					return RET_BUF_NAME
+					ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(LuaValue(" .. inline_func .. "(" .. arg_code .. ")));\n")
+					return ctx:use_ret_buf()
 				else
 					return inline_func .. "(" .. arg_code .. ")"
 				end
@@ -872,31 +876,28 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	-- 3. Emit Call Statement
 	if not opts.multiret and not is_vector and num_args <= 3 then
 		-- Fast path: Direct call returning single value
-		ctx.uses_ret_buf = true
 		local temp_var = "call_res_" .. ctx:get_unique_id()
-		local call_expr = "lua_call" .. num_args .. "(" .. translated_func_access .. ", " .. RET_BUF_NAME .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
+		local call_expr = "lua_call" .. num_args .. "(" .. translated_func_access .. ", " .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
 		ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
 		return temp_var
 	elseif is_vector then
 		-- args_code is the name of a vector variable
-		ctx.uses_ret_buf = true
-		ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. args_code .. ".data(), " .. args_code .. ".size(), " .. RET_BUF_NAME .. ");\n")
+		ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
 	else
-		ctx.uses_ret_buf = true
 		if args_code == "" then
-			ctx:add_statement("call_lua_value(" .. translated_func_access .. ", {}, 0, " .. RET_BUF_NAME .. ");\n")
+			ctx:add_statement("call_lua_value(" .. translated_func_access .. ", {}, 0, " .. ctx:use_ret_buf() .. ");\n")
 		else
 			-- Single/Simple args optimization
-			ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. RET_BUF_NAME .. ", " .. args_code .. ");\n")
+			ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. ctx:use_ret_buf() .. ", " .. args_code .. ");\n")
 		end
 	end
 	
 	-- 4. Return Result (for cases where we didn't use the fast path)
 	if opts.multiret then
-		return RET_BUF_NAME
+		return ctx:use_ret_buf()
 	else
 		local temp_var = "call_res_" .. ctx:get_unique_id()
-		ctx:add_statement("LuaValue " .. temp_var .. " = get_return_value(" .. RET_BUF_NAME .. ", 0);\n")
+		ctx:add_statement("LuaValue " .. temp_var .. " = get_return_value(" .. ctx:use_ret_buf() .. ", 0);\n")
 		return temp_var
 	end
 end)
@@ -923,8 +924,8 @@ MethodCallHandlers["byte"] = function(ctx, node, base_node, depth, opts)
 		local base_code = translate_node(ctx, base_node, depth + 1)
 		
 		if opts.multiret then
-			ctx:add_statement("lua_string_byte(" .. base_code .. ", " .. arg1_code .. ", " .. arg1_code .. ", " .. RET_BUF_NAME .. ");\n")
-			return RET_BUF_NAME
+			ctx:add_statement("lua_string_byte(" .. base_code .. ", " .. arg1_code .. ", " .. arg1_code .. ", " .. ctx:use_ret_buf() .. ");\n")
+			return ctx:use_ret_buf()
 		else
 			return "lua_string_byte_at_raw(" .. base_code .. ", " .. arg1_code .. ")"
 		end
@@ -936,8 +937,8 @@ MethodCallHandlers["byte"] = function(ctx, node, base_node, depth, opts)
 		if arg1_code == arg2_code then
 			local base_code = translate_node(ctx, base_node, depth + 1)
 			if opts.multiret then
-				ctx:add_statement("lua_string_byte(" .. base_code .. ", " .. arg1_code .. ", " .. arg1_code .. ", " .. RET_BUF_NAME .. ");\n")
-				return RET_BUF_NAME
+				ctx:add_statement("lua_string_byte(" .. base_code .. ", " .. arg1_code .. ", " .. arg1_code .. ", " .. ctx:use_ret_buf() .. ");\n")
+				return ctx:use_ret_buf()
 			else
 				return "lua_string_byte_at_raw(" .. base_code .. ", " .. arg1_code .. ")"
 			end
@@ -982,8 +983,8 @@ MethodCallHandlers["sub"] = function(ctx, node, base_node, depth, opts)
 		if arg1_code == arg2_code then
 			local base_code = translate_node(ctx, base_node, depth + 1)
 			if opts.multiret then
-				ctx:add_statement(RET_BUF_NAME .. ".clear(); " .. RET_BUF_NAME .. ".push_back(lua_string_char_at(" .. base_code .. ", " .. arg1_code .. "));\n")
-				return RET_BUF_NAME
+				ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(lua_string_char_at(" .. base_code .. ", " .. arg1_code .. "));\n")
+				return ctx:use_ret_buf()
 			else
 				return "lua_string_char_at(" .. base_code .. ", " .. arg1_code .. ")"
 			end
@@ -1022,26 +1023,23 @@ register_handler("method_call_expression", function(ctx, node, depth, opts)
 	-- 3. Emit Call Statement
 	if not opts.multiret and not is_vector and num_args <= 3 then
 		-- Fast path: Direct call returning single value
-		ctx.uses_ret_buf = true
 		local temp_var = "mcall_res_" .. ctx:get_unique_id()
-		local call_expr = "lua_call" .. num_args .. "(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. RET_BUF_NAME .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
+		local call_expr = "lua_call" .. num_args .. "(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
 		ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
 		return temp_var
 	elseif is_vector then
 		-- args_code is the name of a vector variable
-		ctx.uses_ret_buf = true
-		ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. args_code .. ".data(), " .. args_code .. ".size(), " .. RET_BUF_NAME .. ");\n")
+		ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
 	else
 		-- Single/Simple args optimization
-		ctx.uses_ret_buf = true
-		ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. RET_BUF_NAME .. ", " .. args_code .. ");\n")
+		ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. ctx:use_ret_buf() .. ", " .. args_code .. ");\n")
 	end
 	
 	if opts.multiret then
-		return RET_BUF_NAME
+		return ctx:use_ret_buf()
 	else
 		local temp_var = "mcall_res_" .. ctx:get_unique_id()
-		ctx:add_statement("LuaValue " .. temp_var .. " = get_return_value(" .. RET_BUF_NAME .. ", 0);\n")
+		ctx:add_statement("LuaValue " .. temp_var .. " = get_return_value(" .. ctx:use_ret_buf() .. ", 0);\n")
 		return temp_var
 	end
 end)

@@ -188,7 +188,7 @@ local function generate_cmake(output_path, generated_basenames)
 		"cmake_minimum_required(VERSION 3.10)",
 		"project(LuaX_Generated_Project LANGUAGES CXX)",
 		"set(CMAKE_CXX_STANDARD 20)",
-		"add_compile_options(-O2)",
+		"add_compile_options(-g -O2)",
 		"include_directories(\"" .. luax_root .. "include\")",
 		"set(LIB_SOURCES " .. table.concat(lib_srcs, "\n    ") .. ")",
 		"set(GEN_SOURCES " .. table.concat(gen_srcs, "\n    ") .. ")",
@@ -234,6 +234,15 @@ while head <= #queue do
 end
 
 local generated_basenames = {}
+local threads = {}
+local has_parallel = (type(coroutine.create_parallel) == "function")
+
+if has_parallel then
+	print("Parallel translation enabled.")
+else
+	print("Parallel translation unavailable (bootstrapping). Running sequentially.")
+end
+
 for file_path, output_name in pairs(files_to_translate) do
 	table.insert(generated_basenames, output_name)
 	local cpp_out = BUILD_DIR .. "/" .. output_name .. ".cpp"
@@ -241,7 +250,34 @@ for file_path, output_name in pairs(files_to_translate) do
 	if is_uptodate(file_path, cpp_out) then
 		print("Up to date: " .. output_name)
 	else
-		translate_file(file_path, output_name, file_path == input_lua_file, true)
+		local is_main_entry = (file_path == input_lua_file)
+
+		if has_parallel then
+			local co = coroutine.create_parallel(function(fp, out, main, keep) 
+				return translate_file(fp, out, main, keep) 
+			end)
+			coroutine.resume(co, file_path, output_name, is_main_entry, keep_files)
+			table.insert(threads, co)
+		else
+			translate_file(file_path, output_name, is_main_entry, keep_files)
+		end
+	end
+end
+
+-- Synchronization Barrier
+if has_parallel and #threads > 0 then
+	local error_count = 0
+	for _, co in ipairs(threads) do
+		local success, val = coroutine.await(co) 
+		
+		if not success then
+			print("Error in thread: " .. tostring(val))
+			error_count = error_count + 1
+		end
+	end
+	
+	if error_count > 0 then
+		error("Compilation failed with " .. error_count .. " errors.")
 	end
 end
 
