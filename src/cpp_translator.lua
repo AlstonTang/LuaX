@@ -482,7 +482,7 @@ register_handler("binary_expression", function(ctx, node, depth)
 	elseif operator == "==" then
 		return "lua_equals(" .. left .. ", " .. right .. ")"
 	elseif operator == "~=" then
-		return "(!is_lua_truthy(lua_equals(" .. left .. ", " .. right .. ")))"
+		return "(!lua_equals(" .. left .. ", " .. right .. "))"
 	elseif operator == "<" then
 		return "lua_less_than(" .. left .. ", " .. right .. ")"
 	elseif operator == ">" then

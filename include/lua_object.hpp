@@ -915,8 +915,8 @@ inline LuaValue operator>>(const LuaValue& a, const LuaValue& b) {
 }
 
 inline LuaValue lua_get_length(const LuaValue& val) {
-	if (auto* s = std::get_if<std::string>(&val)) return static_cast<double>(s->length());
-	if (auto* sv = std::get_if<std::string_view>(&val)) return static_cast<double>(sv->length());
+	if (auto* s = std::get_if<std::string>(&val)) return static_cast<long long>(s->length());
+	if (auto* sv = std::get_if<std::string_view>(&val)) return static_cast<long long>(sv->length());
 	if (auto* obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&val)) {
 		auto& obj = *obj_ptr;
 		LUAX_LOCK(obj.get());
@@ -928,7 +928,27 @@ inline LuaValue lua_get_length(const LuaValue& val) {
 				return res.empty() ? std::monostate{} : res[0];
 			}
 		}
-		return static_cast<double>(obj->array_part.size());
+		return static_cast<long long>(obj->array_part.size());
+	}
+	throw std::runtime_error("attempt to get length of a " + get_lua_type_name(val) + " value");
+}
+
+inline long long lua_get_length_int(const LuaValue& val) {
+	if (auto* s = std::get_if<std::string>(&val)) return static_cast<long long>(s->length());
+	if (auto* sv = std::get_if<std::string_view>(&val)) return static_cast<long long>(sv->length());
+	if (auto* obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&val)) {
+		auto& obj = *obj_ptr;
+		LUAX_LOCK(obj.get());
+		if (obj->metatable) {
+			auto len_meta = obj->metatable->get_item("__len");
+			if (!std::holds_alternative<std::monostate>(len_meta)) {
+				LuaValueVector res;
+				call_lua_value(len_meta, &val, 1, res);
+				LuaValue ret = res.empty() ? std::monostate{} : res[0];
+                return static_cast<long long>(to_double(ret));
+			}
+		}
+		return static_cast<long long>(obj->array_part.size());
 	}
 	throw std::runtime_error("attempt to get length of a " + get_lua_type_name(val) + " value");
 }
