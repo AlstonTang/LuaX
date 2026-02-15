@@ -198,7 +198,7 @@ local function translate_node(ctx, node, depth, opts)
 	end
 	
 	if not node[1] then
-		print("ERROR: Node has no type field:", node)
+		print("ERROR: Node has no type field:", tostring(node))
 		return "/* ERROR: Node with no type */"
 	end
 	
@@ -383,7 +383,12 @@ register_handler("identifier", function(ctx, node, depth)
 	if node[3] == "nil" then
 		return "std::monostate{}"
 	elseif lua_global_libraries[node[3]] then
-		-- Cache standard library objects
+		-- Cache standard library objects unless overridden
+		if ctx.overrides and ctx.overrides[node[3]] then
+			-- print("DEBUG: handler for identifier '" .. node[3] .. "' detected override=true")
+			return "get_object(_G->get(" .. ctx:get_string_cache(node[3]) .. "))"
+		end
+		-- print("DEBUG: handler for identifier '" .. node[3] .. "' detected override=false")
 		return "get_object(" .. ctx:get_global_cache(node[3]) .. ")"
 	elseif node[3] == "type" or node[3] == "print" or node[3] == "error" or node[3] == "tonumber" or node[3] == "tostring" or node[3] == "setmetatable" or node[3] == "getmetatable" or node[3] == "pairs" or node[3] == "ipairs" or node[3] == "next" or node[3] == "select" or node[3] == "rawget" or node[3] == "rawset" or node[3] == "rawequal" or node[3] == "pcall" or node[3] == "xpcall" or node[3] == "require" or node[3] == "loadfile" or node[3] == "dofile" or node[3] == "load" or node[3] == "assert" or node[3] == "collectgarbage" or node[3] == "_VERSION" or node[3] == "_G" then
 		return ctx:get_global_cache(node[3])
@@ -522,7 +527,12 @@ register_handler("member_expression", function(ctx, node, depth)
 	local base_code = translate_node(ctx, base_node, depth + 1)
 	
 	if base_node[1] == "identifier" and lua_global_libraries[base_node[3]] then
-		-- Use cached access for global library members
+		-- Use cached access for global library members unless overridden
+		if ctx.overrides and ctx.overrides[base_node[3]] then
+			local member_cache_var = ctx:get_string_cache(member_node[3])
+			return "lua_get_member(" .. base_code .. ", " .. member_cache_var .. ")"
+		end
+		-- print("DEBUG: member_expression for '" .. base_node[3] .. "." .. member_node[3] .. "' detected override=false")
 		local cache_var = ctx:get_lib_cache(base_node[3], member_node[3])
 		return cache_var
 	else
@@ -787,6 +797,17 @@ local function handle_string_method(method_name, ctx, node, base_node, depth, op
 	end
 end
 
+local function get_call_args(node)
+	local list_args = {}
+	local children = node[5]
+	if children then
+		for i = 2, #children do
+			table.insert(list_args, children[i])
+		end
+	end
+	return list_args
+end
+
 StringMethodHandlers["match"] = function(ctx, node, base_node, depth, opts) return handle_string_method("match", ctx, node, base_node, depth, opts) end
 StringMethodHandlers["find"] = function(ctx, node, base_node, depth, opts) return handle_string_method("find", ctx, node, base_node, depth, opts) end
 StringMethodHandlers["gsub"] = function(ctx, node, base_node, depth, opts) return handle_string_method("gsub", ctx, node, base_node, depth, opts) end
@@ -794,20 +815,23 @@ StringMethodHandlers["gsub"] = function(ctx, node, base_node, depth, opts) retur
 register_handler("call_expression", function(ctx, node, depth, opts)
 	local func_node = node[5][1]
 	
-	-- Check for string library methods via member expression
+	-- Check for library method calls via member expression
 	if func_node[1] == "member_expression" then
 		local base = func_node[5][1]
 		local member = func_node[5][2]
-		if base[3] == "string" then
-			local handler = StringMethodHandlers[member[3]]
+		if base[3] == "string" or base[3] == "table" or base[3] == "math" or base[3] == "os" then
+			local handler = BuiltinCallHandlers[base[3] .. "." .. member[3]]
 			if handler then
-				return handler(ctx, node, node[5][2], depth, opts)
+				local result = handler(ctx, node, depth, opts)
+				if result then return result end
 			end
-		end
-		if base[3] == "table" then
-			local handler = BuiltinCallHandlers["table." .. member[3]]
-			if handler then
-				return handler(ctx, node, depth, opts)
+			-- Also check StringMethodHandlers for string.*
+			if base[3] == "string" then
+				local s_handler = StringMethodHandlers[member[3]]
+				if s_handler then
+					local s_result = s_handler(ctx, node, node[5][2], depth, opts)
+					if s_result then return s_result end
+				end
 			end
 		end
 	end
@@ -816,7 +840,8 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	if func_node[1] == "identifier" then
 		local handler = BuiltinCallHandlers[func_node[3]]
 		if handler then
-			return handler(ctx, node, depth, opts)
+			local result = handler(ctx, node, depth, opts)
+			if result then return result end
 		end
 	end
 	
@@ -1701,10 +1726,234 @@ function CppTranslator:get_unique_id()
 	return tostring(self.unique_id_counter)
 end
 
+--------------------------------------------------------------------------------
+-- Analysis: Override Detection
+--------------------------------------------------------------------------------
+
+local function analyze_overrides(ast, ctx)
+	local overrides = { math = false, string = false, os = false }
+	
+	local function scan(node)
+		if not node or type(node) ~= "table" then return end
+		
+		-- Check for assignment to variables
+		if node[1] == "assignment" or node[1] == "local_declaration" then
+			local var_list = node[5] and node[5][1]
+			if var_list and var_list[5] then
+				for _, var in ipairs(var_list[5]) do
+					if var and var[1] == "identifier" then
+						if overrides[var[3]] ~= nil then
+							overrides[var[3]] = true
+						end
+					elseif var and var[1] == "member_expression" and var[5] then
+						local base = var[5][1]
+						if base and base[1] == "identifier" and overrides[base[3]] ~= nil then
+							overrides[base[3]] = true
+						end
+					end
+				end
+			end
+		end
+		
+		-- Recurse
+		local children = node[5]
+		if children then
+			for i = 1, #children do
+				scan(children[i])
+			end
+		end
+	end
+	
+	scan(ast)
+	ctx.overrides = overrides
+end
+
+--------------------------------------------------------------------------------
+-- Math Library Inlining
+--------------------------------------------------------------------------------
+
+local MathHandlers = {
+	abs = "std::abs", ceil = "std::ceil", floor = "std::floor",
+	sin = "std::sin", cos = "std::cos", tan = "std::tan",
+	asin = "std::asin", acos = "std::acos", atan = "std::atan",
+	exp = "std::exp", log = "std::log", sqrt = "std::sqrt",
+	deg = function(arg) return "(" .. arg .. " * 180.0 / " .. "M_PI" .. ")" end,
+	rad = function(arg) return "(" .. arg .. " * " .. "M_PI" .. " / 180.0)" end
+}
+
+for name, cpp_func in pairs(MathHandlers) do
+	BuiltinCallHandlers["math." .. name] = function(ctx, node, depth, opts)
+		if ctx.overrides and ctx.overrides.math then return nil end
+		
+		local call_args = get_call_args(node)
+		if #call_args == 0 and name == "random" then
+			if opts.multiret then
+				ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back((double)std::rand() / RAND_MAX);\n")
+				return ctx:use_ret_buf()
+			else
+				return "((double)std::rand() / RAND_MAX)"
+			end
+		end
+		
+		if #call_args == 1 then
+			local arg_code = translate_node(ctx, call_args[1], depth + 1)
+			local expr
+			if type(cpp_func) == "function" then
+				expr = cpp_func(ctx:to_double(arg_code))
+			else
+				expr = cpp_func .. "(" .. ctx:to_double(arg_code) .. ")"
+			end
+			
+			if opts.multiret then
+				ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+				return ctx:use_ret_buf()
+			else
+				return expr
+			end
+		end
+		return nil -- Fallback to generic call for unexpected arg counts (e.g. math.random(min, max))
+	end
+end
+
+BuiltinCallHandlers["math.random"] = function(ctx, node, depth, opts)
+	if ctx.overrides and ctx.overrides.math then return nil end
+	local call_args = get_call_args(node)
+	if #call_args == 0 then
+		local expr = "((double)std::rand() / RAND_MAX)"
+		if opts.multiret then
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			return ctx:use_ret_buf()
+		else
+			return expr
+		end
+	end
+	return nil -- Fallback for math.random(n) or math.random(m, n)
+end
+
+-- Special handling for vararg math functions
+BuiltinCallHandlers["math.max"] = function(ctx, node, depth, opts)
+	if ctx.overrides and ctx.overrides.math then return nil end
+	local call_args = get_call_args(node)
+	if #call_args == 2 then
+		local a = translate_node(ctx, call_args[1], depth + 1)
+		local b = translate_node(ctx, call_args[2], depth + 1)
+		local da = ctx:to_double(a)
+		local db = ctx:to_double(b)
+		local expr = "(" .. da .. " > " .. db .. " ? " .. da .. " : " .. db .. ")"
+		if opts.multiret then
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			return ctx:use_ret_buf()
+		else
+			return expr
+		end
+	end
+	return nil -- Fallback for >2 args
+end
+
+BuiltinCallHandlers["math.min"] = function(ctx, node, depth, opts)
+	if ctx.overrides and ctx.overrides.math then return nil end
+	local call_args = get_call_args(node)
+	if #call_args == 2 then
+		local a = translate_node(ctx, call_args[1], depth + 1)
+		local b = translate_node(ctx, call_args[2], depth + 1)
+		local da = ctx:to_double(a)
+		local db = ctx:to_double(b)
+		local expr = "(" .. da .. " < " .. db .. " ? " .. da .. " : " .. db .. ")"
+		if opts.multiret then
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			return ctx:use_ret_buf()
+		else
+			return expr
+		end
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
+-- String Library Inlining
+--------------------------------------------------------------------------------
+
+BuiltinCallHandlers["string.byte"] = function(ctx, node, depth, opts)
+	if ctx.overrides and ctx.overrides.string then return nil end
+	local call_args = get_call_args(node)
+	if #call_args == 1 then
+		local str = translate_node(ctx, call_args[1], depth + 1)
+		local expr = "(as_view(" .. str .. ").empty() ? LuaValue() : LuaValue((double)(unsigned char)as_view(" .. str .. ")[0]))"
+		if opts.multiret then
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			return ctx:use_ret_buf()
+		else
+			return expr
+		end
+	end
+	return nil
+end
+
+BuiltinCallHandlers["string.len"] = function(ctx, node, depth, opts)
+	if ctx.overrides and ctx.overrides.string then return nil end
+	local call_args = get_call_args(node)
+	if #call_args == 1 then
+		local str = translate_node(ctx, call_args[1], depth + 1)
+		local expr = "lua_get_length_int(" .. str .. ")"
+		if opts.multiret then
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			return ctx:use_ret_buf()
+		else
+			return expr
+		end
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
+-- OS Library Inlining
+--------------------------------------------------------------------------------
+
+BuiltinCallHandlers["os.clock"] = function(ctx, node, depth, opts)
+	if ctx.overrides and ctx.overrides.os then return nil end
+	local expr = "((double)clock() / CLOCKS_PER_SEC)"
+	if opts.multiret then
+		ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+		return ctx:use_ret_buf()
+	else
+		return expr
+	end
+end
+
+BuiltinCallHandlers["os.time"] = function(ctx, node, depth, opts)
+	if ctx.overrides and ctx.overrides.os then return nil end
+	local call_args = get_call_args(node)
+	if #call_args == 0 then
+		local expr = "(long long)std::time(nullptr)"
+		if opts.multiret then
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			return ctx:use_ret_buf()
+		else
+			return expr
+		end
+	end
+	return nil
+end
+
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
+
+function TranslatorContext:to_double(expr)
+	return "to_double(" .. expr .. ")"
+end
+
+
+
 function CppTranslator:translate_recursive(ast_root, file_name, for_header, current_module_object_name, is_main_script)
-	-- Create translation context
+	self.unique_id_counter = 0
 	local ctx = TranslatorContext:new(self, for_header, current_module_object_name, is_main_script)
 	
+	-- Run safety analysis first (if not generating header)
+	if not for_header then
+		analyze_overrides(ast_root, ctx)
+	end
+
 	-- Translate the AST
 	local generated_code = translate_node(ctx, ast_root, 0)
 	
@@ -1713,7 +1962,7 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 	generated_code = remaining_stmts .. generated_code
 	
 	-- Build the header
-	local header = "#include <iostream>\n#include <vector>\n#include <string>\n#include <map>\n#include <memory>\n#include <variant>\n#include <functional>\n#include <cmath>\n#include \"lua_object.hpp\"\n\n"
+	local header = "#include <iostream>\n#include <vector>\n#include <string>\n#include <map>\n#include <memory>\n#include <variant>\n#include <functional>\n#include <cmath>\n#include <ctime>\n#include \"lua_object.hpp\"\n\n"
 	
 	for module_name, _ in pairs(ctx.required_modules) do
 		local sanitized_module_name = module_name:gsub("%.", "_")
@@ -1746,13 +1995,13 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 		local namespace_end = "\n} // namespace " .. file_name .. "\n"
 		
 		if for_header then
-			local hpp_header = "#pragma once\n#include \"lua_object.hpp\"\n\n"
+			local hpp_header = "#ifndef LUAX_" .. string.upper(file_name) .. "_HPP\n#define LUAX_" .. string.upper(file_name) .. "_HPP\n\n#include \"lua_object.hpp\"\n\n"
 			local hpp_load_function_declaration = "LuaValueVector load();\n"
 			local global_var_extern_declarations = ""
 			for var_name, _ in pairs(ctx.module_global_vars) do
 				global_var_extern_declarations = global_var_extern_declarations .. "extern LuaValue " .. var_name .. ";\n"
 			end
-			return hpp_header .. global_var_extern_declarations .. namespace_start .. hpp_load_function_declaration .. namespace_end
+			return hpp_header .. global_var_extern_declarations .. namespace_start .. hpp_load_function_declaration .. namespace_end .. "#endif\n"
 		else
 			local cpp_header = "#include \"" .. file_name .. ".hpp\"\n"
 			local global_var_definitions = ""
@@ -1763,6 +2012,11 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 			local module_identifier = ""
 			local explicit_return_found = false
 			local explicit_return_value = "LuaObject::create()"
+			
+			-- Re-process AST for module return handling (simplified for module structure)
+			-- Note: generated_code already contains the body, but we need to wrap it specifically for modules
+			-- The current approach in translate_recursive for modules seems to be re-traversing the AST to separate definitions from execution?
+			-- The original code did this. Let's revert to using the AST traversal for modules as it was before.
 			
 			for _, child in ipairs(ast_root[5] or empty_table) do
 				if child[1] == "local_declaration" and #(child[5] or empty_table) >= 2 and child[5][1][1] == "variable" and child[5][2][1] == "table_constructor" then
