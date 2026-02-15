@@ -53,11 +53,11 @@ struct PoolAllocator {
     template <typename U> PoolAllocator(const PoolAllocator<U>&) {}
 
     T* allocate(std::size_t n) {
-        return static_cast<T*>(::operator new(n * sizeof(T)));
+        return static_cast<T*>(LuaObjectPool::allocate(n * sizeof(T)));
     }
 
     void deallocate(T* p, std::size_t n) {
-        ::operator delete(p);
+        LuaObjectPool::deallocate(p, n * sizeof(T));
     }
 };
 
