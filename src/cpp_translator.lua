@@ -141,6 +141,8 @@ function TranslatorContext:get_string_cache(s)
 end
 
 function TranslatorContext:get_global_cache(name)
+	if name == "math.pi" then return "M_PI" end
+	if name == "math.huge" then return "HUGE_VAL" end
 	if not self.global_identifier_caches[name] then
 		self.global_identifier_caches[name] = "_cache_global_" .. name
 	end
@@ -454,6 +456,37 @@ register_handler("binary_expression", function(ctx, node, depth)
 		return temp_var
 	end
 
+	-- Constant Folding (Structural)
+	if node[5][1][1] == "number" and node[5][2][1] == "number" then
+		local l = tonumber(node[5][1][2])
+		local r = tonumber(node[5][2][2])
+		if l and r then
+			if operator == "+" then return tostring(l + r)
+			elseif operator == "-" then return tostring(l - r)
+			elseif operator == "*" then return tostring(l * r)
+			elseif operator == "/" and r ~= 0 then return tostring(l / r)
+			end
+		end
+	elseif node[5][1][1] == "integer" and node[5][2][1] == "integer" then
+		local l = tonumber(node[5][1][2])
+		local r = tonumber(node[5][2][2])
+		if l and r then
+			if operator == "+" then return tostring(l + r) .. "LL"
+			elseif operator == "-" then return tostring(l - r) .. "LL"
+			elseif operator == "*" then return tostring(l * r) .. "LL"
+			elseif operator == "//" and r ~= 0 then return tostring(math.floor(l / r)) .. "LL"
+			elseif operator == "%" and r ~= 0 then return tostring(l % r) .. "LL"
+			elseif operator == "&" then return tostring(l & r) .. "LL"
+			elseif operator == "|" then return tostring(l | r) .. "LL"
+			elseif operator == "~" then return tostring(l ~ r) .. "LL"
+			elseif operator == "<<" then return tostring(l << r) .. "LL"
+			elseif operator == ">>" then return tostring(l >> r) .. "LL"
+			end
+		end
+	elseif operator == ".." and node[5][1][1] == "string" and node[5][2][1] == "string" then
+		return ctx:get_string_cache(node[5][1][2] .. node[5][2][2])
+	end
+
 	local left = translate_node(ctx, node[5][1], depth + 1)
 	local right = translate_node(ctx, node[5][2], depth + 1)
 	
@@ -652,8 +685,12 @@ register_handler("table_constructor", function(ctx, node, depth)
 		end
 	end
 
-	if #props > 0 and #props <= 4 and #array == 0 and not has_complex then
-		ctx:add_statement("auto " .. temp_table_var .. " = LuaObject::create(" .. table.concat(props, ", ") .. ");\n")
+	if #props > 0 and #props <= 8 and #array == 0 and not has_complex then
+		ctx:add_statement("auto " .. temp_table_var .. " = LuaObject::create({" .. table.concat(props, ", ") .. "});\n")
+	elseif #props == 0 and #array > 0 and #array <= 8 and not has_complex then
+		ctx:add_statement("auto " .. temp_table_var .. " = LuaObject::create({}, {" .. table.concat(array, ", ") .. "});\n")
+	elseif #props > 0 and #props <= 8 and #array > 0 and #array <= 8 and not has_complex then
+		ctx:add_statement("auto " .. temp_table_var .. " = LuaObject::create({" .. table.concat(props, ", ") .. "}, {" .. table.concat(array, ", ") .. "});\n")
 	else
 		local props_str = "{" .. table.concat(props, ", ") .. "}"
 		local array_str = "{" .. table.concat(array, ", ") .. "}"
@@ -727,6 +764,17 @@ BuiltinCallHandlers["table.insert"] = function(ctx, node, depth, opts)
 		local value_code = translate_node(ctx, children[4], depth + 1)
         ctx:add_statement("lua_table_insert(" .. table_code .. ", get_long_long(" .. pos_code .. "), " .. value_code .. ");\n")
 		return "std::monostate{}"
+	end
+	return nil
+end
+
+BuiltinCallHandlers["table.unpack"] = function(ctx, node, depth, opts)
+	if not opts.multiret then return nil end -- Scalar context falls back to generic
+	local children = node[5]
+	if #children >= 2 then
+		local table_code = translate_node(ctx, children[2], depth + 1)
+		ctx:add_statement(ctx:use_ret_buf() .. " = get_object(" .. table_code .. ")->array_part;\n")
+		return ctx:use_ret_buf()
 	end
 	return nil
 end
@@ -1000,13 +1048,11 @@ MethodCallHandlers["sub"] = function(ctx, node, base_node, depth, opts)
 	local arg3 = node[5][5]
 	
 	if arg1 and arg2 and not arg3 then
-		-- We optimize if we can prove args are identical, or just simple vars
-		-- For now, let's translate them and compare the generated code string
 		local arg1_code = translate_node(ctx, arg1, depth + 1)
 		local arg2_code = translate_node(ctx, arg2, depth + 1)
 		
+		local base_code = translate_node(ctx, base_node, depth + 1)
 		if arg1_code == arg2_code then
-			local base_code = translate_node(ctx, base_node, depth + 1)
 			if opts.multiret then
 				ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(lua_string_char_at(" .. base_code .. ", " .. arg1_code .. "));\n")
 				return ctx:use_ret_buf()
@@ -1015,12 +1061,16 @@ MethodCallHandlers["sub"] = function(ctx, node, base_node, depth, opts)
 			end
 		end
         
-        -- Optimization for general sub(i, j)
-        local base_code = translate_node(ctx, base_node, depth + 1)
         if not opts.multiret then
             return "lua_string_sub(" .. base_code .. ", get_long_long(" .. arg1_code .. "), get_long_long(" .. arg2_code .. "))"
         end
-	end
+	elseif arg1 and not arg2 then
+        local arg1_code = translate_node(ctx, arg1, depth + 1)
+        local base_code = translate_node(ctx, base_node, depth + 1)
+        if not opts.multiret then
+            return "lua_string_sub(" .. base_code .. ", get_long_long(" .. arg1_code .. "), -1)"
+        end
+    end
 	return nil
 end
 
@@ -1616,6 +1666,44 @@ register_handler("for_generic_statement", function(ctx, node, depth)
 	
 	local cpp_code = prev_stmts .. "{\n" -- Open block for loop scope
 	
+	local is_ipairs = false
+	local is_pairs = false
+	local table_to_iter = nil
+
+	if #(expr_list_node[5] or empty_table) == 1 then
+		local call_node = expr_list_node[5][1]
+		if call_node[1] == "call_expression" and call_node[5][1][1] == "identifier" then
+			local func_name = call_node[5][1][3]
+			if func_name == "ipairs" or func_name == "pairs" then
+				if not ctx.overrides or not ctx.overrides[func_name] then
+					if func_name == "ipairs" then is_ipairs = true else is_pairs = true end
+					table_to_iter = translate_node(ctx, call_node[5][2], depth + 1)
+					local stmts = ctx:flush_statements()
+					cpp_code = cpp_code .. stmts
+				end
+			end
+		end
+	end
+
+	if is_ipairs and #loop_vars <= 2 then
+		-- Optimized ipairs loop
+		local idx_var = "i_" .. ctx:get_unique_id()
+		local t_obj = "t_obj_" .. ctx:get_unique_id()
+		cpp_code = cpp_code .. "auto " .. t_obj .. " = get_object(" .. table_to_iter .. ");\n"
+		cpp_code = cpp_code .. "for (size_t " .. idx_var .. " = 0; " .. idx_var .. " < " .. t_obj .. "->array_part.size(); ++" .. idx_var .. ") {\n"
+		if #loop_vars >= 1 then
+			cpp_code = cpp_code .. "    LuaValue " .. loop_vars[1] .. " = static_cast<long long>(" .. idx_var .. " + 1);\n"
+		end
+		if #loop_vars >= 2 then
+			cpp_code = cpp_code .. "    LuaValue " .. loop_vars[2] .. " = " .. t_obj .. "->array_part[" .. idx_var .. "];\n"
+		end
+		cpp_code = cpp_code .. "    if (std::holds_alternative<std::monostate>(" .. (#loop_vars >= 2 and loop_vars[2] or (t_obj .. "->array_part[" .. idx_var .. "]")) .. ")) break;\n"
+		cpp_code = cpp_code .. translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "\n"
+		cpp_code = cpp_code .. "}\n"
+		cpp_code = cpp_code .. "}\n"
+		return cpp_code
+	end
+
 	if #(expr_list_node[5] or empty_table) == 1 and (expr_list_node[5][1][1] == "call_expression" or expr_list_node[5][1][1] == "method_call_expression") then
 		local iterator_call_buf = translate_node(ctx, expr_list_node[5][1], depth + 1, { multiret = true })
 		local stmts = ctx:flush_statements()
@@ -1786,12 +1874,16 @@ for name, cpp_func in pairs(MathHandlers) do
 		if ctx.overrides and ctx.overrides.math then return nil end
 		
 		local call_args = get_call_args(node)
-		if #call_args == 0 and name == "random" then
-			if opts.multiret then
-				ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back((double)std::rand() / RAND_MAX);\n")
-				return ctx:use_ret_buf()
-			else
-				return "((double)std::rand() / RAND_MAX)"
+		if #call_args == 0 then
+			if name == "random" then
+				if opts.multiret then
+					ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back((double)std::rand() / RAND_MAX);\n")
+					return ctx:use_ret_buf()
+				else
+					return "((double)std::rand() / RAND_MAX)"
+				end
+			elseif name == "pi" then return "M_PI"
+			elseif name == "huge" then return "HUGE_VAL"
 			end
 		end
 		
@@ -1811,7 +1903,7 @@ for name, cpp_func in pairs(MathHandlers) do
 				return expr
 			end
 		end
-		return nil -- Fallback to generic call for unexpected arg counts (e.g. math.random(min, max))
+		return nil -- Fallback to generic call for unexpected arg counts
 	end
 end
 
@@ -1878,12 +1970,16 @@ BuiltinCallHandlers["string.byte"] = function(ctx, node, depth, opts)
 	local call_args = get_call_args(node)
 	if #call_args == 1 then
 		local str = translate_node(ctx, call_args[1], depth + 1)
-		local expr = "(as_view(" .. str .. ").empty() ? LuaValue() : LuaValue((double)(unsigned char)as_view(" .. str .. ")[0]))"
+		local expr = "lua_string_byte_at_raw(" .. str .. ", 1)"
 		if opts.multiret then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); ")
+            ctx:add_statement("{\n    long long _b = " .. expr .. ";\n")
+            ctx:add_statement("    if (_b != -1) " .. ctx:use_ret_buf() .. ".push_back((double)_b);\n")
+            ctx:add_statement("}\n")
 			return ctx:use_ret_buf()
 		else
-			return expr
+            -- For scalar context, we need to handle the -1 case to return nil
+			return "lua_string_byte_at(" .. str .. ", 1)"
 		end
 	end
 	return nil
@@ -1895,6 +1991,22 @@ BuiltinCallHandlers["string.len"] = function(ctx, node, depth, opts)
 	if #call_args == 1 then
 		local str = translate_node(ctx, call_args[1], depth + 1)
 		local expr = "lua_get_length_int(" .. str .. ")"
+		if opts.multiret then
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			return ctx:use_ret_buf()
+		else
+			return expr
+		end
+	end
+	return nil
+end
+
+BuiltinCallHandlers["string.char"] = function(ctx, node, depth, opts)
+	if ctx.overrides and ctx.overrides.string then return nil end
+	local call_args = get_call_args(node)
+	if #call_args == 1 then
+		local arg = translate_node(ctx, call_args[1], depth + 1)
+		local expr = "LuaValue(std::string(1, static_cast<char>(get_long_long(" .. arg .. "))))"
 		if opts.multiret then
 			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
 			return ctx:use_ret_buf()

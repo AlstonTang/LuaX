@@ -672,6 +672,13 @@ inline bool lua_equals(long long a, const LuaValue& b) { return lua_equals(b, a)
 inline bool lua_equals(const LuaValue& a, int b) { return lua_equals(a, static_cast<long long>(b)); }
 inline bool lua_equals(int a, const LuaValue& b) { return lua_equals(b, static_cast<long long>(a)); }
 
+// Primitive overloads to resolve ambiguity when both sides are already unwrapped
+inline bool lua_equals(long long a, long long b) { return a == b; }
+inline bool lua_equals(double a, double b) { return a == b; }
+inline bool lua_equals(long long a, double b) { return static_cast<double>(a) == b; }
+inline bool lua_equals(double a, long long b) { return a == static_cast<double>(b); }
+inline bool lua_equals(int a, int b) { return a == b; }
+
 inline bool lua_not_equals(const LuaValue& a, std::string_view b) { return !lua_equals(a, b); }
 inline bool lua_not_equals(std::string_view a, const LuaValue& b) { return !lua_equals(b, a); }
 inline bool lua_not_equals(const LuaValue& a, const std::string& b) { return !lua_equals(a, std::string_view(b)); }
