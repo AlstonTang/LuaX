@@ -9,7 +9,9 @@
 #include <charconv>
 #include "coroutine.hpp" // Ensure full definition of LuaCoroutine is available
 #include <unordered_set>
+#ifdef LUAX_THREAD_SAFE
 #include <mutex>
+#endif
 
 // ==========================================
 // String Intern Pool
@@ -31,10 +33,12 @@ static std::unordered_set<std::string, TransparentStringHash, TransparentStringE
     return pool;
 }
 
+#ifdef LUAX_THREAD_SAFE
 static std::mutex& get_pool_mutex() {
     static std::mutex mtx;
     return mtx;
 }
+#endif
 
 std::string_view LuaObject::intern(std::string_view sv) {
     if (sv.empty()) return "";
@@ -52,8 +56,10 @@ std::string_view LuaObject::intern(std::string_view sv) {
     if (cache[idx].key == sv) [[likely]] return cache[idx].val;
 
     auto& pool = get_string_pool();
+#ifdef LUAX_THREAD_SAFE
     auto& mtx = get_pool_mutex();
     std::lock_guard<std::mutex> lock(mtx);
+#endif
     
     auto it_pool = pool.find(sv);
     if (it_pool != pool.end()) {
@@ -119,13 +125,13 @@ void LuaObject::set(std::string_view key, const LuaValue& value) {
 }
 
 void LuaObject::set_metatable(const std::shared_ptr<LuaObject>& mt) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
 	metatable = mt;
 	invalidate_metamethods();
 }
 
 LuaValue LuaObject::get_item(const LuaValue& key) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
 	// Optimization: Fast path for string keys to skip array checks
 	if (key.index() == INDEX_STRING_VIEW) return get_item(std::get<std::string_view>(key));
 	if (key.index() == INDEX_STRING) return get_item(std::string_view(std::get<std::string>(key)));
@@ -179,7 +185,7 @@ LuaValue LuaObject::get_item(const LuaValue& key) {
 }
 
 LuaValue LuaObject::get_item(long long idx) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
 	if (idx >= 1 && idx <= (long long)array_part.size()) {
 		return array_part[idx - 1];
 	}
@@ -212,7 +218,7 @@ LuaValue LuaObject::get_item(long long idx) {
 }
 
 LuaValue LuaObject::get_item(std::string_view key) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
 	LuaObject* current_obj = this;
 
 	for (int depth = 0; depth < 100; ++depth) {
@@ -245,7 +251,7 @@ LuaValue LuaObject::get_item(std::string_view key) {
 }
 
 void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
 	long long idx = -1;
 	bool is_int = false;
 
@@ -299,7 +305,7 @@ void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
 }
 
 void LuaObject::set_item(std::string_view key, const LuaValue& value) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
     // Simplified set_item
 	bool key_exists = find_prop(key) != nullptr;
 
@@ -325,7 +331,7 @@ void LuaObject::set_item(std::string_view key, const LuaValue& value) {
 }
 
 void LuaObject::set_item(long long idx, const LuaValue& value) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
     // Simplified set_item
 	if (idx >= 1) {
 		if (idx <= (long long)array_part.size()) {
@@ -402,7 +408,7 @@ void LuaObject::set_item(long long idx, const LuaValue& value) {
 }
 
 LuaValue LuaObject::get_prop(const LuaValue& key) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
 	if (properties) {
 		auto it = properties->find(key);
 		if (it != properties->end()) return it->second;
@@ -415,7 +421,7 @@ LuaValue LuaObject::get_prop(const LuaValue& key) {
 }
 
 LuaValue LuaObject::get_prop(std::string_view key) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
 	if (properties) {
 		auto it = properties->find(key);
 		if (it != properties->end()) return it->second;
@@ -436,7 +442,7 @@ LuaValue LuaObject::get_prop(std::string_view key) {
 }
 
 LuaValue* LuaObject::find_prop(const LuaValue& key) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
 	if (properties) {
 		auto it = properties->find(key);
 		if (it != properties->end()) return &it->second;
@@ -449,7 +455,7 @@ LuaValue* LuaObject::find_prop(const LuaValue& key) {
 }
 
 LuaValue* LuaObject::find_prop(std::string_view key) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
 	LuaValue* res = nullptr;
 	if (properties) {
 		auto it = properties->find(key);
@@ -481,7 +487,7 @@ LuaValue* LuaObject::find_prop(std::string_view key) {
 }
 
 void LuaObject::set_prop(const LuaValue& key, const LuaValue& value) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
     LuaValue interned_key = key;
     if (key.index() == INDEX_STRING) {
         interned_key = intern(std::get<std::string>(key));
@@ -566,12 +572,12 @@ void LuaObject::set_item(const LuaValue& key, const LuaValueVector& value) {
 }
 
 void LuaObject::table_insert(const LuaValue& value) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
     array_part.push_back(value);
 }
 
 void LuaObject::table_insert(long long pos, const LuaValue& value) {
-	std::lock_guard<std::recursive_mutex> lock(mtx);
+	LUAX_LOCK_LOCAL();
     if (pos >= 1 && pos <= static_cast<long long>(array_part.size() + 1)) {
         array_part.insert(array_part.begin() + (pos - 1), value);
     }

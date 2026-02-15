@@ -12,9 +12,24 @@
 #include "lua_value.hpp"
 #include "pool_allocator.hpp"
 #include <cmath>
-#include <mutex>
 #include <algorithm>
 #include <iostream>
+
+// ==========================================
+// Conditional Threading Support
+// ==========================================
+// Define LUAX_THREAD_SAFE to enable mutex locking (required for parallel mode).
+// When not defined, all locking is compiled out for maximum single-threaded performance.
+#ifdef LUAX_THREAD_SAFE
+#include <mutex>
+#define LUAX_LOCK(obj) std::lock_guard<std::recursive_mutex> _luax_lock_##__LINE__((obj)->mtx)
+#define LUAX_LOCK_LOCAL() std::lock_guard<std::recursive_mutex> _luax_lock_##__LINE__(mtx)
+#define LUAX_UNIQUE_LOCK(obj, name) std::unique_lock<std::recursive_mutex> name((obj)->mtx, std::defer_lock)
+#else
+#define LUAX_LOCK(obj) ((void)0)
+#define LUAX_LOCK_LOCAL() ((void)0)
+#define LUAX_UNIQUE_LOCK(obj, name) ((void)0)
+#endif
 
 // Forward declaration
 class LuaObject;
@@ -107,7 +122,9 @@ inline std::shared_ptr<LuaCallable> make_specialized_callable(FVar&& v, FSpec&& 
 // LuaObject Definition
 class LuaObject : public std::enable_shared_from_this<LuaObject> {
 public:
+#ifdef LUAX_THREAD_SAFE
 	mutable std::recursive_mutex mtx;
+#endif
 	virtual ~LuaObject() = default;
 	
 	// Hybrid storage: small vector for few properties, map for many.
@@ -231,13 +248,13 @@ public:
 	bool metamethods_initialized = false;
 	std::pair<LuaValue, LuaValue> get_cached_metamethods() {
 		if (!metamethods_initialized) ensure_metamethods();
-		std::lock_guard<std::recursive_mutex> lock(mtx);
+		LUAX_LOCK_LOCAL();
 		return {cached_index, cached_newindex};
 	}
 
 	void ensure_metamethods() {
 		if (metamethods_initialized) return;
-		std::lock_guard<std::recursive_mutex> lock(mtx);
+		LUAX_LOCK_LOCAL();
 		if (metamethods_initialized) return;
 		if (metatable) {
 			cached_index = metatable->get_prop("__index");
@@ -902,7 +919,7 @@ inline LuaValue lua_get_length(const LuaValue& val) {
 	if (auto* sv = std::get_if<std::string_view>(&val)) return static_cast<double>(sv->length());
 	if (auto* obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&val)) {
 		auto& obj = *obj_ptr;
-		std::lock_guard<std::recursive_mutex> lock(obj->mtx);
+		LUAX_LOCK(obj.get());
 		if (obj->metatable) {
 			auto len_meta = obj->metatable->get_item("__len");
 			if (!std::holds_alternative<std::monostate>(len_meta)) {

@@ -14,6 +14,7 @@ local BUILD_DIR = "build"
 local CXX = "clang++"
 local keep_files = false
 local do_compile = true
+local force_single_threaded = false
 local input_lua_file = nil
 local path_to_out_file = nil
 
@@ -27,6 +28,7 @@ Options:
   -o, --output <file>    Path/name of the resulting executable (default: input name)
   -b, --build-dir <dir>  Directory for intermediate files (default: "build")
   -t, --translate-only   Only generate C++ files, do not compile.
+  -s, --single-threaded  Compile without thread safety for maximum performance.
   -k, --keep             Preserve generated source/object files after compilation.
   -h, --help             Show this help message.
 ]], cmd))
@@ -41,6 +43,8 @@ while i <= #arg do
 	elseif a == "-t" or a == "--translate-only" then
 		do_compile = false
 		keep_files = true -- Implicitly keep if we aren't compiling
+	elseif a == "-s" or a == "--single-threaded" then
+		force_single_threaded = true
 	elseif a == "-o" or a == "--output" then
 		path_to_out_file = arg[i+1]
 		i = i + 1
@@ -165,7 +169,7 @@ local function find_dependencies(lua_file_path)
 	return dependencies
 end
 
-local function generate_cmake(output_path, generated_basenames)
+local function generate_cmake(output_path, generated_basenames, thread_safe)
 	local cmake_path = BUILD_DIR .. "/CMakeLists.txt"
 	local luax_root = get_abs_path(script_dir)
 	local abs_target = get_abs_path(output_path)
@@ -184,11 +188,16 @@ local function generate_cmake(output_path, generated_basenames)
 	local gen_srcs = {}
 	for _, basename in ipairs(generated_basenames) do table.insert(gen_srcs, '"' .. basename .. ".cpp" .. '"') end
 
+	local compile_opts = "-g -Ofast"
+	if thread_safe then
+		compile_opts = compile_opts .. " -DLUAX_THREAD_SAFE"
+	end
+
 	local cmake_content = {
 		"cmake_minimum_required(VERSION 3.10)",
 		"project(LuaX_Generated_Project LANGUAGES CXX)",
 		"set(CMAKE_CXX_STANDARD 20)",
-		"add_compile_options(-g -O2)",
+		"add_compile_options(" .. compile_opts .. ")",
 		"include_directories(\"" .. luax_root .. "include\")",
 		"set(LIB_SOURCES " .. table.concat(lib_srcs, "\n    ") .. ")",
 		"set(GEN_SOURCES " .. table.concat(gen_srcs, "\n    ") .. ")",
@@ -281,7 +290,8 @@ if has_parallel and #threads > 0 then
 	end
 end
 
-generate_cmake(path_to_out_file, generated_basenames)
+local needs_thread_safe = has_parallel and not force_single_threaded
+generate_cmake(path_to_out_file, generated_basenames, needs_thread_safe)
 
 if do_compile then
 	run_cmake()
