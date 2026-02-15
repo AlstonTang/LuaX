@@ -111,25 +111,31 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry, sh
 
 	local cpp_code, hpp_code
 	if is_main_entry then
-        print("Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		print("Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 		cpp_code = translate_object:translate_recursive(ast, output_file_name, false, nil, true)
-        print("Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		print("Done Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		print("Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 		hpp_code = translate_object:translate_recursive(ast, output_file_name, true, nil, true)
+		print("Done Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 	else
-        print("Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		print("Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 		cpp_code = translate_object:translate_recursive(ast, output_file_name, false, output_file_name, false)
-        print("Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		print("Done Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		print("Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 		hpp_code = translate_object:translate_recursive(ast, output_file_name, true, output_file_name, false)
+		print("Done Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 	end
 
 	local cpp_output_path = BUILD_DIR .. "/" .. output_file_name .. ".cpp"
 	local hpp_output_path = BUILD_DIR .. "/" .. output_file_name .. ".hpp"
 
 	if should_format then
-        print("Formatting C++ Code... for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		print("Formatting C++ Code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 		cpp_code = formatter.format_cpp_code(cpp_code)
-        print("Formatting hpp Code... for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		print("Done Formatting C++ Code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		print("Formatting hpp Code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 		hpp_code = formatter.format_cpp_code(hpp_code)
+		print("Done Formatting hpp Code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 	end
 
 	local function write_file(path, content)
@@ -142,7 +148,7 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry, sh
 	print("Writing transpiled output for " .. lua_file_path .. " at " .. os.clock() .. "...")
 	write_file(cpp_output_path, cpp_code)
 	write_file(hpp_output_path, hpp_code)
-	print("Done writing. Done transpiling " .. lua_file_path .. " at " .. os.clock() .. "...")
+	print("Done writing and done transpiling " .. lua_file_path .. " at " .. os.clock() .. "...")
 
 	return lua_file_path
 end
@@ -213,7 +219,7 @@ end
 
 local function run_cmake()
 	run_command("cmake -S " .. BUILD_DIR .. " -B " .. BUILD_DIR, "CMake configuration failed.")
-    run_command("cmake --build " .. BUILD_DIR .. " -j", "Compilation failed.")
+	run_command("cmake --build " .. BUILD_DIR .. " -j", "Compilation failed.")
 end
 
 -- ============================================================================
@@ -244,7 +250,7 @@ end
 
 local generated_basenames = {}
 local threads = {}
-local has_parallel = (type(coroutine.create_parallel) == "function")
+local has_parallel = (not force_single_threaded) and (type(coroutine.create_parallel) == "function")
 
 if has_parallel then
 	print("Parallel translation enabled.")

@@ -838,6 +838,7 @@ end
 function Parser:parse(name)
 	print("Tokenizing " .. name .. " at " .. os.clock() .. "...")
 	self:tokenize()
+	print("Done Tokenizing " .. name .. " at " .. os.clock() .. "...")
 	print("Generating AST for " .. name .. " at " .. os.clock() .. "...")
 	self[2] = 1
 	local root = Node:new("Root", nil, nil)
@@ -867,6 +868,7 @@ function Parser:parse(name)
 			end
 		end
 	end
+	print("Done Generating AST for " .. name .. " at " .. os.clock() .. "...")
 
 	return root
 end
