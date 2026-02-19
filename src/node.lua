@@ -8,7 +8,7 @@ Node.__index = Node
 -- [1] = type
 -- [2] = value
 -- [3] = identifier
--- [4] = parent
+-- [4] = parent (REMOVED to break cycles)
 -- [5] = ordered_children
 
 function Node:new(type, value, identifier)
@@ -16,7 +16,7 @@ function Node:new(type, value, identifier)
 		type,       -- [1]
 		value,      -- [2]
 		identifier, -- [3]
-		nil,        -- [4] parent
+		nil,        -- [4]
 		nil         -- [5] ordered_children (Lazy)
 	}
 	setmetatable(instance, Node)
@@ -31,7 +31,7 @@ function Node:AddChild(child)
 		self[5] = children
 	end
 	table.insert(children, child)
-	child[4] = self -- child[4] is child.parent
+	-- child[4] = self -- REMOVED to break cyclic references for C++ shared_ptr
 end
 
 function Node:AddChildren(c1, c2, c3)

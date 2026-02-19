@@ -2099,7 +2099,7 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 			                    "    LuaValueVector " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(10);\n"
 			local main_function_start = "int main(int argc, char* argv[]) {\n" ..
 										"init_G(argc, argv);\n" .. local_cache_decls .. buffer_decl
-			local main_function_end = "\n    return 0;\n}"
+			local main_function_end = "\n    luax_cleanup();\n    return 0;\n}"
 			return header .. global_cache_decls .. main_function_start .. generated_code .. main_function_end
 		end
 	else

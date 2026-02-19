@@ -36,6 +36,16 @@ public:
         ::operator delete(p);
     }
 
+    static void cleanup() {
+        for (size_t i = 0; i < POOL_BUCKET_COUNT; ++i) {
+            auto& pool = get_pool(i);
+            for (void* ptr : pool) {
+                ::operator delete(ptr);
+            }
+            pool.clear();
+        }
+    }
+
 private:
     static std::vector<void*>& get_pool(size_t bucket_idx) {
         static thread_local std::vector<void*> pools[POOL_BUCKET_COUNT];

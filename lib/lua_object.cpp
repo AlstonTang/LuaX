@@ -1332,4 +1332,14 @@ void lua_collectgarbage(const LuaValue* args, size_t n_args, LuaValueVector& out
 	out.push_back(std::monostate{});
 }
 
+void luax_cleanup() {
+    LuaObjectPool::cleanup();
+    {
+#ifdef LUAX_THREAD_SAFE
+        std::lock_guard<std::mutex> lock(get_pool_mutex());
+#endif
+        get_string_pool().clear();
+    }
+}
+
 

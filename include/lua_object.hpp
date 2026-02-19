@@ -292,6 +292,7 @@ extern std::shared_ptr<LuaObject> _G;
 
 // Global helper functions
 void print_value(const LuaValue& value);
+void luax_cleanup();
 
 inline double get_double(const LuaValue& value) {
 	if (const double* val = std::get_if<double>(&value)) [[likely]] {
