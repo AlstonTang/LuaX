@@ -128,7 +128,6 @@ public:
 	virtual ~LuaObject() = default;
 	
 	// Hybrid storage: small vector for few properties, map for many.
-	// This drastically improves performance for tokens and AST nodes.
 	using PropPair = std::pair<LuaValue, LuaValue>;
 	std::vector<PropPair, PoolAllocator<PropPair>> small_props;
 	using PropMap = std::unordered_map<LuaValue, LuaValue, LuaValueHash, LuaValueEq, PoolAllocator<std::pair<const LuaValue, LuaValue>>>;
@@ -137,7 +136,7 @@ public:
 	std::vector<LuaValue, PoolAllocator<LuaValue>> array_part;
 	std::shared_ptr<LuaObject> metatable;
 	
-	static const size_t SMALL_TABLE_THRESHOLD = 16;
+	static const size_t SMALL_TABLE_THRESHOLD = 8; // Shrink threshold to keep small_props small
 
 	static LuaValue intern_key(const LuaValue& v) {
 		if (v.index() == INDEX_STRING) return intern(std::get<std::string>(v));

@@ -404,24 +404,26 @@ end)
 --------------------------------------------------------------------------------
 
 register_handler("Root", function(ctx, node, depth)
-	local cpp_code = ""
+	local parts = {}
 	for _, child in ipairs(node[5] or empty_table) do
-		cpp_code = cpp_code .. translate_node(ctx, child, depth + 1) .. "\n"
+		table.insert(parts, translate_node(ctx, child, depth + 1))
+		table.insert(parts, "\n")
 	end
-	return cpp_code
+	return table.concat(parts)
 end)
 
 register_handler("block", function(ctx, node, depth, opts)
-	local block_code = (opts and opts.no_braces) and "" or "{\n"
+	local parts = {}
+	if not (opts and opts.no_braces) then table.insert(parts, "{\n") end
+	
 	local saved_scope = ctx:save_scope()
-	
 	for _, child in ipairs(node[5] or empty_table) do
-		block_code = block_code .. translate_node(ctx, child, depth + 1)
+		table.insert(parts, translate_node(ctx, child, depth + 1))
 	end
-	
 	ctx:restore_scope(saved_scope)
-	block_code = block_code .. ((opts and opts.no_braces) and "" or "}\n")
-	return block_code
+	
+	if not (opts and opts.no_braces) then table.insert(parts, "}\n") end
+	return table.concat(parts)
 end)
 
 --------------------------------------------------------------------------------

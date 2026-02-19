@@ -342,7 +342,7 @@ void LuaObject::set_item(long long idx, const LuaValue& value) {
 			}
 			return;
 		} else if (!std::holds_alternative<std::monostate>(value) && idx < (long long)array_part.size() + 100) {
-			array_part.resize(idx, std::monostate{});
+			if (idx > (long long)array_part.size()) array_part.resize((size_t)idx, std::monostate{});
 			array_part[idx - 1] = value;
 			return;
 		}
@@ -573,12 +573,15 @@ void LuaObject::set_item(const LuaValue& key, const LuaValueVector& value) {
 
 void LuaObject::table_insert(const LuaValue& value) {
 	LUAX_LOCK_LOCAL();
-    array_part.push_back(value);
+    
+	array_part.push_back(value);
 }
 
 void LuaObject::table_insert(long long pos, const LuaValue& value) {
 	LUAX_LOCK_LOCAL();
-    if (pos >= 1 && pos <= static_cast<long long>(array_part.size() + 1)) {
+    long long current_size = static_cast<long long>(array_part.size());
+    if (pos >= 1 && pos <= current_size + 1) {
+        
         array_part.insert(array_part.begin() + (pos - 1), value);
     }
 }
@@ -618,9 +621,9 @@ void append_to_string(const LuaValue& value, std::string& out) {
 		case INDEX_STRING: out.append(std::get<std::string>(value)); break;
 		case INDEX_STRING_VIEW: out.append(std::get<std::string_view>(value)); break;
 		case INDEX_OBJECT: {
-			std::stringstream ss;
-			ss << "table: " << std::get<std::shared_ptr<LuaObject>>(value).get();
-			out.append(ss.str());
+			char buf[32];
+			int len = snprintf(buf, sizeof(buf), "table: %p", (void*)std::get<std::shared_ptr<LuaObject>>(value).get());
+			out.append(buf, len);
 			break;
 		}
 		case INDEX_FUNCTION: out.append("function"); break;
@@ -850,13 +853,7 @@ LuaValue lua_concat(const LuaValue& a, const LuaValue& b) {
 LuaValue lua_concat(LuaValue&& a, const LuaValue& b) {
 	// 1. Try In-Place String Append
 	if (auto* s_a = std::get_if<std::string>(&a)) {
-		// We hold the string buffer unique? LuaValue is valueless_by_exception safe variant.
-		// If b is also string, fast append
-		if (const auto* s_b = std::get_if<std::string>(&b)) {
-			s_a->append(*s_b);
-		} else {
-			s_a->append(to_cpp_string(b));
-		}
+		append_to_string(b, *s_a);
 		return std::move(a);
 	}
 
@@ -909,7 +906,7 @@ void lua_rawget(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (auto* i_ptr = std::get_if<long long>(&key)) { idx = *i_ptr; is_int = true; }
 	else if (auto* d_ptr = std::get_if<double>(&key)) { is_int = is_integer_key(*d_ptr, idx); }
 
-	if (is_int && idx >= 1 && idx <= (long long)table->array_part.size()) {
+	if (is_int && idx >= 1 && idx <= (long long)(table->array_part.size())) {
 		out.assign({table->array_part[idx - 1]});
 		return;
 	}
@@ -1047,7 +1044,8 @@ void lua_next(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	bool key_is_int = !key_is_nil && (std::holds_alternative<long long>(key) || (std::holds_alternative<double>(key) && is_integer_key(std::get<double>(key), k_int)));
 
 	if (key_is_nil) {
-		for (size_t i = 0; i < table->array_part.size(); ++i) {
+		size_t arr_size = table->array_part.size();
+		for (size_t i = 0; i < arr_size; ++i) {
 			if (!std::holds_alternative<std::monostate>(table->array_part[i])) {
 				out.assign({(double)(i + 1), table->array_part[i]});
 				return;
@@ -1055,8 +1053,9 @@ void lua_next(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		}
 	} else if (key_is_int) {
 		if (std::holds_alternative<long long>(key)) k_int = std::get<long long>(key);
-		if (k_int >= 1 && k_int <= (long long)table->array_part.size()) {
-			for (size_t i = (size_t)k_int; i < table->array_part.size(); ++i) {
+		size_t arr_size = table->array_part.size();
+		if (k_int >= 1 && k_int <= (long long)arr_size) {
+			for (size_t i = (size_t)k_int; i < arr_size; ++i) {
 				if (!std::holds_alternative<std::monostate>(table->array_part[i])) {
 					out.assign({(double)(i + 1), table->array_part[i]});
 					return;
@@ -1118,7 +1117,8 @@ void ipairs_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto table = std::get<std::shared_ptr<LuaObject>>(args[0]);
 	long long next_idx = static_cast<long long>(std::get<double>(args[1])) + 1;
 
-	if (next_idx >= 1 && next_idx <= (long long)table->array_part.size()) {
+	size_t arr_size = table->array_part.size();
+	if (next_idx >= 1 && next_idx <= (long long)arr_size) {
 		const auto& val = table->array_part[next_idx - 1];
 		if (!std::holds_alternative<std::monostate>(val)) {
 			out.push_back(static_cast<double>(next_idx));
