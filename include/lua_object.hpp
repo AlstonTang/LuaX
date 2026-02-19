@@ -160,40 +160,6 @@ public:
 		return obj;
 	}
 
-	static std::shared_ptr<LuaObject> create(std::pair<LuaValue, LuaValue> p1) {
-		auto obj = std::allocate_shared<LuaObject>(PoolAllocator<LuaObject>{});
-		obj->small_props.reserve(1);
-		obj->small_props.push_back({intern_key(p1.first), std::move(p1.second)});
-		return obj;
-	}
-
-	static std::shared_ptr<LuaObject> create(std::pair<LuaValue, LuaValue> p1, std::pair<LuaValue, LuaValue> p2) {
-		auto obj = std::allocate_shared<LuaObject>(PoolAllocator<LuaObject>{});
-		obj->small_props.reserve(2);
-		obj->small_props.push_back({intern_key(p1.first), std::move(p1.second)});
-		obj->small_props.push_back({intern_key(p2.first), std::move(p2.second)});
-		return obj;
-	}
-
-	static std::shared_ptr<LuaObject> create(std::pair<LuaValue, LuaValue> p1, std::pair<LuaValue, LuaValue> p2, std::pair<LuaValue, LuaValue> p3) {
-		auto obj = std::allocate_shared<LuaObject>(PoolAllocator<LuaObject>{});
-		obj->small_props.reserve(3);
-		obj->small_props.push_back({intern_key(p1.first), std::move(p1.second)});
-		obj->small_props.push_back({intern_key(p2.first), std::move(p2.second)});
-		obj->small_props.push_back({intern_key(p3.first), std::move(p3.second)});
-		return obj;
-	}
-
-	static std::shared_ptr<LuaObject> create(std::pair<LuaValue, LuaValue> p1, std::pair<LuaValue, LuaValue> p2, std::pair<LuaValue, LuaValue> p3, std::pair<LuaValue, LuaValue> p4) {
-		auto obj = std::allocate_shared<LuaObject>(PoolAllocator<LuaObject>{});
-		obj->small_props.reserve(4);
-		obj->small_props.push_back({intern_key(p1.first), std::move(p1.second)});
-		obj->small_props.push_back({intern_key(p2.first), std::move(p2.second)});
-		obj->small_props.push_back({intern_key(p3.first), std::move(p3.second)});
-		obj->small_props.push_back({intern_key(p4.first), std::move(p4.second)});
-		return obj;
-	}
-
 	LuaValue get(std::string_view key);
 	LuaValue get(const std::string& key) { return get(std::string_view(key)); }
 	LuaValue get(const char* key) { return get(std::string_view(key)); }
@@ -371,9 +337,7 @@ inline LuaCallable* get_callable(const LuaValue& value) {
 
 inline LuaValue lua_call0(const LuaValue& callable, LuaValueVector& out) {
 	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) [[likely]] {
-		out.clear();
-		(*callable_ptr)->call(nullptr, 0, out);
-		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+		return (*callable_ptr)->call0();
 	}
 	call_lua_value(callable, nullptr, 0, out);
 	return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
@@ -381,10 +345,7 @@ inline LuaValue lua_call0(const LuaValue& callable, LuaValueVector& out) {
 
 inline LuaValue lua_call1(const LuaValue& callable, LuaValueVector& out, const LuaValue& a1) {
 	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) [[likely]] {
-		out.clear();
-		const LuaValue args[] = {a1};
-		(*callable_ptr)->call(args, 1, out);
-		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+		return (*callable_ptr)->call1(a1);
 	}
 	const LuaValue args[] = {a1};
 	call_lua_value(callable, args, 1, out);
@@ -393,10 +354,7 @@ inline LuaValue lua_call1(const LuaValue& callable, LuaValueVector& out, const L
 
 inline LuaValue lua_call2(const LuaValue& callable, LuaValueVector& out, const LuaValue& a1, const LuaValue& a2) {
 	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) [[likely]] {
-		out.clear();
-		const LuaValue args[] = {a1, a2};
-		(*callable_ptr)->call(args, 2, out);
-		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+		return (*callable_ptr)->call2(a1, a2);
 	}
 	const LuaValue args[] = {a1, a2};
 	call_lua_value(callable, args, 2, out);
@@ -405,10 +363,7 @@ inline LuaValue lua_call2(const LuaValue& callable, LuaValueVector& out, const L
 
 inline LuaValue lua_call3(const LuaValue& callable, LuaValueVector& out, const LuaValue& a1, const LuaValue& a2, const LuaValue& a3) {
 	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) [[likely]] {
-		out.clear();
-		const LuaValue args[] = {a1, a2, a3};
-		(*callable_ptr)->call(args, 3, out);
-		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
+		return (*callable_ptr)->call3(a1, a2, a3);
 	}
 	const LuaValue args[] = {a1, a2, a3};
 	call_lua_value(callable, args, 3, out);

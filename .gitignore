@@ -5,12 +5,14 @@ temp*/
 
 # IDE files
 .vscode/
+.idea/
 
 # Compiled object files
 *.o
 
 # Executables
-luax
+luax*
+bench*
 
 # CMake artifacts
 CMakeCache.txt

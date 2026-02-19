@@ -564,16 +564,13 @@ register_handler("member_expression", function(ctx, node, depth)
 	if base_node[1] == "identifier" and lua_global_libraries[base_node[3]] then
 		-- Use cached access for global library members unless overridden
 		if ctx.overrides and ctx.overrides[base_node[3]] then
-			local member_cache_var = ctx:get_string_cache(member_node[3])
-			return "lua_get_member(" .. base_code .. ", " .. member_cache_var .. ")"
+			return "lua_get_member(" .. base_code .. ", LuaObject::intern(\"" .. member_node[3] .. "\"))"
 		end
-		-- print("DEBUG: member_expression for '" .. base_node[3] .. "." .. member_node[3] .. "' detected override=false")
 		local cache_var = ctx:get_lib_cache(base_node[3], member_node[3])
 		return cache_var
 	else
-		-- Optimization: cache member name string literal
-		local member_cache_var = ctx:get_string_cache(member_node[3])
-		return "lua_get_member(" .. base_code .. ", " .. member_cache_var .. ")"
+		-- Optimization: use interned string literal for member access
+		return "lua_get_member(" .. base_code .. ", LuaObject::intern(\"" .. member_node[3] .. "\"))"
 	end
 end)
 
@@ -666,7 +663,7 @@ register_handler("table_constructor", function(ctx, node, depth)
 			-- Explicit key-value pair
 			local key_part
 			if key_child[1] == "identifier" then
-				key_part = "{" .. ctx:get_string_cache(key_child[3]) .. ", "
+				key_part = '{LuaObject::intern("' .. key_child[3] .. '"), '
 			else
 				key_part = "{" .. translate_node(ctx, key_child, depth + 1) .. ", "
 			end
