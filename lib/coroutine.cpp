@@ -287,18 +287,17 @@ std::shared_ptr<LuaObject> create_coroutine_library() {
 	static std::shared_ptr<LuaObject> coroutine_lib;
 	if (coroutine_lib) return coroutine_lib;
 
-	coroutine_lib = LuaObject::create({
-		{LuaValue(std::string_view("await")), std::make_shared<LuaFunctionWrapper>(coroutine_await)},
-		{LuaValue(std::string_view("close")), std::make_shared<LuaFunctionWrapper>(coroutine_close)},
-		{LuaValue(std::string_view("create")), std::make_shared<LuaFunctionWrapper>(coroutine_create)},
-		{LuaValue(std::string_view("create_parallel")), std::make_shared<LuaFunctionWrapper>(coroutine_create_parallel)},
-		{LuaValue(std::string_view("isyieldable")), std::make_shared<LuaFunctionWrapper>(coroutine_isyieldable)},
-		{LuaValue(std::string_view("resume")), std::make_shared<LuaFunctionWrapper>(coroutine_resume)},
-		{LuaValue(std::string_view("running")), std::make_shared<LuaFunctionWrapper>(coroutine_running)},
-		{LuaValue(std::string_view("status")), std::make_shared<LuaFunctionWrapper>(coroutine_status)},
-		{LuaValue(std::string_view("wrap")), std::make_shared<LuaFunctionWrapper>(coroutine_wrap)},
-		{LuaValue(std::string_view("yield")), std::make_shared<LuaFunctionWrapper>(coroutine_yield)},
-	});
+	coroutine_lib = std::make_shared<LuaObject>();
+	coroutine_lib->set("await", LUA_C_FUNC(coroutine_await));
+	coroutine_lib->set("close", LUA_C_FUNC(coroutine_close));
+	coroutine_lib->set("create", LUA_C_FUNC(coroutine_create));
+	coroutine_lib->set("create_parallel", LUA_C_FUNC(coroutine_create_parallel));
+	coroutine_lib->set("isyieldable", LUA_C_FUNC(coroutine_isyieldable));
+	coroutine_lib->set("resume", LUA_C_FUNC(coroutine_resume));
+	coroutine_lib->set("running", LUA_C_FUNC(coroutine_running));
+	coroutine_lib->set("status", LUA_C_FUNC(coroutine_status));
+	coroutine_lib->set("wrap", LUA_C_FUNC(coroutine_wrap));
+	coroutine_lib->set("yield", LUA_C_FUNC(coroutine_yield));
 
 	return coroutine_lib;
 }

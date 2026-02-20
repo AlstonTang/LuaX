@@ -573,22 +573,21 @@ std::shared_ptr<LuaObject> create_io_library() {
 	current_input_file = std::static_pointer_cast<LuaObject>(io_stdin_handle);
 	current_output_file = std::static_pointer_cast<LuaObject>(io_stdout_handle);
 
-	io_lib = LuaObject::create({
-		{LuaValue(std::string_view("close")), std::make_shared<LuaFunctionWrapper>(io_close)},
-		{LuaValue(std::string_view("flush")), std::make_shared<LuaFunctionWrapper>(io_flush)},
-		{LuaValue(std::string_view("input")), std::make_shared<LuaFunctionWrapper>(io_input)},
-		{LuaValue(std::string_view("lines")), std::make_shared<LuaFunctionWrapper>(io_lines)},
-		{LuaValue(std::string_view("open")), std::make_shared<LuaFunctionWrapper>(io_open)},
-		{LuaValue(std::string_view("output")), std::make_shared<LuaFunctionWrapper>(io_output)},
-		{LuaValue(std::string_view("popen")), std::make_shared<LuaFunctionWrapper>(io_popen)},
-		{LuaValue(std::string_view("read")), std::make_shared<LuaFunctionWrapper>(io_read)},
-		{LuaValue(std::string_view("tmpfile")), std::make_shared<LuaFunctionWrapper>(io_tmpfile)},
-		{LuaValue(std::string_view("type")), std::make_shared<LuaFunctionWrapper>(io_type)},
-		{LuaValue(std::string_view("write")), std::make_shared<LuaFunctionWrapper>(io_write)},
-		{LuaValue(std::string_view("stdin")), file_to_value(io_stdin_handle)},
-		{LuaValue(std::string_view("stdout")), file_to_value(io_stdout_handle)},
-		{LuaValue(std::string_view("stderr")), file_to_value(io_stderr_handle)}
-	});
+	io_lib = std::make_shared<LuaObject>();
+	io_lib->set("close", LUA_C_FUNC(io_close));
+	io_lib->set("flush", LUA_C_FUNC(io_flush));
+	io_lib->set("input", LUA_C_FUNC(io_input));
+	io_lib->set("lines", LUA_C_FUNC(io_lines));
+	io_lib->set("open", LUA_C_FUNC(io_open));
+	io_lib->set("output", LUA_C_FUNC(io_output));
+	io_lib->set("popen", LUA_C_FUNC(io_popen));
+	io_lib->set("read", LUA_C_FUNC(io_read));
+	io_lib->set("tmpfile", LUA_C_FUNC(io_tmpfile));
+	io_lib->set("type", LUA_C_FUNC(io_type));
+	io_lib->set("write", LUA_C_FUNC(io_write));
+	io_lib->set("stdin", file_to_value(io_stdin_handle));
+	io_lib->set("stdout", file_to_value(io_stdout_handle));
+	io_lib->set("stderr", file_to_value(io_stderr_handle));
 
 	return io_lib;
 }

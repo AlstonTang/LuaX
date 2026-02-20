@@ -741,25 +741,24 @@ std::shared_ptr<LuaObject> create_string_library() {
 	static std::shared_ptr<LuaObject> lib;
 	if (lib) return lib;
 
-	lib = LuaObject::create({
-		{LuaValue(std::string_view("byte")), std::make_shared<LuaFunctionWrapper>(string_byte)},
-		{LuaValue(std::string_view("char")), std::make_shared<LuaFunctionWrapper>(string_char)},
-		{LuaValue(std::string_view("dump")), std::make_shared<LuaFunctionWrapper>(string_dump)},
-		{LuaValue(std::string_view("find")), std::make_shared<LuaFunctionWrapper>(string_find)},
-		{LuaValue(std::string_view("format")), std::make_shared<LuaFunctionWrapper>(string_format)},
-		{LuaValue(std::string_view("gmatch")), std::make_shared<LuaFunctionWrapper>(string_gmatch)},
-		{LuaValue(std::string_view("gsub")), std::make_shared<LuaFunctionWrapper>(string_gsub)},
-		{LuaValue(std::string_view("len")), std::make_shared<LuaFunctionWrapper>(string_len)},
-		{LuaValue(std::string_view("lower")), std::make_shared<LuaFunctionWrapper>(string_lower)},
-		{LuaValue(std::string_view("match")), std::make_shared<LuaFunctionWrapper>(string_match)},
-		{LuaValue(std::string_view("pack")), std::make_shared<LuaFunctionWrapper>(string_pack)},
-		{LuaValue(std::string_view("packsize")), std::make_shared<LuaFunctionWrapper>(string_packsize)},
-		{LuaValue(std::string_view("rep")), std::make_shared<LuaFunctionWrapper>(string_rep)},
-		{LuaValue(std::string_view("reverse")), std::make_shared<LuaFunctionWrapper>(string_reverse)},
-		{LuaValue(std::string_view("sub")), std::make_shared<LuaFunctionWrapper>(string_sub)},
-		{LuaValue(std::string_view("unpack")), std::make_shared<LuaFunctionWrapper>(string_unpack)},
-		{LuaValue(std::string_view("upper")), std::make_shared<LuaFunctionWrapper>(string_upper)}
-	});
+	lib = std::make_shared<LuaObject>();
+	lib->set("byte", LUA_C_FUNC(string_byte));
+	lib->set("char", LUA_C_FUNC(string_char));
+	lib->set("dump", LUA_C_FUNC(string_dump));
+	lib->set("find", LUA_C_FUNC(string_find));
+	lib->set("format", LUA_C_FUNC(string_format));
+	lib->set("gmatch", LUA_C_FUNC(string_gmatch));
+	lib->set("gsub", LUA_C_FUNC(string_gsub));
+	lib->set("len", LUA_C_FUNC(string_len));
+	lib->set("lower", LUA_C_FUNC(string_lower));
+	lib->set("match", LUA_C_FUNC(string_match));
+	lib->set("pack", LUA_C_FUNC(string_pack));
+	lib->set("packsize", LUA_C_FUNC(string_packsize));
+	lib->set("rep", LUA_C_FUNC(string_rep));
+	lib->set("reverse", LUA_C_FUNC(string_reverse));
+	lib->set("sub", LUA_C_FUNC(string_sub));
+	lib->set("unpack", LUA_C_FUNC(string_unpack));
+	lib->set("upper", LUA_C_FUNC(string_upper));
 
 	return lib;
 }

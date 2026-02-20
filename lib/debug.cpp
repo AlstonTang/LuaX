@@ -70,24 +70,23 @@ std::shared_ptr<LuaObject> create_debug_library() {
 	static std::shared_ptr<LuaObject> debug_lib;
 	if (debug_lib) return debug_lib;
 
-	debug_lib = LuaObject::create({
-		{LuaValue(std::string_view("debug")), std::make_shared<LuaFunctionWrapper>(debug_debug)},
-		{LuaValue(std::string_view("gethook")), std::make_shared<LuaFunctionWrapper>(debug_gethook)},
-		{LuaValue(std::string_view("getinfo")), std::make_shared<LuaFunctionWrapper>(debug_getinfo)},
-		{LuaValue(std::string_view("getlocal")), std::make_shared<LuaFunctionWrapper>(debug_getlocal)},
-		{LuaValue(std::string_view("getmetatable")), std::make_shared<LuaFunctionWrapper>(debug_getmetatable)},
-		{LuaValue(std::string_view("getregistry")), std::make_shared<LuaFunctionWrapper>(debug_getregistry)},
-		{LuaValue(std::string_view("getupvalue")), std::make_shared<LuaFunctionWrapper>(debug_getupvalue)},
-		{LuaValue(std::string_view("getuservalue")), std::make_shared<LuaFunctionWrapper>(debug_getuservalue)},
-		{LuaValue(std::string_view("sethook")), std::make_shared<LuaFunctionWrapper>(debug_sethook)},
-		{LuaValue(std::string_view("setlocal")), std::make_shared<LuaFunctionWrapper>(debug_setlocal)},
-		{LuaValue(std::string_view("setmetatable")), std::make_shared<LuaFunctionWrapper>(debug_setmetatable)},
-		{LuaValue(std::string_view("setupvalue")), std::make_shared<LuaFunctionWrapper>(debug_setupvalue)},
-		{LuaValue(std::string_view("setuservalue")), std::make_shared<LuaFunctionWrapper>(debug_setuservalue)},
-		{LuaValue(std::string_view("traceback")), std::make_shared<LuaFunctionWrapper>(debug_traceback)},
-		{LuaValue(std::string_view("upvalueid")), std::make_shared<LuaFunctionWrapper>(debug_upvalueid)},
-		{LuaValue(std::string_view("upvaluejoin")), std::make_shared<LuaFunctionWrapper>(debug_upvaluejoin)}
-	});
+	debug_lib = std::make_shared<LuaObject>();
+	debug_lib->set("debug", LUA_C_FUNC(debug_debug));
+	debug_lib->set("getuservalue", LUA_C_FUNC(debug_getuservalue));
+	debug_lib->set("gethook", LUA_C_FUNC(debug_gethook));
+	debug_lib->set("getinfo", LUA_C_FUNC(debug_getinfo));
+	debug_lib->set("getlocal", LUA_C_FUNC(debug_getlocal));
+	debug_lib->set("getmetatable", LUA_C_FUNC(debug_getmetatable));
+	debug_lib->set("getregistry", LUA_C_FUNC(debug_getregistry));
+	debug_lib->set("getupvalue", LUA_C_FUNC(debug_getupvalue));
+	debug_lib->set("sethook", LUA_C_FUNC(debug_sethook));
+	debug_lib->set("setlocal", LUA_C_FUNC(debug_setlocal));
+	debug_lib->set("setmetatable", LUA_C_FUNC(debug_setmetatable));
+	debug_lib->set("setupvalue", LUA_C_FUNC(debug_setupvalue));
+	debug_lib->set("setuservalue", LUA_C_FUNC(debug_setuservalue));
+	debug_lib->set("traceback", LUA_C_FUNC(debug_traceback));
+	debug_lib->set("upvalueid", LUA_C_FUNC(debug_upvalueid));
+	debug_lib->set("upvaluejoin", LUA_C_FUNC(debug_upvaluejoin));
 
 	return debug_lib;
 }

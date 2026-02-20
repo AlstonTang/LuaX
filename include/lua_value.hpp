@@ -11,6 +11,15 @@ class LuaObject;
 struct LuaCallable;
 class LuaCoroutine;
 
+// Fast C function dispatch type (Uses void* to avoid circular dependency)
+typedef void (*LuaCFunctionPtr)(const void*, size_t, void*);
+struct LuaCFunction {
+    LuaCFunctionPtr ptr;
+    bool operator==(const LuaCFunction& other) const { return ptr == other.ptr; }
+};
+
+#define LUA_C_FUNC(f) LuaCFunction{(LuaCFunctionPtr)(f)}
+
 // Define LuaValue using forward declarations for recursive types
 using LuaValue = std::variant<
 	std::monostate, // for nil
@@ -21,7 +30,8 @@ using LuaValue = std::variant<
 	std::string_view,
 	std::shared_ptr<LuaObject>,
 	std::shared_ptr<LuaCallable>,
-	std::shared_ptr<LuaCoroutine>
+	std::shared_ptr<LuaCoroutine>,
+	LuaCFunction // Raw C function pointer (Fast path)
 >;
 
 enum LuaTypeIndex {
@@ -33,7 +43,8 @@ enum LuaTypeIndex {
 	INDEX_STRING_VIEW = 5,
 	INDEX_OBJECT = 6,
 	INDEX_FUNCTION = 7,
-	INDEX_COROUTINE = 8
+	INDEX_COROUTINE = 8,
+	INDEX_CFUNCTION = 9
 };
 
 // Custom hasher for LuaValue to support heterogeneous lookup with string_view
@@ -56,6 +67,7 @@ struct LuaValueHash {
 			case INDEX_OBJECT: return std::hash<void*>{}(std::get<INDEX_OBJECT>(v).get());
 			case INDEX_FUNCTION: return std::hash<void*>{}(std::get<INDEX_FUNCTION>(v).get());
 			case INDEX_COROUTINE: return std::hash<void*>{}(std::get<INDEX_COROUTINE>(v).get());
+			case INDEX_CFUNCTION: return std::hash<void*>{}((void*)std::get<INDEX_CFUNCTION>(v).ptr);
 			default: return 0;
 		}
 	}
@@ -135,5 +147,8 @@ struct LuaValueEq {
 // Define a standardized vector type using the pool allocator
 // This allows all LuaValue vectors (args, returns, props) to share the thread-local pool.
 using LuaValueVector = std::vector<LuaValue, PoolAllocator<LuaValue>>;
+
+// Typed version for internal use
+typedef void (*LuaCFunctionTyped)(const LuaValue*, size_t, LuaValueVector&);
 
 #endif // LUA_VALUE_HPP

@@ -73,36 +73,27 @@ std::shared_ptr<LuaObject> create_package_library() {
 	static std::shared_ptr<LuaObject> package_lib;
 	if (package_lib) return package_lib;
 
-	package_lib = LuaObject::create({
-		{LuaValue(std::string_view("config")), std::string("/\n;\n?\n!\n-\n")},
+	package_lib = std::make_shared<LuaObject>();
+	package_lib->set("config", std::string("/\n;\n?\n!\n-\n"));
 #if defined(__linux__)
-		{
-			LuaValue(std::string_view("cpath")),
-			std::string("/usr/local/lib/lua/5.4/?.so;/usr/lib/x86_64-linux-gnu/lua/5.4/?.so;/usr/lib/lua/5.4/?.so;/usr/local/lib/lua/5.4/loadall.so;./?.so")
-		},
+	package_lib->set("cpath", std::string("/usr/local/lib/lua/5.4/?.so;/usr/lib/x86_64-linux-gnu/lua/5.4/?.so;/usr/lib/lua/5.4/?.so;/usr/local/lib/lua/5.4/loadall.so;./?.so"));
 #elif defined(_WIN32)
-		{ LuaValue(std::string_view("cpath")), std::string(".\\?.dll;!.\\?.dll;!.\\loadall.dll") },
+	package_lib->set("cpath", std::string(".\\?.dll;!.\\?.dll;!.\\loadall.dll"));
 #else
-		{ LuaValue(std::string_view("cpath")), std::string("/?.so") },
+	package_lib->set("cpath", std::string("/?.so"));
 #endif
-		{LuaValue(std::string_view("loaded")), package_loaded_table},
-		{LuaValue(std::string_view("loadlib")), std::make_shared<LuaFunctionWrapper>(package_loadlib)},
+	package_lib->set("loaded", package_loaded_table);
+	package_lib->set("loadlib", LUA_C_FUNC(package_loadlib));
 #if defined(__linux__)
-		{
-			LuaValue(std::string_view("path")),
-			std::string("/usr/local/share/lua/5.4/?.lua;/usr/local/share/lua/5.4/?/init.lua;/usr/local/lib/lua/5.4/?.lua;/usr/local/lib/lua/5.4/?/init.lua;/usr/share/lua/5.4/?.lua;/usr/share/lua/5.4/?/init.lua;./?.lua;./?/init.lua")
-		},
+	package_lib->set("path", std::string("/usr/local/share/lua/5.4/?.lua;/usr/local/share/lua/5.4/?/init.lua;/usr/local/lib/lua/5.4/?.lua;/usr/local/lib/lua/5.4/?/init.lua;/usr/share/lua/5.4/?.lua;/usr/share/lua/5.4/?/init.lua;./?.lua;./?/init.lua"));
 #elif defined(_WIN32)
-		{
-			LuaValue(std::string_view("path")), std::string(".;.\\?.lua;!\\lua\\?.lua;!\\lua\\?\\init.lua;C:\\Program Files\\Lua\\5.4\\?.lua;C:\\Program Files\\Lua\\5.4\\?\\init.lua")
-		},
+	package_lib->set("path", std::string(".;.\\?.lua;!\\lua\\?.lua;!\\lua\\?\\init.lua;C:\\Program Files\\Lua\\5.4\\?.lua;C:\\Program Files\\Lua\\5.4\\?\\init.lua"));
 #else
-		{ LuaValue(std::string_view("path")), std::string("./?.lua;./?/init.lua") },
+	package_lib->set("path", std::string("./?.lua;./?/init.lua"));
 #endif
-		{LuaValue(std::string_view("preload")), package_preload_table},
-		{LuaValue(std::string_view("searchers")), package_searchers_table},
-		{LuaValue(std::string_view("searchpath")), std::make_shared<LuaFunctionWrapper>(package_searchpath)}
-	});
+	package_lib->set("preload", package_preload_table);
+	package_lib->set("searchers", package_searchers_table);
+	package_lib->set("searchpath", LUA_C_FUNC(package_searchpath));
 
 	return package_lib;
 }

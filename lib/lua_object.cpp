@@ -116,6 +116,24 @@ const LuaValue& LuaObject::get_single_char(unsigned char c) {
     return single_char_cache[c];
 }
 
+std::shared_ptr<LuaObject> LuaObject::create(
+    std::initializer_list<PropPair> props,
+    std::initializer_list<LuaValue> arr,
+    std::shared_ptr<LuaObject> mt) {
+    auto obj = std::allocate_shared<LuaObject>(PoolAllocator<LuaObject>{});
+    if (props.size() > SMALL_TABLE_THRESHOLD) {
+        obj->properties = std::make_unique<PropMap>();
+        for (const auto& p : props) (*obj->properties)[intern_key(p.first)] = p.second;
+    } else {
+        obj->small_props.reserve(props.size());
+        for (const auto& p : props) obj->small_props.push_back({intern_key(p.first), p.second});
+    }
+    // Convert initializer_list to vector for array_part
+    obj->array_part.assign(arr.begin(), arr.end());
+    obj->metatable = mt;
+    return obj;
+}
+
 LuaValue LuaObject::get(std::string_view key) {
 	return get_item(key);
 }
@@ -628,6 +646,7 @@ void append_to_string(const LuaValue& value, std::string& out) {
 		}
 		case INDEX_FUNCTION: out.append("function"); break;
 		case INDEX_COROUTINE: out.append("thread"); break;
+		case INDEX_CFUNCTION: out.append("function"); break;
 		default: out.append("unknown"); break;
 	}
 }
@@ -652,6 +671,7 @@ std::string get_lua_type_name(const LuaValue& val) {
 	if (std::holds_alternative<std::string>(val) || std::holds_alternative<std::string_view>(val)) return "string";
 	if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) return "table";
 	if (std::holds_alternative<std::shared_ptr<LuaCallable>>(val)) return "function";
+	if (std::holds_alternative<LuaCFunction>(val)) return "function";
 	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(val)) return "thread";
 	return "userdata";
 }
@@ -1106,7 +1126,7 @@ void lua_pairs(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		}
 	}
 
-	static const auto pairs_iter = std::make_shared<LuaFunctionWrapper>(pairs_iterator);
+	static const auto pairs_iter = LUA_C_FUNC(pairs_iterator);
 	out.push_back(pairs_iter);
 	out.push_back(args[0]);
 	out.push_back(std::monostate{});
@@ -1144,7 +1164,7 @@ void lua_ipairs(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		}
 	}
 
-	static const auto ipairs_iter = std::make_shared<LuaFunctionWrapper>(ipairs_iterator);
+	static const auto ipairs_iter = LUA_C_FUNC(ipairs_iterator);
 	out.push_back(ipairs_iter);
 	out.push_back(args[0]);
 	out.push_back(0.0);
@@ -1230,6 +1250,10 @@ inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_
                            LuaValueVector& out_result) {
 	out_result.clear();
 
+	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) {
+		((LuaCFunctionTyped)(cfunc->ptr))(args, n_args, out_result);
+		return;
+	}
 	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) {
 		(*callable_ptr)->call(args, n_args, out_result);
 		return;
@@ -1277,10 +1301,10 @@ void lua_xpcall(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		out.clear();
 		out.push_back(false);
 
-		if (std::holds_alternative<std::shared_ptr<LuaCallable>>(errh)) {
+		if (std::holds_alternative<std::shared_ptr<LuaCallable>>(errh) || std::holds_alternative<LuaCFunction>(errh)) {
 			LuaValue err_msg = std::string(e.what());
 			LuaValueVector err_res;
-			std::get<std::shared_ptr<LuaCallable>>(errh)->call(&err_msg, 1, err_res);
+			call_lua_value(errh, &err_msg, 1, err_res);
 			out.push_back(err_res.empty() ? LuaValue(std::monostate{}) : err_res[0]);
 		}
 		else {

@@ -13,6 +13,7 @@ temp*/
 # Executables
 luax*
 bench*
+test*
 
 # CMake artifacts
 CMakeCache.txt

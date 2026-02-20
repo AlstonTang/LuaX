@@ -208,15 +208,14 @@ std::shared_ptr<LuaObject> create_table_library() {
 	static std::shared_ptr<LuaObject> table_lib;
 	if (table_lib) return table_lib;
 
-	table_lib = LuaObject::create({
-		{LuaValue(std::string_view("concat")), std::make_shared<LuaFunctionWrapper>(table_concat)},
-		{LuaValue(std::string_view("insert")), std::make_shared<LuaFunctionWrapper>(table_insert)},
-		{LuaValue(std::string_view("move")), std::make_shared<LuaFunctionWrapper>(table_move)},
-		{LuaValue(std::string_view("pack")), std::make_shared<LuaFunctionWrapper>(table_pack)},
-		{LuaValue(std::string_view("remove")), std::make_shared<LuaFunctionWrapper>(table_remove)},
-		{LuaValue(std::string_view("sort")), std::make_shared<LuaFunctionWrapper>(table_sort)},
-		{LuaValue(std::string_view("unpack")), std::make_shared<LuaFunctionWrapper>(table_unpack)}
-	});
+	table_lib = std::make_shared<LuaObject>();
+	table_lib->set("concat", LUA_C_FUNC(table_concat));
+	table_lib->set("insert", LUA_C_FUNC(table_insert));
+	table_lib->set("pack", LUA_C_FUNC(table_pack));
+	table_lib->set("unpack", LUA_C_FUNC(table_unpack));
+	table_lib->set("remove", LUA_C_FUNC(table_remove));
+	table_lib->set("move", LUA_C_FUNC(table_move));
+	table_lib->set("sort", LUA_C_FUNC(table_sort));
 
 	return table_lib;
 }
