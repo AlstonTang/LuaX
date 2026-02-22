@@ -32,7 +32,7 @@ static std::shared_ptr<LuaObject> file_metatable;
 // Helper to create method wrappers for LuaFile
 // The lambda must return void and take the output vector reference.
 auto make_file_method = [](auto method_ptr) {
-	return std::make_shared<LuaFunctionWrapper>(
+	return make_lua_callable(
 		[method_ptr](const LuaValue* args, size_t n_args, LuaValueVector& out) {
 			// The first argument (args[0]) will be the LuaFile object itself
 			if (n_args < 1) {
@@ -277,7 +277,7 @@ void LuaFile::lines(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	}
 
 	// The iterator function for file:lines()
-	auto iterator_func = std::make_shared<LuaFunctionWrapper>(
+	auto iterator_func = make_lua_callable(
 		[self_obj = shared_from_this()](const LuaValue* _, size_t __, LuaValueVector& iter_out) {
 			// Cast self_obj to LuaFile to access file_handle
 			if (auto self = std::dynamic_pointer_cast<LuaFile>(self_obj)) {
@@ -514,7 +514,7 @@ void io_lines(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 					auto original_iter = std::get<std::shared_ptr<LuaCallable>>(iter_res[0]);
 
 					// Wrap the iterator to close the file on nil
-					auto iter_wrapper = std::make_shared<LuaFunctionWrapper>(
+					auto iter_wrapper = make_lua_callable(
 						[original_iter, file_obj](const LuaValue* w_args, size_t w_n_args,
 						                          LuaValueVector& w_out) {
 							// Call original iterator

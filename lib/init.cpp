@@ -104,7 +104,7 @@ static std::shared_ptr<LuaObject> create_initial_global() {
 	globals->set("tostring", LUA_C_FUNC(lua_tostring));
 	globals->set("error", LUA_C_FUNC(lua_error));
 	globals->set("pcall", LUA_C_FUNC(lua_pcall));
-	globals->set("_VERSION", std::string("Lua 5.4"));
+	globals->set("_VERSION", std::string("LuaX"));
 	globals->set("math", create_math_library());
 	globals->set("string", create_string_library());
 	globals->set("table", create_table_library());

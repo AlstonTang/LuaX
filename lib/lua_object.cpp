@@ -1222,61 +1222,30 @@ void lua_tonumber(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 LuaValue LuaCallable::call0() {
 	LuaValueVector res;
 	call(nullptr, 0, res);
-	return res.empty() ? LuaValue(std::monostate{}) : res[0];
+	return res.empty() ? LuaValue(std::monostate{}) : std::move(res[0]);
 }
 
 LuaValue LuaCallable::call1(const LuaValue& a1) {
 	LuaValueVector res;
 	const LuaValue args[] = {a1};
 	call(args, 1, res);
-	return res.empty() ? LuaValue(std::monostate{}) : res[0];
+	return res.empty() ? LuaValue(std::monostate{}) : std::move(res[0]);
 }
 
 LuaValue LuaCallable::call2(const LuaValue& a1, const LuaValue& a2) {
 	LuaValueVector res;
 	const LuaValue args[] = {a1, a2};
 	call(args, 2, res);
-	return res.empty() ? LuaValue(std::monostate{}) : res[0];
+	return res.empty() ? LuaValue(std::monostate{}) : std::move(res[0]);
 }
 
 LuaValue LuaCallable::call3(const LuaValue& a1, const LuaValue& a2, const LuaValue& a3) {
 	LuaValueVector res;
 	const LuaValue args[] = {a1, a2, a3};
 	call(args, 3, res);
-	return res.empty() ? LuaValue(std::monostate{}) : res[0];
+	return res.empty() ? LuaValue(std::monostate{}) : std::move(res[0]);
 }
 
-inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args,
-                           LuaValueVector& out_result) {
-	out_result.clear();
-
-	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) {
-		((LuaCFunctionTyped)(cfunc->ptr))(args, n_args, out_result);
-		return;
-	}
-	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) {
-		(*callable_ptr)->call(args, n_args, out_result);
-		return;
-	}
-
-	// 2. Metatable / __call Handling
-	if (const auto* obj = std::get_if<std::shared_ptr<LuaObject>>(&callable)) {
-		const auto& t = *obj;
-		if (t->metatable) {
-			LuaValue call_handler = t->metatable->get_item("__call");
-			if (is_lua_truthy(call_handler)) {
-				LuaValueVector new_args_vec;
-				new_args_vec.reserve(n_args + 1);
-				new_args_vec.push_back(callable); // Push 'self'
-				new_args_vec.insert(new_args_vec.end(), args, args + n_args);
-				call_lua_value(call_handler, new_args_vec.data(), new_args_vec.size(), out_result);
-				return;
-			}
-		}
-	}
-	std::cerr << "CRITICAL: attempt to call a " << get_lua_type_name(callable) << " value from thread " << std::this_thread::get_id() << std::endl;
-	throw std::runtime_error("attempt to call a " + get_lua_type_name(callable) + " value");
-}
 
 void lua_xpcall(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (n_args < 2) throw std::runtime_error("bad argument #2 to 'xpcall' (value expected)");

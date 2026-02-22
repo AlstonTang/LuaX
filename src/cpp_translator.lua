@@ -926,9 +926,11 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	
 	-- 2. Resolve function
 	local translated_func_access
+	local is_known_local = false
 	if func_node[1] == "identifier" then
 		local decl_info = ctx:is_declared(func_node[3])
 		if decl_info then
+			is_known_local = true
 			if type(decl_info) == "table" and decl_info.is_ptr then
 				translated_func_access = "(*" .. decl_info.ptr_name .. ")"
 			else
@@ -949,18 +951,41 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	if not opts.multiret and not is_vector and num_args <= 3 then
 		-- Fast path: Direct call returning single value
 		local temp_var = "call_res_" .. ctx:get_unique_id()
-		local call_expr = "lua_call" .. num_args .. "(" .. translated_func_access .. ", " .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
+		local call_expr
+		if is_known_local then
+			call_expr = "get_callable(" .. translated_func_access .. ")->call" .. num_args .. "(" .. args_code .. ")"
+		else
+			call_expr = "lua_call" .. num_args .. "(" .. translated_func_access .. ", " .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
+		end
 		ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
 		return temp_var
 	elseif is_vector then
 		-- args_code is the name of a vector variable
-		ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
+		if is_known_local then
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
+			ctx:add_statement("get_callable(" .. translated_func_access .. ")->call(" .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
+		else
+			ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
+		end
 	else
 		if args_code == "" then
-			ctx:add_statement("call_lua_value(" .. translated_func_access .. ", {}, 0, " .. ctx:use_ret_buf() .. ");\n")
+			if is_known_local then
+				ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
+				ctx:add_statement("get_callable(" .. translated_func_access .. ")->call(nullptr, 0, " .. ctx:use_ret_buf() .. ");\n")
+			else
+				ctx:add_statement("call_lua_value(" .. translated_func_access .. ", {}, 0, " .. ctx:use_ret_buf() .. ");\n")
+			end
 		else
 			-- Single/Simple args optimization
-			ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. ctx:use_ret_buf() .. ", " .. args_code .. ");\n")
+			if is_known_local then
+				-- We need an array for the call() interface
+				local args_arr = "args_" .. ctx:get_unique_id()
+				ctx:add_statement("const LuaValue " .. args_arr .. "[] = {" .. args_code .. "};\n")
+				ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
+				ctx:add_statement("get_callable(" .. translated_func_access .. ")->call(" .. args_arr .. ", " .. num_args .. ", " .. ctx:use_ret_buf() .. ");\n")
+			else
+				ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. ctx:use_ret_buf() .. ", " .. args_code .. ");\n")
+			end
 		end
 	end
 	
@@ -1088,6 +1113,14 @@ register_handler("method_call_expression", function(ctx, node, depth, opts)
 	
 	-- Generic method call
 	-- 1. Translate base object (caching statements)
+	local is_known_local_base = false
+	if base_node[1] == "identifier" then
+		local decl_info = ctx:is_declared(base_node[3])
+		if decl_info then
+			is_known_local_base = true
+		end
+	end
+	
 	local base_code = translate_node(ctx, base_node, depth + 1)
 	local method_cache_var = ctx:get_string_cache(method_name)
 	
@@ -1098,15 +1131,32 @@ register_handler("method_call_expression", function(ctx, node, depth, opts)
 	if not opts.multiret and not is_vector and num_args <= 3 then
 		-- Fast path: Direct call returning single value
 		local temp_var = "mcall_res_" .. ctx:get_unique_id()
-		local call_expr = "lua_call" .. num_args .. "(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
+		local call_expr
+		if is_known_local_base then
+			call_expr = "get_callable(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "))->call" .. num_args .. "(" .. (args_code ~= "" and args_code or "") .. ")"
+		else
+			call_expr = "lua_call" .. num_args .. "(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
+		end
 		ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
 		return temp_var
 	elseif is_vector then
 		-- args_code is the name of a vector variable
-		ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
+		if is_known_local_base then
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
+			ctx:add_statement("get_callable(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "))->call(" .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
+		else
+			ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
+		end
 	else
 		-- Single/Simple args optimization
-		ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. ctx:use_ret_buf() .. ", " .. args_code .. ");\n")
+		if is_known_local_base then
+			local args_arr = "args_" .. ctx:get_unique_id()
+			ctx:add_statement("const LuaValue " .. args_arr .. "[] = {" .. args_code .. "};\n")
+			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
+			ctx:add_statement("get_callable(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "))->call(" .. args_arr .. ", " .. num_args .. ", " .. ctx:use_ret_buf() .. ");\n")
+		else
+			ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. ctx:use_ret_buf() .. ", " .. args_code .. ");\n")
+		end
 	end
 	
 	if opts.multiret then

@@ -461,7 +461,7 @@ void string_gmatch(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		*done_ptr = true;
 	};
 
-	out.assign({std::make_shared<LuaFunctionWrapper>(iter), std::monostate{}, std::monostate{}});
+	out.assign({make_lua_callable(std::move(iter)), std::monostate{}, std::monostate{}});
 }
 
 // string.gsub

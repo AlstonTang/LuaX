@@ -253,7 +253,7 @@ void coroutine_wrap(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto co = std::get<std::shared_ptr<LuaCoroutine>>(co_res[0]);
 
 	// 2. Return a wrapper function
-	auto wrapper = std::make_shared<LuaFunctionWrapper>(
+	auto wrapper = make_lua_callable(
 		[co](const LuaValue* wrap_args, size_t n_wrap_args, LuaValueVector& wrap_out) {
 			wrap_out.clear();
 			co->resume(wrap_args, n_wrap_args, wrap_out);

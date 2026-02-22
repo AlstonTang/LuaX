@@ -17,6 +17,7 @@ local do_compile = true
 local force_single_threaded = false
 local input_lua_file = nil
 local path_to_out_file = nil
+local no_format = false
 
 -- Argument Parsing
 local function print_usage()
@@ -29,6 +30,7 @@ Options:
   -b, --build-dir <dir>  Directory for intermediate files (default: "build")
   -t, --translate-only   Only generate C++ files, do not compile.
   -s, --single-threaded  Compile without thread safety for maximum performance.
+  -r, --raw              Do not format C++ files.
   -k, --keep             Preserve generated source/object files after compilation.
   -h, --help             Show this help message.
 ]], cmd))
@@ -51,6 +53,8 @@ while i <= #arg do
 	elseif a == "-b" or a == "--build-dir" then
 		BUILD_DIR = arg[i+1]
 		i = i + 1
+	elseif a == "-r" or a == "--raw" then
+		no_format = true
 	elseif a == "-h" or a == "--help" then
 		print_usage()
 	elseif not input_lua_file then
@@ -271,10 +275,10 @@ for file_path, output_name in pairs(files_to_translate) do
 			local co = coroutine.create_parallel(function(fp, out, main, keep) 
 				return translate_file(fp, out, main, keep) 
 			end)
-			coroutine.resume(co, file_path, output_name, is_main_entry, keep_files)
+			coroutine.resume(co, file_path, output_name, is_main_entry, keep_files and (not no_format))
 			table.insert(threads, co)
 		else
-			translate_file(file_path, output_name, is_main_entry, keep_files)
+			translate_file(file_path, output_name, is_main_entry, keep_files and (not no_format))
 		end
 	end
 end

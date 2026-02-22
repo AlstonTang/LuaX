@@ -47,21 +47,6 @@ struct LuaCallable {
 	virtual LuaValue call3(const LuaValue& a1, const LuaValue& a2, const LuaValue& a3);
 };
 
-// Compatible wrapper for std::function (used by library functions and generic lambdas)
-struct LuaFunctionWrapper : public LuaCallable {
-	using FuncSignature = std::function<void(const LuaValue*, size_t, LuaValueVector&)>;
-	FuncSignature func;
-
-	LuaFunctionWrapper() = default;
-
-	template <typename F>
-	LuaFunctionWrapper(F&& f) : func(std::forward<F>(f)) {}
-
-	void call(const LuaValue* args, size_t n_args, LuaValueVector& out_result) override {
-		func(args, n_args, out_result);
-	}
-};
-
 // Generic template to wrap ANY lambda/callable without std::function overhead
 template <typename F>
 struct LuaLambdaCallable : public LuaCallable {
@@ -321,7 +306,9 @@ inline const std::shared_ptr<LuaObject>& get_object(const std::shared_ptr<LuaObj
 
 // Forward declarations for inline helpers
 std::string get_lua_type_name(const LuaValue& val);
-void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args, LuaValueVector& out_result);
+
+// Forward declaration — full definition below after is_lua_truthy
+inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args, LuaValueVector& out_result);
 
 inline LuaCallable* get_callable(const LuaValue& value) {
 	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&value)) [[likely]] {
@@ -417,9 +404,8 @@ void pairs_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out_res
 void ipairs_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out_result);
 void lua_tonumber(const LuaValue* args, size_t n_args, LuaValueVector& out);
 
-// Core Call Function
-void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args, LuaValueVector& out_result);
 
+// Convenience overloads for call_lua_value
 // Overloads for convenience
 inline void call_lua_value(const LuaValue& callable, LuaValueVector& out_result,
                            const LuaValueVector& args) {
@@ -470,6 +456,38 @@ inline bool is_lua_truthy(const LuaValue& val) {
 	if (idx == INDEX_NIL) [[unlikely]] return false;
 	if (idx == INDEX_BOOLEAN) return std::get<bool>(val);
 	return true;
+}
+
+// Core call dispatch — fully inline for cross-TU inlining of fast paths
+inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args,
+                           LuaValueVector& out_result) {
+	out_result.clear();
+
+	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) {
+		((LuaCFunctionTyped)(cfunc->ptr))(args, n_args, out_result);
+		return;
+	}
+	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) {
+		(*callable_ptr)->call(args, n_args, out_result);
+		return;
+	}
+
+	// Metatable / __call Handling
+	if (const auto* obj = std::get_if<std::shared_ptr<LuaObject>>(&callable)) {
+		const auto& t = *obj;
+		if (t->metatable) {
+			LuaValue call_handler = t->metatable->get_item("__call");
+			if (is_lua_truthy(call_handler)) {
+				LuaValueVector new_args_vec;
+				new_args_vec.reserve(n_args + 1);
+				new_args_vec.push_back(callable); // Push 'self'
+				new_args_vec.insert(new_args_vec.end(), args, args + n_args);
+				call_lua_value(call_handler, new_args_vec.data(), new_args_vec.size(), out_result);
+				return;
+			}
+		}
+	}
+	throw std::runtime_error("attempt to call a " + get_lua_type_name(callable) + " value");
 }
 
 // ==========================================
