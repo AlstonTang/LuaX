@@ -1307,7 +1307,10 @@ register_handler("assignment", function(ctx, node, depth)
 			value_code = "get_return_value(" .. function_call_results_var .. ", " .. offset .. ")"
 		end
 		
-		cpp_code = cpp_code .. translate_assignment_target(ctx, var_node, value_code, depth)
+		-- FIX: Capture the target code, flush any hoisted statements, THEN append.
+		local target_code = translate_assignment_target(ctx, var_node, value_code, depth)
+		local stmts = ctx:flush_statements()
+		cpp_code = cpp_code .. stmts .. target_code
 	end
 	
 	return cpp_code
@@ -1433,7 +1436,7 @@ register_handler("function_declaration", function(ctx, node, depth)
 	local ptr_name = nil
 	
 	-- Handle local recursive function with pointer
-	if node[6] and node[3] then
+	if node:meta().is_local and node[3] then
 		ptr_name = node[3] .. "_ptr_" .. ctx:get_unique_id()
 		local sanitized_var_name = sanitize_cpp_identifier(node[3])
 		ctx:declare_variable(sanitized_var_name, { is_ptr = true, ptr_name = ptr_name })
@@ -1448,18 +1451,18 @@ register_handler("function_declaration", function(ctx, node, depth)
 	end
 	
 	-- Restore variable declaration for non-pointer access
-	if node[6] and node[3] then
+	if node:meta().is_local and node[3] then
 		local var_name = sanitize_cpp_identifier(node[3])
 		ctx:declare_variable(node[3])
 	end
 	
 	-- Check for table member function (e.g., function M.greet(name))
-	if node[7] ~= nil then
+	if node:meta().method_name  ~= nil then
 		local prev_stmts = ctx:flush_statements()
-		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node[7] .. "\", " .. callable_expr .. ");"
+		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node:meta().method_name .. "\", " .. callable_expr .. ");"
 	elseif node[3] ~= nil then
 		local prev_stmts = ctx:flush_statements()
-		if node[6] then
+		if node:meta().is_local  then
 			local var_name = sanitize_cpp_identifier(node[3])
 			return prev_stmts .. "auto " .. ptr_name .. " = std::make_shared<LuaValue>();\n" ..
 				"*" .. ptr_name .. " = " .. callable_expr .. ";\n" ..
@@ -1484,8 +1487,8 @@ register_handler("method_declaration", function(ctx, node, depth)
 	
 	local prev_stmts = ctx:flush_statements()
 	
-	if node[7] ~= nil then
-		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node[7] .. "\", " .. callable_expr .. ");"
+	if node:meta().method_name ~= nil then
+		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node:meta().method_name .. "\", " .. callable_expr .. ");"
 	else
 		return prev_stmts .. callable_expr
 	end

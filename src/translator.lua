@@ -364,8 +364,12 @@ function Parser:parse_expression(min_precedence)
 		end
 
 		self[2] = self[2] + 1 -- consume operator
-		local right_expr = self:parse_expression(op_precedence + 1) -- Recursive call with higher precedence
-		if not right_expr then error("Expected expression after operator") end
+
+		-- FIX: Right-associative operators don't increment precedence for the right side
+		local is_right_assoc = (operator_token[2] == '^' or operator_token[2] == '..')
+		local next_prec = is_right_assoc and op_precedence or (op_precedence + 1)
+
+		local right_expr = self:parse_expression(next_prec)
 
 		local binary_expr = Node:new("binary_expression", operator_token[2])
 		binary_expr:AddChildren(left_expr, right_expr)
@@ -802,7 +806,7 @@ function Parser:parse_function_declaration(is_local)
 	local name_token = peek(self)
 	if name_token and name_token[1] == "identifier" then
 		local function_node = Node:new("function_declaration")
-		function_node[6] = is_local -- Store if it's a local function
+		function_node:meta().is_local = is_local -- Store if it's a local function
 
 		self[2] = self[2] + 1 -- consume identifier
 		function_node[3] = name_token[2]
@@ -814,7 +818,7 @@ function Parser:parse_function_declaration(is_local)
 			local method_name_token = peek(self)
 			if method_name_token and method_name_token[1] == "identifier" then
 				self[2] = self[2] + 1 -- consume method identifier
-				function_node[7] = method_name_token[2] -- Store method name separately
+				function_node:meta().method_name = method_name_token[2] -- Store method name separately
 				if separator_type == "colon" then
 					function_node[1] = "method_declaration" -- Change node type to reflect method
 				end
@@ -858,14 +862,11 @@ function Parser:parse(name)
 			end
 			root:AddChildren(statement_node)
 		else
-			-- If parse_statement returns nil, it means either no statement was found
-			-- or we've reached the end of a block (like 'end').
-			-- We should only advance if we haven't reached the end of tokens.
-			if self[2] <= #self[1] then
-				self[2] = self[2] + 1
-			else
-				break -- Reached end of tokens
+			local bad_token = peek(self)
+			if bad_token and bad_token[1] ~= "keyword" then -- ignore stray 'end'/'else'
+				error("Syntax Error: Unexpected token '" .. tostring(bad_token[2]) .. "' near token index " .. self[2])
 			end
+			self[2] = self[2] + 1
 		end
 	end
 	print("Done Generating AST for " .. name .. " at " .. os.clock() .. "...")

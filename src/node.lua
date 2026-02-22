@@ -1,44 +1,37 @@
--- Node class - AST node representation
--- This module provides the Node class used throughout the translator
-
 local Node = {}
 Node.__index = Node
 
--- Mapping for Node:
--- [1] = type
--- [2] = value
--- [3] = identifier
--- [4] = parent (REMOVED to break cycles)
--- [5] = ordered_children
-
 function Node:new(type, value, identifier)
-	local instance = {
-		type,       -- [1]
-		value,      -- [2]
-		identifier, -- [3]
-		nil,        -- [4]
-		nil         -- [5] ordered_children (Lazy)
-	}
-	setmetatable(instance, Node)
-	return instance
+	local instance = { type, value, identifier, nil, nil }
+	-- Add a dedicated metadata table at index 6 to stop the random [6]/[7] assignments
+	instance[6] = {} 
+	return setmetatable(instance, Node)
 end
 
-function Node:AddChild(child)
-	if not child then return end
+-- FIX: Use varargs (...) so it accepts infinite children
+function Node:AddChildren(...)
 	local children = self[5]
 	if not children then
 		children = {}
 		self[5] = children
 	end
-	table.insert(children, child)
-	-- child[4] = self -- REMOVED to break cyclic references for C++ shared_ptr
+	for i = 1, select('#', ...) do
+		local child = select(i, ...)
+		if child then table.insert(children, child) end
+	end
 end
 
-function Node:AddChildren(c1, c2, c3)
-	if c1 then self:AddChild(c1) end
-	if c2 then self:AddChild(c2) end
-	if c3 then self:AddChild(c3) end
+function Node:AddChild(child)
+	self:AddChildren(child)
 end
+
+-- HELPER METHODS: Use these instead of raw index brackets in the future
+function Node:type() return self[1] end
+function Node:value() return self[2] end
+function Node:id() return self[3] end
+function Node:children() return self[5] or {} end
+function Node:child(index) return self:children()[index] end
+function Node:meta() return self[6] end
 
 function Node:get_all_children_of_type(type_name)
 	local matching_children = {}
