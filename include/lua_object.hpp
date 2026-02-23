@@ -14,6 +14,7 @@
 #include <cmath>
 #include <algorithm>
 #include <iostream>
+#include <atomic>
 
 // ==========================================
 // Conditional Threading Support
@@ -189,10 +190,17 @@ public:
 	// Metamethod and property cache
 	LuaValue cached_index;
 	LuaValue cached_newindex;
-	bool metamethods_initialized = false;
+	std::atomic<bool> metamethods_initialized{false}; 
+
 	std::pair<LuaValue, LuaValue> get_cached_metamethods() {
-		if (!metamethods_initialized) ensure_metamethods();
-		LUAX_LOCK_LOCAL();
+		// Acquire-Release fence ensures that if this is true, the data IS ready
+		if (!metamethods_initialized.load(std::memory_order_acquire)) {
+			ensure_metamethods();
+		}
+		// If we are just reading, we should use a shared_lock
+		#ifdef LUAX_THREAD_SAFE
+			std::lock_guard<std::recursive_mutex> lock(mtx);
+		#endif
 		return {cached_index, cached_newindex};
 	}
 
@@ -231,6 +239,9 @@ public:
 
 	static std::string_view intern(std::string_view sv);
 	static const LuaValue& get_single_char(unsigned char c);
+private:
+    // Internal version that tracks depth to prevent Segfaults
+    LuaValue get_item_internal(const LuaValue& key, int depth);
 };
 
 extern std::shared_ptr<LuaObject> _G;
@@ -310,11 +321,45 @@ std::string get_lua_type_name(const LuaValue& val);
 // Forward declaration — full definition below after is_lua_truthy
 inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args, LuaValueVector& out_result);
 
+// A lightweight shim to make a C function look like a LuaCallable
+struct LuaCFunctionShim : public LuaCallable {
+    LuaCFunctionPtr ptr;
+    void call(const LuaValue* args, size_t n_args, LuaValueVector& out_result) override {
+        ((LuaCFunctionTyped)ptr)(args, n_args, out_result);
+    }
+};
+
 inline LuaCallable* get_callable(const LuaValue& value) {
-	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&value)) [[likely]] {
-		return callable_ptr->get();
-	}
-	throw std::runtime_error("attempt to call a " + get_lua_type_name(value) + " value");
+    const size_t idx = value.index();
+
+    // 1. HOT PATH: Transpiled Lua Functions (std::shared_ptr<LuaCallable>)
+    if (idx == INDEX_FUNCTION) [[likely]] {
+        return std::get<INDEX_FUNCTION>(value).get();
+    }
+
+    // 2. NATIVE PATH: C Functions
+    if (idx == INDEX_CFUNCTION) [[likely]] {
+        // We use a thread-local shim so that this is thread-safe and 
+        // doesn't require a heap allocation every time.
+        thread_local LuaCFunctionShim shim;
+        shim.ptr = std::get<INDEX_CFUNCTION>(value).ptr;
+        return &shim;
+    }
+
+    // 3. TABLE PATH: Check for __call
+    if (idx == INDEX_OBJECT) [[unlikely]] {
+        const auto& obj = std::get<INDEX_OBJECT>(value);
+        if (obj && obj->metatable) {
+            // This is slightly slower as it requires a lookup
+            LuaValue call_handler = obj->metatable->get_item("__call");
+            if (call_handler.index() == INDEX_FUNCTION || call_handler.index() == INDEX_CFUNCTION) {
+                return get_callable(call_handler);
+            }
+        }
+    }
+
+    [[unlikely]]
+    throw std::runtime_error("attempt to call a " + get_lua_type_name(value) + " value");
 }
 
 inline LuaValue lua_call0(const LuaValue& callable, LuaValueVector& out) {
@@ -461,32 +506,66 @@ inline bool is_lua_truthy(const LuaValue& val) {
 // Core call dispatch — fully inline for cross-TU inlining of fast paths
 inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args,
 						   LuaValueVector& out_result) {
+	// 1. Reset the return buffer
 	out_result.clear();
 
-	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) {
-		((LuaCFunctionTyped)(cfunc->ptr))(args, n_args, out_result);
-		return;
-	}
-	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) {
-		(*callable_ptr)->call(args, n_args, out_result);
-		return;
-	}
-
-	// Metatable / __call Handling
-	if (const auto* obj = std::get_if<std::shared_ptr<LuaObject>>(&callable)) {
-		const auto& t = *obj;
-		if (t->metatable) {
-			LuaValue call_handler = t->metatable->get_item("__call");
-			if (is_lua_truthy(call_handler)) {
-				LuaValueVector new_args_vec;
-				new_args_vec.reserve(n_args + 1);
-				new_args_vec.push_back(callable); // Push 'self'
-				new_args_vec.insert(new_args_vec.end(), args, args + n_args);
-				call_lua_value(call_handler, new_args_vec.data(), new_args_vec.size(), out_result);
+	// 2. Dispatch based on the Type Index
+	switch (callable.index()) {
+		
+		// INDEX 7: std::shared_ptr<LuaCallable> (Transpiled Lua Functions)
+		case INDEX_FUNCTION: [[likely]] {
+			const auto& func_ptr = std::get<INDEX_FUNCTION>(callable);
+			// In a multithreaded engine, always verify the pointer isn't null
+			if (func_ptr) [[likely]] {
+				func_ptr->call(args, n_args, out_result);
 				return;
 			}
+			break;
 		}
+
+		// INDEX 9: LuaCFunction (Native Library Functions)
+		case INDEX_CFUNCTION: [[likely]] {
+			const auto& cfunc = std::get<INDEX_CFUNCTION>(callable);
+			// Cast the raw pointer to the typed function and execute
+			((LuaCFunctionTyped)(cfunc.ptr))(args, n_args, out_result);
+			return;
+		}
+
+		// INDEX 6: std::shared_ptr<LuaObject> (Tables with __call)
+		case INDEX_OBJECT: [[unlikely]] {
+			const auto& obj = std::get<INDEX_OBJECT>(callable);
+			if (obj && obj->metatable) {
+				LuaValue call_handler = obj->metatable->get_item("__call");
+				if (is_lua_truthy(call_handler)) {
+					// Inject 'self' into the arguments
+					LuaValueVector new_args;
+					new_args.reserve(n_args + 1);
+					new_args.push_back(callable); 
+					if (n_args > 0) {
+						new_args.insert(new_args.end(), args, args + n_args);
+					}
+					
+					// Tail-call into the handler
+					call_lua_value(call_handler, new_args.data(), new_args.size(), out_result);
+					return;
+				}
+			}
+			break; 
+		}
+
+		// INDEX 8: std::shared_ptr<LuaCoroutine>
+		case INDEX_COROUTINE: [[unlikely]] {
+			// Usually handled via coroutine.resume, but if you want 
+			// direct calling to work like resume, add logic here.
+			break;
+		}
+
+		default: [[unlikely]]
+			break;
 	}
+
+	// If we reach here, the value isn't a function, a C function, or a table with __call.
+	[[unlikely]]
 	throw std::runtime_error("attempt to call a " + get_lua_type_name(callable) + " value");
 }
 
@@ -952,57 +1031,65 @@ inline long long lua_get_length_int(const LuaValue& val) {
 }
 
 inline LuaValue lua_get_member(const LuaValue& base, const LuaValue& key) {
-	switch (base.index()) {
-	case INDEX_OBJECT: {
+	// 1. TABLE ACCESS (The 99% case)
+	if (base.index() == INDEX_OBJECT) [[likely]] {
 		return std::get<INDEX_OBJECT>(base)->get_item(key);
 	}
-	case INDEX_STRING:
-	case INDEX_STRING_VIEW: {
+
+	// 2. STRING METATABLE (The 0.9% case)
+	if (base.index() == INDEX_STRING || base.index() == INDEX_STRING_VIEW) [[unlikely]] {
 		static LuaObject* string_lib_obj = std::get<std::shared_ptr<LuaObject>>(_G->get_item("string")).get();
 		return string_lib_obj->get_item(key);
 	}
-	default:
-		throw std::runtime_error("attempt to index a " + get_lua_type_name(base) + " value");
-	}
+
+	// 3. ERROR PATH (The 0.1% case)
+	[[unlikely]]
+	throw std::runtime_error("attempt to index a " + get_lua_type_name(base) + " value");
 }
 
 inline LuaValue lua_get_member(const LuaValue& base, std::string_view key) {
-	switch (base.index()) {
-	case INDEX_OBJECT: {
+	if (base.index() == INDEX_OBJECT) [[likely]] {
 		return std::get<INDEX_OBJECT>(base)->get_item(key);
 	}
-	case INDEX_STRING:
-	case INDEX_STRING_VIEW: {
+
+	if (base.index() == INDEX_STRING || base.index() == INDEX_STRING_VIEW) [[unlikely]] {
 		static LuaObject* string_lib_obj = std::get<std::shared_ptr<LuaObject>>(_G->get_item("string")).get();
 		return string_lib_obj->get_item(key);
 	}
-	default:
-		throw std::runtime_error("attempt to index a " + get_lua_type_name(base) + " value");
-	}
+
+	[[unlikely]]
+	throw std::runtime_error("attempt to index a " + get_lua_type_name(base) + " value");
 }
 
+// These direct pointer/shared_ptr overloads are great for "Self" access
 inline LuaValue lua_get_member(const std::shared_ptr<LuaObject>& base, std::string_view key) {
-	if (!base) return std::monostate{};
-	return base->get_item(key);
+	if (base) [[likely]] {
+		return base->get_item(key);
+	}
+	return std::monostate{};
 }
 
 inline LuaValue lua_get_member(LuaObject* base, std::string_view key) {
-	if (!base) return std::monostate{};
-	return base->get_item(key);
+	if (base) [[likely]] {
+		return base->get_item(key);
+	}
+	return std::monostate{};
 }
 
+// ARRAY ACCESS (Crucial for the new integer loops)
 inline LuaValue lua_get_member(const LuaValue& base, long long key) {
-	if (const auto* obj = std::get_if<std::shared_ptr<LuaObject>>(&base)) {
-		return (*obj)->get_item(key);
+	if (base.index() == INDEX_OBJECT) [[likely]] {
+		return std::get<INDEX_OBJECT>(base)->get_item(key);
 	}
 	return std::monostate{};
 }
 
 inline LuaValue lua_get_member(const std::shared_ptr<LuaObject>& base, long long key) {
-	if (!base) return std::monostate{};
-	return base->get_item(key);
+	if (base) [[likely]] {
+		return base->get_item(key);
+	}
+	return std::monostate{};
 }
-
 
 // Transpiler helper to safely extract return values
 inline LuaValue get_return_value(LuaValueVector& results, size_t index) {

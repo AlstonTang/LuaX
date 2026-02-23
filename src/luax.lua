@@ -198,7 +198,7 @@ local function generate_cmake(output_path, generated_basenames, thread_safe)
 	local gen_srcs = {}
 	for _, basename in ipairs(generated_basenames) do table.insert(gen_srcs, '"' .. basename .. ".cpp" .. '"') end
 
-	local compile_opts = "-g -Ofast"
+	local compile_opts = "-Ofast"
 	if thread_safe then
 		compile_opts = compile_opts .. " -DLUAX_THREAD_SAFE"
 	end

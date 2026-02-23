@@ -284,7 +284,7 @@ std::shared_ptr<LuaObject> create_math_library() {
 	math_lib->set("type", LUA_C_FUNC(math_type));
 	math_lib->set("ult", LUA_C_FUNC(math_ult));
 	math_lib->set("huge", HUGE_VAL);
-	math_lib->set("pi", 3.14159265358979323846);
+	math_lib->set("pi", PI);
 	math_lib->set("maxinteger", 9223372036854775807LL);
 	math_lib->set("mininteger", -9223372036854775807LL - 1);
 

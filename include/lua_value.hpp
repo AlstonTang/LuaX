@@ -48,7 +48,6 @@ enum LuaTypeIndex {
 };
 
 // Custom hasher for LuaValue to support heterogeneous lookup with string_view
-// Custom hasher for LuaValue to support heterogeneous lookup with string_view
 struct LuaValueHash {
 	using is_transparent = void;
 
@@ -83,63 +82,82 @@ struct LuaValueHash {
 
 // Custom equality for LuaValue to support heterogeneous lookup
 struct LuaValueEq {
-	using is_transparent = void;
+    using is_transparent = void;
 
-	bool operator()(const LuaValue& lhs, const LuaValue& rhs) const {
-        size_t lidx = lhs.index();
-        size_t ridx = rhs.index();
-        
-        if (lidx == ridx) {
-            if (lidx == INDEX_STRING_VIEW) {
-                auto sv1 = std::get<INDEX_STRING_VIEW>(lhs);
-                auto sv2 = std::get<INDEX_STRING_VIEW>(rhs);
-                if (sv1.data() == sv2.data() && sv1.size() == sv2.size()) [[likely]] return true;
+    bool operator()(const LuaValue& lhs, const LuaValue& rhs) const {
+        const size_t lidx = lhs.index();
+        const size_t ridx = rhs.index();
+
+        // 1. FAST PATH: Same internal type
+        if (lidx == ridx) [[likely]] {
+            // Hot Path: String Views (Interned members)
+            if (lidx == INDEX_STRING_VIEW) [[likely]] {
+                const auto sv1 = std::get<INDEX_STRING_VIEW>(lhs);
+                const auto sv2 = std::get<INDEX_STRING_VIEW>(rhs);
+                
+                // POINTER EQUALITY: The absolute fastest check for interned strings.
+                if (sv1.data() == sv2.data()) [[likely]] {
+                    // In a perfect interned world, data match implies size match, 
+                    // but we check size to support substrings/views.
+                    return sv1.size() == sv2.size();
+                }
+                // Fallback for non-interned views
                 return sv1 == sv2;
             }
+            
+            // Hot Path: Tables/Objects
+            if (lidx == INDEX_OBJECT) [[likely]] {
+                return std::get<INDEX_OBJECT>(lhs) == std::get<INDEX_OBJECT>(rhs);
+            }
+
+            // Primitive types (bool, double, int, monostate)
             return lhs == rhs;
         }
 
-        // Cross-type string comparison
-        if (lidx == INDEX_STRING && ridx == INDEX_STRING_VIEW)
-            return std::get<INDEX_STRING>(lhs) == std::get<INDEX_STRING_VIEW>(rhs);
-        if (lidx == INDEX_STRING_VIEW && ridx == INDEX_STRING)
-            return std::get<INDEX_STRING_VIEW>(lhs) == std::get<INDEX_STRING>(rhs);
+        // 2. CROSS-TYPE COMPARISONS (Cold Path)
 
-        // Cross-type numeric comparison
+        // String vs View (Content comparison)
+        if ((lidx == INDEX_STRING && ridx == INDEX_STRING_VIEW) || 
+            (lidx == INDEX_STRING_VIEW && ridx == INDEX_STRING)) [[unlikely]] {
+            std::string_view sv1 = (lidx == INDEX_STRING) ? std::get<INDEX_STRING>(lhs) : std::get<INDEX_STRING_VIEW>(lhs);
+            std::string_view sv2 = (ridx == INDEX_STRING) ? std::get<INDEX_STRING>(rhs) : std::get<INDEX_STRING_VIEW>(rhs);
+            return sv1 == sv2;
+        }
+
+        // Numeric Comparison (Integer vs Double)
+        // Lua Semantics: 1 == 1.0 is true
         if ((lidx == INDEX_DOUBLE || lidx == INDEX_INTEGER) && 
-            (ridx == INDEX_DOUBLE || ridx == INDEX_INTEGER)) {
-            double d1 = (lidx == INDEX_DOUBLE) ? std::get<double>(lhs) : (double)std::get<long long>(lhs);
-            double d2 = (ridx == INDEX_DOUBLE) ? std::get<double>(rhs) : (double)std::get<long long>(rhs);
+            (ridx == INDEX_DOUBLE || ridx == INDEX_INTEGER)) [[unlikely]] {
+            double d1 = (lidx == INDEX_DOUBLE) ? std::get<double>(lhs) : static_cast<double>(std::get<long long>(lhs));
+            double d2 = (ridx == INDEX_DOUBLE) ? std::get<double>(rhs) : static_cast<double>(std::get<long long>(rhs));
             return d1 == d2;
         }
 
         return false;
-	}
+    }
 
-	bool operator()(const LuaValue& lhs, std::string_view rhs) const {
-        size_t idx = lhs.index();
-		if (idx == INDEX_STRING_VIEW) {
-			auto sv = std::get<INDEX_STRING_VIEW>(lhs);
-			if (sv.data() == rhs.data() && sv.size() == rhs.size()) [[likely]] return true;
-			return sv == rhs;
-		}
-		if (idx == INDEX_STRING) {
-			return std::get<INDEX_STRING>(lhs) == rhs;
-		}
-		return false;
-	}
+    // Specialized for map lookups using string literals (e.g. properties->find("name"))
+    bool operator()(const LuaValue& lhs, std::string_view rhs) const {
+        const size_t idx = lhs.index();
 
-	bool operator()(std::string_view lhs, const LuaValue& rhs) const {
-		return (*this)(rhs, lhs);
-	}
+        if (idx == INDEX_STRING_VIEW) [[likely]] {
+            const auto sv = std::get<INDEX_STRING_VIEW>(lhs);
+            // Pointer match for interned keys
+            if (sv.data() == rhs.data()) [[likely]] return sv.size() == rhs.size();
+            return sv == rhs;
+        }
 
-	bool operator()(const LuaValue& lhs, const char* rhs) const {
-		return (*this)(lhs, std::string_view(rhs));
-	}
+        if (idx == INDEX_STRING) [[unlikely]] {
+            return std::get<INDEX_STRING>(lhs) == rhs;
+        }
 
-	bool operator()(const char* lhs, const LuaValue& rhs) const {
-		return (*this)(rhs, std::string_view(lhs));
-	}
+        return false;
+    }
+
+    // Symmetry overloads for transparency
+    bool operator()(std::string_view lhs, const LuaValue& rhs) const { return (*this)(rhs, lhs); }
+    bool operator()(const LuaValue& lhs, const char* rhs) const { return (*this)(lhs, std::string_view(rhs)); }
+    bool operator()(const char* lhs, const LuaValue& rhs) const { return (*this)(rhs, std::string_view(lhs)); }
 };
 
 #include "pool_allocator.hpp"

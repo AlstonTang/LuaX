@@ -1620,84 +1620,75 @@ end)
 register_handler("for_numeric_statement", function(ctx, node, depth)
 	local prev_stmts = ctx:flush_statements()
 	
-	local var_name = sanitize_cpp_identifier(node[5][1][3])
+	local var_raw_name = node[5][1][3]
+	local var_name = sanitize_cpp_identifier(var_raw_name)
 	local start_node = node[5][2]
 	local end_node = node[5][3]
 	
-	-- Hoist start/end/step calculations to ensure order of evaluation (start -> end -> step)
-	-- and to catch any function calls passed as arguments.
-	local start_expr_code = translate_node(ctx, start_node, depth + 1)
-	local start_stmts = ctx:flush_statements()
-	
-	local end_expr_code = translate_node(ctx, end_node, depth + 1)
-	local end_stmts = ctx:flush_statements()
-	
-	local step_expr_code
-	local body_node
 	local step_node = nil
-	local step_stmts = ""
-	
+	local body_node = nil
 	if #(node[5] or empty_table) == 5 then
 		step_node = node[5][4]
-		step_expr_code = translate_node(ctx, step_node, depth + 1)
-		step_stmts = ctx:flush_statements()
 		body_node = node[5][5]
 	else
-		step_expr_code = nil
 		body_node = node[5][4]
 	end
-	
-	ctx:declare_variable(node[5][1][3])
-	
-	-- Optimization for integer loops (literals only)
-	local all_integers = (start_node[1] == "integer") and (end_node[1] == "integer")
-	local step_is_one = (step_node == nil) or (step_node[1] == "integer" and tonumber(step_node[2]) == 1)
-	local step_is_neg_one = (step_node and step_node[1] == "integer" and tonumber(step_node[2]) == -1)
-	local step_is_integer = (step_node == nil) or (step_node[1] == "integer")
-	
-	-- Combine hoisted statements (side effects of the expressions)
-	local setup_code = prev_stmts .. "{\n" .. start_stmts .. end_stmts .. step_stmts
-	
-	if all_integers and step_is_one then
-		local start_val = tostring(start_node[2])
-		local end_val = tostring(end_node[2])
-		-- Direct long long iteration, no inner LuaValue casting
-		return setup_code .. "for (long long " .. var_name .. " = " .. start_val .. "LL; " .. var_name .. " <= " .. end_val .. "LL; ++" .. var_name .. ") {\n" ..
-			translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "}}\n"
 
-	elseif all_integers and step_is_neg_one then
-		local start_val = tostring(start_node[2])
-		local end_val = tostring(end_node[2])
-		return setup_code .. "for (long long " .. var_name .. " = " .. start_val .. "LL; " .. var_name .. " >= " .. end_val .. "LL; --" .. var_name .. ") {\n" ..
-			translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "}}\n"
+	-- 1. Evaluate loop control expressions once (Lua Spec)
+	local start_val_code = translate_node(ctx, start_node, depth + 1)
+	local start_stmts = ctx:flush_statements()
+	
+	local end_val_code = translate_node(ctx, end_node, depth + 1)
+	local end_stmts = ctx:flush_statements()
+	
+	local step_val_code = step_node and translate_node(ctx, step_node, depth + 1) or "1LL"
+	local step_stmts = ctx:flush_statements()
 
-	elseif all_integers and step_is_integer then
-		local start_val = tostring(start_node[2])
-		local end_val = tostring(end_node[2])
-		local step_val = tostring(step_node[2])
-		local condition = "(" .. step_val .. " >= 0 ? " .. var_name .. " <= " .. end_val .. "LL : " .. var_name .. " >= " .. end_val .. "LL)"
-		return setup_code .. "for (long long " .. var_name .. " = " .. start_val .. "LL; " .. condition .. "; " .. var_name .. " += " .. step_val .. "LL) {\n" ..
-			translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "}}\n"
-
-	else
-		-- Generic numeric loop (handles variables, doubles, and expression results)
-		local limit_var = "limit_" .. ctx:get_unique_id()
-		local step_var = "step_" .. ctx:get_unique_id()
-		local actual_step = step_expr_code or "1.0"
-
-		-- 1. Evaluate/Fetch Limit and Step as const doubles.
-		--    Start is evaluated in the for-loop init.
-		local setup_vars = "const double " .. limit_var .. " = get_double(" .. end_expr_code .. ");\n" ..
-					       "const double " .. step_var .. " = get_double(" .. actual_step .. ");\n"
-		
-		-- 2. Determine loop condition based on step direction
-		local loop_condition = "(" .. step_var .. " >= 0 ? " .. var_name .. " <= " .. limit_var .. " : " .. var_name .. " >= " .. limit_var .. ")"
-		
-		-- 3. Construct loop using 'double var_name' directly
-		return setup_code .. setup_vars .. 
-			   "for (double " .. var_name .. " = get_double(" .. start_expr_code .. "); " .. loop_condition .. "; " .. var_name .. " += " .. step_var .. ") {\n" ..
-			   translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "}}\n"
+	-- 2. Determine if we can use an Integer Fast-Path
+	-- We use long long if start/end/step are all integers or integer variables
+	local is_integer_loop = (start_node[1] == "integer" or start_node[1] == "number") and
+	                        (end_node[1] == "integer" or end_node[1] == "number") and
+	                        (not step_node or step_node[1] == "integer")
+	
+	-- We check if we know the step direction at compile time
+	local known_step = nil
+	if not step_node then 
+		known_step = 1 
+	elseif step_node[1] == "integer" then 
+		known_step = tonumber(step_node[2]) 
 	end
+
+	ctx:declare_variable(var_raw_name)
+
+	-- 3. Construct the C++ block
+	local loop_id = ctx:get_unique_id()
+	local stop_var = "limit_" .. loop_id
+	local step_var = "step_" .. loop_id
+	
+	local type_cast = is_integer_loop and "get_long_long" or "get_double"
+	local cpp_type = is_integer_loop and "long long" or "double"
+
+	-- Build the Setup
+	local setup = "{\n" .. start_stmts .. end_stmts .. step_stmts ..
+	              "    const " .. cpp_type .. " " .. stop_var .. " = " .. type_cast .. "(" .. end_val_code .. ");\n" ..
+	              "    const " .. cpp_type .. " " .. step_var .. " = " .. type_cast .. "(" .. step_val_code .. ");\n"
+
+	-- Build the Condition
+	local condition = ""
+	if known_step then
+		condition = (known_step >= 0) and (var_name .. " <= " .. stop_var) 
+		                              or  (var_name .. " >= " .. stop_var)
+	else
+		condition = "(" .. step_var .. " >= 0 ? " .. var_name .. " <= " .. stop_var .. " : " .. var_name .. " >= " .. stop_var .. ")"
+	end
+
+	-- Build the Loop Header
+	local loop_header = "    for (" .. cpp_type .. " " .. var_name .. " = " .. type_cast .. "(" .. start_val_code .. "); " .. 
+	                    condition .. "; " .. var_name .. " += " .. step_var .. ") {\n"
+
+	-- Body and Closing
+	local body = translate_node(ctx, body_node, depth + 1, { no_braces = true })
+	return prev_stmts .. setup .. loop_header .. body .. "    }\n}\n"
 end)
 
 register_handler("for_generic_statement", function(ctx, node, depth)
