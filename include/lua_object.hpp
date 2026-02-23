@@ -182,9 +182,9 @@ public:
 	void set_item(const char* key, const LuaValue& value) { set_item(std::string_view(key), value); }
 	void set_item(const LuaValue& key, const LuaValueVector& value);
 
-    // General high-performance helpers (Phase 2)
-    void table_insert(const LuaValue& value);
-    void table_insert(long long pos, const LuaValue& value);
+	// General high-performance helpers (Phase 2)
+	void table_insert(const LuaValue& value);
+	void table_insert(long long pos, const LuaValue& value);
 
 	// Metamethod and property cache
 	LuaValue cached_index;
@@ -230,7 +230,7 @@ public:
 	void set_metatable(const std::shared_ptr<LuaObject>& mt);
 
 	static std::string_view intern(std::string_view sv);
-    static const LuaValue& get_single_char(unsigned char c);
+	static const LuaValue& get_single_char(unsigned char c);
 };
 
 extern std::shared_ptr<LuaObject> _G;
@@ -408,7 +408,7 @@ void lua_tonumber(const LuaValue* args, size_t n_args, LuaValueVector& out);
 // Convenience overloads for call_lua_value
 // Overloads for convenience
 inline void call_lua_value(const LuaValue& callable, LuaValueVector& out_result,
-                           const LuaValueVector& args) {
+						   const LuaValueVector& args) {
 	call_lua_value(callable, args.data(), args.size(), out_result);
 }
 
@@ -460,7 +460,7 @@ inline bool is_lua_truthy(const LuaValue& val) {
 
 // Core call dispatch — fully inline for cross-TU inlining of fast paths
 inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args,
-                           LuaValueVector& out_result) {
+						   LuaValueVector& out_result) {
 	out_result.clear();
 
 	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) {
@@ -587,7 +587,7 @@ inline const LuaValue& lua_string_char_at(const LuaValue& str, long long i) {
 			return LuaObject::get_single_char(static_cast<unsigned char>((*sv)[i - 1]));
 		}
 	}
-    static const LuaValue empty_str{std::string("")};
+	static const LuaValue empty_str{std::string("")};
 	return empty_str;
 }
 
@@ -596,7 +596,7 @@ inline const LuaValue& lua_string_char_at(const LuaValue& str, const LuaValue& p
 	if (const auto* l = std::get_if<long long>(&pos)) i = *l;
 	else if (const auto* d = std::get_if<double>(&pos)) i = static_cast<long long>(*d);
 	else { static const LuaValue empty_str{std::string("")}; return empty_str; }
-    return lua_string_char_at(str, i);
+	return lua_string_char_at(str, i);
 }
 
 // Optimized Byte Access (replaces str:byte(i))
@@ -614,17 +614,17 @@ inline long long lua_string_byte_at_raw(const LuaValue& str, long long i) {
 }
 
 inline long long lua_string_byte_at_raw(const LuaValue& str, const LuaValue& pos) {
-    long long i = 0;
-    if (const auto* l = std::get_if<long long>(&pos)) i = *l;
-    else if (const auto* d = std::get_if<double>(&pos)) i = static_cast<long long>(*d);
-    else return -1;
-    return lua_string_byte_at_raw(str, i);
+	long long i = 0;
+	if (const auto* l = std::get_if<long long>(&pos)) i = *l;
+	else if (const auto* d = std::get_if<double>(&pos)) i = static_cast<long long>(*d);
+	else return -1;
+	return lua_string_byte_at_raw(str, i);
 }
 
 inline LuaValue lua_string_byte_at(const LuaValue& str, long long i) {
-    long long b = lua_string_byte_at_raw(str, i);
-    if (b == -1) return std::monostate{};
-    return b;
+	long long b = lua_string_byte_at_raw(str, i);
+	if (b == -1) return std::monostate{};
+	return b;
 }
 
 inline LuaValue lua_string_byte_at(const LuaValue& str, const LuaValue& pos) {
@@ -632,7 +632,7 @@ inline LuaValue lua_string_byte_at(const LuaValue& str, const LuaValue& pos) {
 	if (const auto* l = std::get_if<long long>(&pos)) i = *l;
 	else if (const auto* d = std::get_if<double>(&pos)) i = static_cast<long long>(*d);
 	else return std::monostate{}; 
-    return lua_string_byte_at(str, i);
+	return lua_string_byte_at(str, i);
 }
 
 // Optimized String View Overloads
@@ -943,7 +943,7 @@ inline long long lua_get_length_int(const LuaValue& val) {
 				LuaValueVector res;
 				call_lua_value(len_meta, &val, 1, res);
 				LuaValue ret = res.empty() ? std::monostate{} : res[0];
-                return static_cast<long long>(to_double(ret));
+				return static_cast<long long>(to_double(ret));
 			}
 		}
 		return static_cast<long long>(obj->array_part.size());
@@ -1006,8 +1006,12 @@ inline LuaValue lua_get_member(const std::shared_ptr<LuaObject>& base, long long
 
 // Transpiler helper to safely extract return values
 inline LuaValue get_return_value(LuaValueVector& results, size_t index) {
-	// std::move avoids copying the underlying string/table/heavy data
-	return index < results.size() ? std::move(results[index]) : std::monostate{};
+	if (index < results.size()) [[likely]] {
+		// std::move avoids copying the underlying string/table/heavy data
+		return std::move(results[index]);
+	} else {
+		return std::monostate{};
+	}
 }
 
 // Logic operators

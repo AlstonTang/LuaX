@@ -26,7 +26,10 @@ local cpp_keywords = {
 	["using"] = true, ["try"] = true, ["catch"] = true,
 	["throw"] = true, ["const_cast"] = true, ["static_cast"] = true,
 	["dynamic_cast"] = true, ["reinterpret_cast"] = true,
-	["_func_ret_buf"] = true -- Reserved for internal buffer
+	["_func_ret_buf"] = true, -- Reserved for internal buffer
+	["args"] = true,
+	["n_args"] = true,
+	["out_result"] = true,
 }
 
 local function sanitize_cpp_identifier(name)
@@ -761,7 +764,7 @@ BuiltinCallHandlers["table.insert"] = function(ctx, node, depth, opts)
 		local table_code = translate_node(ctx, children[2], depth + 1)
 		local pos_code = translate_node(ctx, children[3], depth + 1)
 		local value_code = translate_node(ctx, children[4], depth + 1)
-        ctx:add_statement("lua_table_insert(" .. table_code .. ", get_long_long(" .. pos_code .. "), " .. value_code .. ");\n")
+		ctx:add_statement("lua_table_insert(" .. table_code .. ", static_cast<long long>(get_double(" .. pos_code .. ")), " .. value_code .. ");\n")
 		return "std::monostate{}"
 	end
 	return nil
@@ -1011,9 +1014,9 @@ StringMethodHandlers["sub"] = function(ctx, node, base_node, depth, opts) return
 
 MethodCallHandlers["byte"] = function(ctx, node, base_node, depth, opts)
 	-- Check for str:byte(i) or str:byte(i, i) pattern -> lua_string_byte_at(str, i)
-	local arg1 = node[5][3]
-	local arg2 = node[5][4]
-	local arg3 = node[5][5]
+	local arg1 = node:child(3)
+	local arg2 = node:child(4)
+	local arg3 = node:child(5)
 	
 	if arg1 and not arg2 then
 		-- str:byte(i) single char
@@ -1084,17 +1087,17 @@ MethodCallHandlers["sub"] = function(ctx, node, base_node, depth, opts)
 				return "lua_string_char_at(" .. base_code .. ", " .. arg1_code .. ")"
 			end
 		end
-        
-        if not opts.multiret then
-            return "lua_string_sub(" .. base_code .. ", get_long_long(" .. arg1_code .. "), get_long_long(" .. arg2_code .. "))"
-        end
+
+		if not opts.multiret then
+			return "lua_string_sub(" .. base_code .. ", static_cast<long long>(get_double(" .. arg1_code .. ")), static_cast<long long>(get_double(" .. arg2_code .. ")))"
+		end
 	elseif arg1 and not arg2 then
-        local arg1_code = translate_node(ctx, arg1, depth + 1)
-        local base_code = translate_node(ctx, base_node, depth + 1)
-        if not opts.multiret then
-            return "lua_string_sub(" .. base_code .. ", get_long_long(" .. arg1_code .. "), -1)"
-        end
-    end
+		local arg1_code = translate_node(ctx, arg1, depth + 1)
+		local base_code = translate_node(ctx, base_node, depth + 1)
+		if not opts.multiret then
+			return "lua_string_sub(" .. base_code .. ", static_cast<long long>(get_double(" .. arg1_code .. ")), -1)"
+		end
+	end
 	return nil
 end
 
@@ -1351,11 +1354,11 @@ local function translate_function_body(ctx, node, depth)
 	for i, param_node in ipairs(params_node[5] or empty_table) do
 		if param_node[1] == "identifier" then
 			ctx.current_function_fixed_params_count = ctx.current_function_fixed_params_count + 1
-			local param_name = param_node[3]
+			local param_name = sanitize_cpp_identifier(param_node[3])
 			local vector_idx = i + param_index_offset - 1
 			params_extraction = params_extraction .. "    LuaValue " .. param_name .. " = (n_args > " .. vector_idx .. " ? args[" .. vector_idx .. "] : LuaValue(std::monostate{}));\n"
-			ctx:declare_variable(param_name)
-			table.insert(param_names, param_name)
+			ctx:declare_variable(param_node[3])
+			table.insert(param_names, param_node[3])
 		end
 	end
 	
@@ -1399,8 +1402,9 @@ local function translate_function_body(ctx, node, depth)
 		local spec_params_list = ""
 		local spec_params_extraction = ""
 		for i = 1, arity do
-			spec_params_list = spec_params_list .. (i > 1 and ", " or "") .. "const LuaValue& a" .. i
-			spec_params_extraction = spec_params_extraction .. "    LuaValue " .. param_names[i] .. " = a" .. i .. ";\n"
+			spec_params_list = spec_params_list .. (i > 1 and ", " or "") .. "const LuaValue& __a" .. i
+			local sanitized_param_name = sanitize_cpp_identifier(param_names[i])
+			spec_params_extraction = spec_params_extraction .. "    LuaValue " .. sanitized_param_name .. " = __a" .. i .. ";\n"
 		end
 		
 		local spec_body_code = translate_node(ctx, body_node, depth + 1, { no_braces = true })
@@ -2058,7 +2062,7 @@ BuiltinCallHandlers["string.char"] = function(ctx, node, depth, opts)
 	local call_args = get_call_args(node)
 	if #call_args == 1 then
 		local arg = translate_node(ctx, call_args[1], depth + 1)
-		local expr = "LuaValue(std::string(1, static_cast<char>(get_long_long(" .. arg .. "))))"
+		local expr = "LuaValue(std::string(1, static_cast<char>(get_double(" .. arg .. "))))"
 		if opts.multiret then
 			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
 			return ctx:use_ret_buf()

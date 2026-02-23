@@ -11,12 +11,13 @@ end
 -- FIX: Use varargs (...) so it accepts infinite children
 function Node:AddChildren(...)
 	local children = self[5]
+	local args = {...}
 	if not children then
 		children = {}
 		self[5] = children
 	end
-	for i = 1, select('#', ...) do
-		local child = select(i, ...)
+	for i = 1, #args do
+		local child = args[i]
 		if child then table.insert(children, child) end
 	end
 end
