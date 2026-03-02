@@ -35,12 +35,12 @@ auto make_file_method = [](auto method_ptr) {
 	return make_lua_callable(
 		[method_ptr](const LuaValue* args, size_t n_args, LuaValueVector& out) {
 			// The first argument (args[0]) will be the LuaFile object itself
-			if (n_args < 1) {
+			if (n_args < 1) [[unlikely]] {
 				out.assign({std::monostate{}, LuaValue(std::string_view("attempt to call method on a non-file object"))});
 				return;
 			}
 
-			if (auto self_obj = get_object(args[0])) {
+			if (auto self_obj = get_object(args[0])) [[likely]] {
 				if (auto self = std::dynamic_pointer_cast<LuaFile>(self_obj)) {
 					// Call the member function directly with the output buffer
 					(self.get()->*method_ptr)(args, n_args, out);

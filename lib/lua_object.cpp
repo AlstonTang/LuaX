@@ -867,7 +867,7 @@ LuaValue lua_concat(LuaValue&& a, const LuaValue& b) {
 // ==========================================
 
 void lua_rawget(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 2) throw std::runtime_error("bad argument #1 to 'rawget' (table expected)");
+	if (n_args < 2) [[unlikely]] throw std::runtime_error("bad argument #1 to 'rawget' (table expected)");
 	auto table = get_object(args[0]);
 	const LuaValue& key = args[1];
 
@@ -890,12 +890,12 @@ void lua_rawget(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_rawset(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 3) throw std::runtime_error("bad argument #1 to 'rawset' (table expected)");
+	if (n_args < 3) [[unlikely]] throw std::runtime_error("bad argument #1 to 'rawset' (table expected)");
 	auto table = get_object(args[0]);
 	const LuaValue& key = args[1];
 	const LuaValue& value = args[2];
 
-	if (std::holds_alternative<std::monostate>(key)) throw std::runtime_error("table index is nil");
+	if (std::holds_alternative<std::monostate>(key)) [[unlikely]] throw std::runtime_error("table index is nil");
 
 	long long idx;
 	bool is_int = false;
@@ -922,7 +922,7 @@ void lua_rawset(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_rawlen(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) {
+	if (n_args < 1) [[unlikely]] {
 		out.assign({0.0});
 		return;
 	}
@@ -983,7 +983,7 @@ void lua_rawequal(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_select(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("bad argument #1 to 'select' (value expected)");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("bad argument #1 to 'select' (value expected)");
 	LuaValue index_val = args[0];
 	int count = n_args - 1;
 
@@ -1004,7 +1004,7 @@ void lua_select(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_next(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("table expected");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("table expected");
 	auto table = std::get<std::shared_ptr<LuaObject>>(args[0]);
 	LuaValue key = (n_args > 1) ? args[1] : LuaValue(std::monostate{});
 
@@ -1062,7 +1062,7 @@ void pairs_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_pairs(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("bad argument #1 to 'pairs' (table expected)");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("bad argument #1 to 'pairs' (table expected)");
 	auto table = get_object(args[0]);
 
 	out.clear();
@@ -1100,7 +1100,7 @@ void ipairs_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_ipairs(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("bad argument #1 to 'ipairs' (table expected)");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("bad argument #1 to 'ipairs' (table expected)");
 	auto table = get_object(args[0]);
 
 	out.clear();
@@ -1198,7 +1198,7 @@ LuaValue LuaCallable::call3(const LuaValue& a1, const LuaValue& a2, const LuaVal
 
 
 void lua_xpcall(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 2) throw std::runtime_error("bad argument #2 to 'xpcall' (value expected)");
+	if (n_args < 2) [[unlikely]] throw std::runtime_error("bad argument #2 to 'xpcall' (value expected)");
 	LuaValue func = args[0];
 	LuaValue errh = args[1];
 
@@ -1233,7 +1233,7 @@ void lua_xpcall(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_assert(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("bad argument #1 to 'assert' (value expected)");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("bad argument #1 to 'assert' (value expected)");
 
 	if (!is_lua_truthy(args[0])) {
 		LuaValue msg = (n_args > 1) ? args[1] : LuaValue(std::string_view("assertion failed!"));

@@ -18,7 +18,7 @@
 // --- Global Functions ---
 
 void lua_setmetatable(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 2) throw std::runtime_error("bad argument #2 to 'setmetatable' (nil or table expected)");
+	if (n_args < 2) [[unlikely]] throw std::runtime_error("bad argument #2 to 'setmetatable' (nil or table expected)");
 	if (auto obj = get_object(args[0])) {
 		if (std::holds_alternative<std::monostate>(args[1])) {
 			obj->set_metatable(nullptr);
@@ -32,24 +32,23 @@ void lua_setmetatable(const LuaValue* args, size_t n_args, LuaValueVector& out) 
 }
 
 void lua_getmetatable(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0) {
-		if (auto obj = get_object(args[0])) {
-			if (obj->metatable) {
-				out.assign({obj->metatable});
-				return;
-			}
+	if (n_args > 0) [[likely]] {
+		auto obj = get_object(args[0]);
+		if (obj->metatable) [[likely]] {
+			out.assign({obj->metatable});
+			return;
 		}
 	}
 	out.assign({std::monostate{}});
 }
 
 void lua_type(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args == 0) out.assign({LuaValue(std::string_view("no value"))});
+	if (n_args == 0) [[unlikely]] out.assign({LuaValue(std::string_view("no value"))});
 	else out.assign({get_lua_type_name(args[0])});
 }
 
 void lua_tostring(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args == 0) out.assign({LuaValue(std::string_view(""))});
+	if (n_args == 0) [[unlikely]] out.assign({LuaValue(std::string_view(""))});
 	else out.assign({to_cpp_string(args[0])});
 }
 
@@ -58,7 +57,7 @@ void lua_error(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_pcall(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("bad argument #1 to 'pcall' (value expected)");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("bad argument #1 to 'pcall' (value expected)");
 	out.clear();
 	try {
         LuaValueVector call_res;

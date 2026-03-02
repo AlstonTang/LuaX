@@ -167,7 +167,7 @@ void LuaCoroutine::yield(const LuaValue* yield_args, size_t n_args, LuaValueVect
 // --- Lua Bindings (Updated for Void/Out Architecture) ---
 
 void coroutine_create(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCallable>>(args[0])) {
+	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCallable>>(args[0])) [[likely]] {
 		auto func = std::get<std::shared_ptr<LuaCallable>>(args[0]);
 		auto co = std::make_shared<LuaCoroutine>(func, false);
 		out.push_back(LuaValue(co));
@@ -177,7 +177,7 @@ void coroutine_create(const LuaValue* args, size_t n_args, LuaValueVector& out) 
 }
 
 void coroutine_create_parallel(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCallable>>(args[0])) {
+	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCallable>>(args[0])) [[likely]] {
 		auto func = std::get<std::shared_ptr<LuaCallable>>(args[0]);
 		auto co = std::make_shared<LuaCoroutine>(func, true);
 		out.push_back(LuaValue(co));
@@ -187,7 +187,7 @@ void coroutine_create_parallel(const LuaValue* args, size_t n_args, LuaValueVect
 }
 
 void coroutine_resume(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) {
+	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) [[likely]] {
 		auto co = std::get<std::shared_ptr<LuaCoroutine>>(args[0]);
 		// Pass remainder of arguments and the output buffer directly
 		if (n_args > 1) {
@@ -202,7 +202,7 @@ void coroutine_resume(const LuaValue* args, size_t n_args, LuaValueVector& out) 
 }
 
 void coroutine_await(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) {
+	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) [[likely]] {
 		auto co = std::get<std::shared_ptr<LuaCoroutine>>(args[0]);
 		co->await(out); // Pass buffer directly
 		return;
@@ -216,7 +216,7 @@ void coroutine_yield(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void coroutine_status(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) {
+	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) [[likely]] {
 		auto co = std::get<std::shared_ptr<LuaCoroutine>>(args[0]);
 		switch (co->status) {
 		case LuaCoroutine::Status::SUSPENDED: out.push_back(LuaValue(std::string_view("suspended")));

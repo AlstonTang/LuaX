@@ -628,13 +628,14 @@ register_handler("varargs", function(ctx, node, depth, opts)
 	if opts.multiret then
 		-- Populate RET_BUF_NAME directly
 		ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
-		ctx:add_statement("if(n_args > " .. start_index .. ") " .. ctx:use_ret_buf() .. ".insert(" .. ctx:use_ret_buf() .. ".end(), args + " .. start_index .. ", args + n_args);\n")
+		ctx:add_statement("if (n_args > " .. start_index .. ") [[likely]]" .. ctx:use_ret_buf() .. ".insert(" .. ctx:use_ret_buf() .. ".end(), args + " .. start_index .. ", args + n_args);\n")
 		return ctx:use_ret_buf()
 	else
 		-- Return a temporary vector or single value?
 		-- Varargs in scalar context returns the first vararg
 		local temp_var = "vararg_" .. ctx:get_unique_id()
-		ctx:add_statement("LuaValue " .. temp_var .. " = (n_args > " .. start_index .. " ? args[" .. start_index .. "] : LuaValue(std::monostate{}));\n")
+		ctx:add_statement("LuaValue " .. temp_var  .. ";\n")
+		ctx:add_statement("if (n_args > " .. start_index .. ") [[likely]] " .. temp_var .. " = args[" .. start_index .. "]; else " .. temp_var .. "= LuaValue(std::monostate{});\n")
 		return temp_var
 	end
 end)
@@ -1342,7 +1343,7 @@ local function translate_function_body(ctx, node, depth)
 	
 	-- Handle method 'self' parameter
 	if node[1] == "method_declaration" or node.is_method then
-		params_extraction = params_extraction .. "    LuaValue self = (n_args > 0 ? args[0] : LuaValue(std::monostate{}));\n"
+		params_extraction = params_extraction .. "    LuaValue self; if (n_args > 0) [[likely]] self = args[0]; else LuaValue(std::monostate{});\n"
 		ctx:declare_variable("self")
 		param_index_offset = 1
 		table.insert(param_names, "self")
@@ -1356,7 +1357,7 @@ local function translate_function_body(ctx, node, depth)
 			ctx.current_function_fixed_params_count = ctx.current_function_fixed_params_count + 1
 			local param_name = sanitize_cpp_identifier(param_node[3])
 			local vector_idx = i + param_index_offset - 1
-			params_extraction = params_extraction .. "    LuaValue " .. param_name .. " = (n_args > " .. vector_idx .. " ? args[" .. vector_idx .. "] : LuaValue(std::monostate{}));\n"
+			params_extraction = params_extraction .. "    LuaValue " .. param_name .. "; if (n_args > " .. vector_idx .. ") [[likely]] " .. param_name .. " = args[" .. vector_idx .. "]; else ".. param_name .." = LuaValue(std::monostate{});\n"
 			ctx:declare_variable(param_node[3])
 			table.insert(param_names, param_node[3])
 		end

@@ -158,7 +158,7 @@ void math_log(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 // math.max
 void math_max(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args == 0) throw std::runtime_error("bad argument #1 to 'max' (value expected)");
+	if (n_args == 0) [[unlikely]] throw std::runtime_error("bad argument #1 to 'max' (value expected)");
 	double max_val = get_number(args[0]);
 	for (unsigned long i = 1; i < n_args; ++i) {
 		LuaValue val = args[i];
@@ -170,7 +170,7 @@ void math_max(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 // math.min
 void math_min(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args == 0) throw std::runtime_error("bad argument #1 to 'min' (value expected)");
+	if (n_args == 0) [[unlikely]] throw std::runtime_error("bad argument #1 to 'min' (value expected)");
 	double min_val = get_number(args[0]);
 	for (unsigned long i = 1; i < n_args; ++i) {
 		LuaValue val = args[i];
@@ -226,7 +226,7 @@ void math_tointeger(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 // math.type
 void math_type(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) {
+	if (n_args < 1) [[unlikely]] {
 		out.assign({LuaValue(std::string_view("nil"))});
 		return;
 	}
