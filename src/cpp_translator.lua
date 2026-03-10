@@ -1652,10 +1652,12 @@ register_handler("for_numeric_statement", function(ctx, node, depth)
 	local step_stmts = ctx:flush_statements()
 
 	-- 2. Determine if we can use an Integer Fast-Path
-	-- We use long long if start/end/step are all integers or integer variables
-	local is_integer_loop = (start_node[1] == "integer" or start_node[1] == "number") and
-	                        (end_node[1] == "integer" or end_node[1] == "number") and
-	                        (not step_node or step_node[1] == "integer")
+	-- Default to long long (the common case in Lua). Only fall back to double
+	-- when the step is a known fractional literal ("number" nodes are floats).
+	local is_integer_loop = true
+	if step_node and step_node[1] == "number" then
+		is_integer_loop = false
+	end
 	
 	-- We check if we know the step direction at compile time
 	local known_step = nil

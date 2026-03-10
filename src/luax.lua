@@ -15,6 +15,7 @@ local CXX = "clang++"
 local keep_files = false
 local do_compile = true
 local force_single_threaded = false
+local compile_no_thread_safe = false
 local input_lua_file = nil
 local path_to_out_file = nil
 local no_format = false
@@ -29,7 +30,8 @@ Options:
   -o, --output <file>    Path/name of the resulting executable (default: input name)
   -b, --build-dir <dir>  Directory for intermediate files (default: "build")
   -t, --translate-only   Only generate C++ files, do not compile.
-  -s, --single-threaded  Compile without thread safety for maximum performance.
+  -s, --single-threaded  Run transpilation in single-threaded mode (runtime only).
+  --no-thread-safe       Compile output without thread safety (faster single-threaded binary).
   -r, --raw              Do not format C++ files.
   -k, --keep             Preserve generated source/object files after compilation.
   -h, --help             Show this help message.
@@ -47,6 +49,8 @@ while i <= #arg do
 		keep_files = true -- Implicitly keep if we aren't compiling
 	elseif a == "-s" or a == "--single-threaded" then
 		force_single_threaded = true
+	elseif a == "--no-thread-safe" then
+		compile_no_thread_safe = true
 	elseif a == "-o" or a == "--output" then
 		path_to_out_file = arg[i+1]
 		i = i + 1
@@ -300,7 +304,7 @@ if has_parallel and #threads > 0 then
 	end
 end
 
-local needs_thread_safe = not force_single_threaded
+local needs_thread_safe = not compile_no_thread_safe
 generate_cmake(path_to_out_file, generated_basenames, needs_thread_safe)
 
 if do_compile then
