@@ -1101,6 +1101,14 @@ inline LuaValue get_return_value(LuaValueVector& results, size_t index) {
 	}
 }
 
+inline LuaValue get_return_value(LuaValueVector&& results, size_t index) {
+	if (index < results.size()) [[likely]] {
+		return std::move(results[index]);
+	} else {
+		return std::monostate{};
+	}
+}
+
 // Logic operators
 template <typename T, typename F>
 LuaValue lua_logical_or(T&& left, F&& right_provider) {

@@ -160,8 +160,20 @@ function Parser:parse_function_call_or_member_access(base_node)
 			local index_node = Node:new("table_index_expression")
 			index_node:AddChildren(current_node, index_expr)
 			current_node = index_node
+		elseif token[1] == "string" then
+			-- Function call with string literal: f "string"
+			self[2] = self[2] + 1 -- consume string
+			local call_node = Node:new("call_expression")
+			call_node:AddChildren(current_node, Node:new("string", token[2]))
+			current_node = call_node
+		elseif token[2] == '{' then
+			-- Function call with table constructor: f { ... }
+			local table_node = self:parse_table_constructor()
+			local call_node = Node:new("call_expression")
+			call_node:AddChildren(current_node, table_node)
+			current_node = call_node
 		else
-			-- If the current token is not '(', '.', ':', or '[', break the loop
+			-- If the current token is not '(', '.', ':', '[', string, or '{', break the loop
 			break
 		end
 	end

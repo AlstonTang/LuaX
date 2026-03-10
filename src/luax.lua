@@ -168,10 +168,11 @@ local function find_dependencies(lua_file_path)
 
 	local current_dir = lua_file_path:match("(.*/)") or ""
 
+	local builtins = {math=true, table=true, string=true, os=true, io=true, package=true, utf8=true, coroutine=true, debug=true}
 	for line in file:lines() do
 		if not line:match("^%s*%-%-") then
-			local module_name = line:match('require%s*%([\'"]([%w%._-]+)[\'"]%)')
-			if module_name then
+			local module_name = line:match('require%s*%s*[\'"]([%w%._-]+)[\'"]') or line:match('require%s*%([\'"]([%w%._-]+)[\'"]%)')
+			if module_name and not builtins[module_name] then
 				local rel_path = module_name:gsub("%.", "/") .. ".lua"
 				local path_from_current = current_dir .. rel_path
 				local dep_path = io.open(path_from_current, "r") and path_from_current or rel_path
