@@ -1118,4 +1118,15 @@ LuaValue lua_logical_and(T&& left, F&& right_provider) {
 	return LuaValue(right_provider());
 }
 
+LuaValueVector& luax_get_ret_buf();
+void luax_release_ret_buf();
+
+struct LuaRetBufGuard {
+	LuaValueVector& buf;
+	LuaRetBufGuard() : buf(luax_get_ret_buf()) {}
+	~LuaRetBufGuard() { luax_release_ret_buf(); }
+};
+
+void luax_flush_thread_pool();
+
 #endif // LUA_OBJECT_HPP

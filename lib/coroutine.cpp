@@ -76,6 +76,9 @@ void LuaCoroutine::run() {
 
 	// Notify any thread waiting on await() or resume()
 	cv_yield.notify_all();
+
+	// Clean up thread-local pool allocator before thread exists
+	luax_flush_thread_pool();
 }
 
 // Updated: Returns void, takes output parameter

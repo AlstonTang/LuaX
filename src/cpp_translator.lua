@@ -1381,7 +1381,7 @@ local function translate_function_body(ctx, node, depth)
 	local body_stmts = ctx:capture_end()
 	
 	-- Inject reusable return buffer for this function scope if needed
-	local buffer_decl = ctx.uses_ret_buf and ("    LuaValueVector " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(8);\n") or ""
+	local buffer_decl = ctx.uses_ret_buf and ("    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n") or ""
 	local var_lambda = "[=](const LuaValue* args, size_t n_args, LuaValueVector& out_result) mutable -> void {\n" .. buffer_decl .. params_extraction .. body_code .. body_stmts .. "}"
 	
 	-- 2. Specialized Mode Translation (if possible)
@@ -1411,7 +1411,7 @@ local function translate_function_body(ctx, node, depth)
 		local spec_body_code = translate_node(ctx, body_node, depth + 1, { no_braces = true })
 		local spec_body_stmts = ctx:capture_end()
 		
-		local spec_buffer_decl = ctx.uses_ret_buf and ("    LuaValueVector " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(8);\n") or ""
+		local spec_buffer_decl = ctx.uses_ret_buf and ("    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n") or ""
 		
 		-- FIX: Ensure terminal return for non-void function
 		local terminal_return = "\n    return LuaValue(std::monostate{});\n"
@@ -1604,10 +1604,16 @@ register_handler("return_statement", function(ctx, node, depth)
 			local stmts = ctx:flush_statements()
 			return cpp_code .. stmts .. "return " .. val .. ";\n"
 		else
-			for _, expr_node in ipairs(expr_list_node[5] or empty_table) do
-				local val = translate_node(ctx, expr_node, depth + 1)
+			local num_exprs = #(expr_list_node[5] or empty_table)
+			for i, expr_node in ipairs(expr_list_node[5] or empty_table) do
+				local is_last = (i == num_exprs)
+				local val = translate_node(ctx, expr_node, depth + 1, { multiret = is_last })
 				local stmts = ctx:flush_statements()
-				cpp_code = cpp_code .. stmts .. "out_result.push_back(" .. val .. ");\n"
+				if is_last and val == RET_BUF_NAME then
+					cpp_code = cpp_code .. stmts .. "out_result.insert(out_result.end(), " .. RET_BUF_NAME .. ".begin(), " .. RET_BUF_NAME .. ".end());\n"
+				else
+					cpp_code = cpp_code .. stmts .. "out_result.push_back(" .. val .. ");\n"
+				end
 			end
 		end
 	end
@@ -2143,8 +2149,7 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 		else
 			-- Emit cache declarations for library member accesses
 			local global_cache_decls, local_cache_decls = emit_cache_declarations(ctx)
-			local buffer_decl = "    LuaValueVector out_result; out_result.reserve(10);\n" ..
-			                    "    LuaValueVector " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(10);\n"
+local buffer_decl = "    LuaValueVector out_result; out_result.reserve(10);\n    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n"
 			local main_function_start = "int main(int argc, char* argv[]) {\n" ..
 										"init_G(argc, argv);\n" .. local_cache_decls .. buffer_decl
 			local main_function_end = "\n    luax_cleanup();\n    return 0;\n}"
@@ -2217,8 +2222,7 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 			
 			-- Emit cache declarations for library member accesses at start of load function
 			local global_cache_decls, local_cache_decls = emit_cache_declarations(ctx)
-			local buffer_decl = "    LuaValueVector out_result; out_result.reserve(10);\n" ..
-			                    "    LuaValueVector " .. RET_BUF_NAME .. "; " .. RET_BUF_NAME .. ".reserve(10);\n"
+local buffer_decl = "    LuaValueVector out_result; out_result.reserve(10);\n    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n"
 			local load_function_definition = "LuaValueVector load() {\n" .. local_cache_decls .. buffer_decl .. load_function_body .. "}\n"
 			return header .. cpp_header .. global_cache_decls .. global_var_definitions .. namespace_start .. load_function_definition .. namespace_end
 		end

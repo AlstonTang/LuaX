@@ -300,14 +300,14 @@ if has_parallel and #threads > 0 then
 	end
 end
 
-local needs_thread_safe = has_parallel and not force_single_threaded
+local needs_thread_safe = not force_single_threaded
 generate_cmake(path_to_out_file, generated_basenames, needs_thread_safe)
 
 if do_compile then
 	run_cmake()
 	if not keep_files then
-		run_command("rm -rf " .. BUILD_DIR)
-		print("Cleaned up intermediate files.")
+            run_command("rm -rf " .. BUILD_DIR)
+            print("Cleaned up intermediate files.")
 	end
 	print("Compilation complete: " .. path_to_out_file)
 else

@@ -7,6 +7,7 @@
 #include <iomanip>
 #include <limits>
 #include <charconv>
+#include <deque>
 #include "coroutine.hpp" // Ensure full definition of LuaCoroutine is available
 #include <unordered_set>
 #ifdef LUAX_THREAD_SAFE
@@ -1273,6 +1274,29 @@ void lua_dofile(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 void lua_collectgarbage(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	out.clear();
 	out.push_back(std::monostate{});
+}
+
+thread_local std::deque<LuaValueVector> _func_ret_buf_stack;
+thread_local size_t _func_ret_buf_depth = 0;
+
+LuaValueVector& luax_get_ret_buf() {
+	if (_func_ret_buf_depth >= _func_ret_buf_stack.size()) {
+		_func_ret_buf_stack.emplace_back();
+		_func_ret_buf_stack.back().reserve(10);
+	}
+	auto& buf = _func_ret_buf_stack[_func_ret_buf_depth++];
+	buf.clear();
+	return buf;
+}
+
+void luax_release_ret_buf() {
+	if (_func_ret_buf_depth > 0) {
+		_func_ret_buf_depth--;
+	}
+}
+
+void luax_flush_thread_pool() {
+	LuaObjectPool::cleanup();
 }
 
 void luax_cleanup() {
