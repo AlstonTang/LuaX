@@ -240,8 +240,8 @@ public:
 	static std::string_view intern(std::string_view sv);
 	static const LuaValue& get_single_char(unsigned char c);
 private:
-    // Internal version that tracks depth to prevent Segfaults
-    LuaValue get_item_internal(const LuaValue& key, int depth);
+	// Internal version that tracks depth to prevent Segfaults
+	LuaValue get_item_internal(const LuaValue& key, int depth);
 };
 
 extern std::shared_ptr<LuaObject> _G;
@@ -323,43 +323,43 @@ inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_
 
 // A lightweight shim to make a C function look like a LuaCallable
 struct LuaCFunctionShim : public LuaCallable {
-    LuaCFunctionPtr ptr;
-    void call(const LuaValue* args, size_t n_args, LuaValueVector& out_result) override {
-        ((LuaCFunctionTyped)ptr)(args, n_args, out_result);
-    }
+	LuaCFunctionPtr ptr;
+	void call(const LuaValue* args, size_t n_args, LuaValueVector& out_result) override {
+		((LuaCFunctionTyped)ptr)(args, n_args, out_result);
+	}
 };
 
 inline LuaCallable* get_callable(const LuaValue& value) {
-    const size_t idx = value.index();
+	const size_t idx = value.index();
 
-    // 1. HOT PATH: Transpiled Lua Functions (std::shared_ptr<LuaCallable>)
-    if (idx == INDEX_FUNCTION) [[likely]] {
-        return std::get<INDEX_FUNCTION>(value).get();
-    }
+	// 1. HOT PATH: Transpiled Lua Functions (std::shared_ptr<LuaCallable>)
+	if (idx == INDEX_FUNCTION) [[likely]] {
+		return std::get<INDEX_FUNCTION>(value).get();
+	}
 
-    // 2. NATIVE PATH: C Functions
-    if (idx == INDEX_CFUNCTION) [[likely]] {
-        // We use a thread-local shim so that this is thread-safe and 
-        // doesn't require a heap allocation every time.
-        thread_local LuaCFunctionShim shim;
-        shim.ptr = std::get<INDEX_CFUNCTION>(value).ptr;
-        return &shim;
-    }
+	// 2. NATIVE PATH: C Functions
+	if (idx == INDEX_CFUNCTION) [[likely]] {
+		// We use a thread-local shim so that this is thread-safe and 
+		// doesn't require a heap allocation every time.
+		thread_local LuaCFunctionShim shim;
+		shim.ptr = std::get<INDEX_CFUNCTION>(value).ptr;
+		return &shim;
+	}
 
-    // 3. TABLE PATH: Check for __call
-    if (idx == INDEX_OBJECT) [[unlikely]] {
-        const auto& obj = std::get<INDEX_OBJECT>(value);
-        if (obj && obj->metatable) {
-            // This is slightly slower as it requires a lookup
-            LuaValue call_handler = obj->metatable->get_item("__call");
-            if (call_handler.index() == INDEX_FUNCTION || call_handler.index() == INDEX_CFUNCTION) {
-                return get_callable(call_handler);
-            }
-        }
-    }
+	// 3. TABLE PATH: Check for __call
+	if (idx == INDEX_OBJECT) [[unlikely]] {
+		const auto& obj = std::get<INDEX_OBJECT>(value);
+		if (obj && obj->metatable) {
+			// This is slightly slower as it requires a lookup
+			LuaValue call_handler = obj->metatable->get_item("__call");
+			if (call_handler.index() == INDEX_FUNCTION || call_handler.index() == INDEX_CFUNCTION) {
+				return get_callable(call_handler);
+			}
+		}
+	}
 
-    [[unlikely]]
-    throw std::runtime_error("attempt to call a " + get_lua_type_name(value) + " value");
+	[[unlikely]]
+	throw std::runtime_error("attempt to call a " + get_lua_type_name(value) + " value");
 }
 
 inline LuaValue lua_call0(const LuaValue& callable, LuaValueVector& out) {
@@ -863,6 +863,18 @@ inline bool lua_greater_equals(int a, const LuaValue& b) { return !lua_less_than
 
 LuaValue lua_concat(const LuaValue& a, const LuaValue& b);
 LuaValue lua_concat(LuaValue&& a, const LuaValue& b);
+LuaValue lua_concat(const LuaValue& a, LuaValue&& b); 
+LuaValue lua_concat(LuaValue&& a, LuaValue&& b);
+
+template <typename T1, typename T2, typename T3, typename... Ts>
+LuaValue lua_concat(T1&& a, T2&& b, T3&& c, Ts&&... rest) {
+	// Right-associative: a .. (b .. (c ...))
+	return lua_concat(
+		std::forward<T1>(a), 
+		lua_concat(std::forward<T2>(b), std::forward<T3>(c), std::forward<Ts>(rest)...)
+	);
+}
+
 LuaValue as_view(const LuaValue& v);
 
 extern std::shared_ptr<LuaObject> _G;

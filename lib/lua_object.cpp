@@ -863,6 +863,30 @@ LuaValue lua_concat(LuaValue&& a, const LuaValue& b) {
 	return res;
 }
 
+// Optimization: Prepend a value to an existing rvalue string
+LuaValue lua_concat(const LuaValue& a, LuaValue&& b) {
+	if (auto* s_b = std::get_if<std::string>(&b)) {
+		// If 'a' is also a string/number, we can do a smart prepend
+		// This is still slightly slower than append, but way faster than a full copy
+		std::string res;
+		// Optimization: one allocation for the whole thing
+		// (Assuming you have a helper to get string length of a)
+		// res.reserve(get_length(a) + s_b->size()); 
+		
+		append_to_string(a, res);
+		res += *s_b; // Append the temporary's content
+		return res;
+	}
+	
+	// Fallback: Use the standard logic
+	return lua_concat(a, static_cast<const LuaValue&>(b));
+}
+
+LuaValue lua_concat(LuaValue&& a, LuaValue&& b) {
+	// Both are temporaries. We'll pick 'a' to be the primary buffer.
+	return lua_concat(std::move(a), static_cast<const LuaValue&>(b));
+}
+
 // ==========================================
 // Standard Library
 // ==========================================
