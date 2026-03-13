@@ -344,7 +344,7 @@ inline LuaCallable* get_callable(const LuaValue& value) {
 }
 
 inline LuaValue lua_call0(const LuaValue& callable, LuaValueVector& out) {
-	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) [[likely]] {
+	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) {
 		out.clear();
 		((LuaCFunctionTyped)(*cfunc).ptr)(nullptr, 0, out);
 		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
@@ -357,7 +357,7 @@ inline LuaValue lua_call0(const LuaValue& callable, LuaValueVector& out) {
 }
 
 inline LuaValue lua_call1(const LuaValue& callable, LuaValueVector& out, const LuaValue& a1) {
-	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) [[likely]] {
+	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) {
 		const LuaValue args[] = {a1};
 		out.clear();
 		((LuaCFunctionTyped)(*cfunc).ptr)(args, 1, out);
@@ -372,7 +372,7 @@ inline LuaValue lua_call1(const LuaValue& callable, LuaValueVector& out, const L
 }
 
 inline LuaValue lua_call2(const LuaValue& callable, LuaValueVector& out, const LuaValue& a1, const LuaValue& a2) {
-	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) [[likely]] {
+	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) {
 		const LuaValue args[] = {a1, a2};
 		out.clear();
 		((LuaCFunctionTyped)(*cfunc).ptr)(args, 2, out);
@@ -387,7 +387,7 @@ inline LuaValue lua_call2(const LuaValue& callable, LuaValueVector& out, const L
 }
 
 inline LuaValue lua_call3(const LuaValue& callable, LuaValueVector& out, const LuaValue& a1, const LuaValue& a2, const LuaValue& a3) {
-	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) [[likely]] {
+	if (const auto* cfunc = std::get_if<LuaCFunction>(&callable)) {
 		const LuaValue args[] = {a1, a2, a3};
 		out.clear();
 		((LuaCFunctionTyped)(*cfunc).ptr)(args, 3, out);
@@ -561,19 +561,22 @@ inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_
 // ==========================================
 
 inline char lua_get_char(const LuaValue& v) {
-	if (const auto* i = std::get_if<long long>(&v)) [[likely]] {
-		return static_cast<char>(*i);
+	switch (v.index()) {
+		case INDEX_INTEGER:
+			return static_cast<char>(std::get<long long>(v));
+		case INDEX_DOUBLE:
+			return static_cast<char>(std::get<double>(v));
+		case INDEX_STRING: {
+			const auto& s = std::get<std::string>(v);
+			return s.size() == 1 ? s[0] : '\0';
+		}
+		case INDEX_STRING_VIEW: {
+			const auto& sv = std::get<std::string_view>(v);
+			return sv.size() == 1 ? sv[0] : '\0';
+		}
+		default:
+			return '\0';
 	}
-	if (const auto* sv = std::get_if<std::string_view>(&v)) {
-		return sv->size() == 1 ? (*sv)[0] : '\0';
-	}
-	if (const auto* s = std::get_if<std::string>(&v)) {
-		return s->size() == 1 ? (*s)[0] : '\0';
-	}
-	if (const auto* d = std::get_if<double>(&v)) {
-		return static_cast<char>(*d);
-	}
-	return '\0';
 }
 
 // Character predicates (primitive overloads for performance)

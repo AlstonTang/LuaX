@@ -2318,7 +2318,7 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 			return header .. "\n// Main script header\n"
 		else
 			local global_cache_decls, local_cache_decls = emit_cache_declarations(ctx)
-			local buffer_decl = "    LuaValueVector out_result; out_result.reserve(10);\n    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n"
+			local buffer_decl = "    LuaValueVector out_result; out_result.reserve(8);\n    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n"
 			local main_function_start = "int main(int argc, char* argv[]) {\n" ..
 										"init_G(argc, argv);\n" .. local_cache_decls .. buffer_decl
 			local main_function_end = "\n    goto luax_main_exit;\nluax_main_exit:\n    luax_cleanup();\n    return 0;\n}"
@@ -2366,7 +2366,7 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 			end
 			
 			local global_cache_decls, local_cache_decls = emit_cache_declarations(ctx)
-			local buffer_decl = "    LuaValueVector out_result; out_result.reserve(10);\n    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n"
+			local buffer_decl = "    LuaValueVector out_result; out_result.reserve(8);\n    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n"
 			local load_function_definition = "LuaValueVector load() {\n" .. local_cache_decls .. buffer_decl .. load_function_body .. "}\n"
 			return header .. cpp_header .. global_cache_decls .. global_var_definitions .. namespace_start .. load_function_definition .. namespace_end
 		end
