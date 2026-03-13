@@ -16,22 +16,6 @@
 #include <iostream>
 #include <atomic>
 
-// ==========================================
-// Conditional Threading Support
-// ==========================================
-// Define LUAX_THREAD_SAFE to enable mutex locking (required for parallel mode).
-// When not defined, all locking is compiled out for maximum single-threaded performance.
-#ifdef LUAX_THREAD_SAFE
-#include <mutex>
-#define LUAX_LOCK(obj) std::lock_guard<std::recursive_mutex> _luax_lock_##__LINE__((obj)->mtx)
-#define LUAX_LOCK_LOCAL() std::lock_guard<std::recursive_mutex> _luax_lock_##__LINE__(mtx)
-#define LUAX_UNIQUE_LOCK(obj, name) std::unique_lock<std::recursive_mutex> name((obj)->mtx, std::defer_lock)
-#else
-#define LUAX_LOCK(obj) ((void)0)
-#define LUAX_LOCK_LOCAL() ((void)0)
-#define LUAX_UNIQUE_LOCK(obj, name) ((void)0)
-#endif
-
 // Forward declaration
 class LuaObject;
 // Virtual Base Class for all callable entities (Functions, Closures, C++ built-ins)
@@ -108,9 +92,6 @@ inline std::shared_ptr<LuaCallable> make_specialized_callable(FVar&& v, FSpec&& 
 // LuaObject Definition
 class LuaObject : public std::enable_shared_from_this<LuaObject> {
 public:
-#ifdef LUAX_THREAD_SAFE
-	mutable std::recursive_mutex mtx;
-#endif
 	virtual ~LuaObject() = default;
 	
 	// Hybrid storage: small vector for few properties, map for many.
@@ -197,16 +178,10 @@ public:
 		if (!metamethods_initialized.load(std::memory_order_acquire)) {
 			ensure_metamethods();
 		}
-		// If we are just reading, we should use a shared_lock
-		#ifdef LUAX_THREAD_SAFE
-			std::lock_guard<std::recursive_mutex> lock(mtx);
-		#endif
 		return {cached_index, cached_newindex};
 	}
 
 	void ensure_metamethods() {
-		if (metamethods_initialized) return;
-		LUAX_LOCK_LOCAL();
 		if (metamethods_initialized) return;
 		if (metatable) {
 			cached_index = metatable->get_prop("__index");
@@ -449,7 +424,6 @@ void pairs_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out_res
 void ipairs_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out_result);
 void lua_tonumber(const LuaValue* args, size_t n_args, LuaValueVector& out);
 
-
 // Convenience overloads for call_lua_value
 // Overloads for convenience
 inline void call_lua_value(const LuaValue& callable, LuaValueVector& out_result,
@@ -653,7 +627,6 @@ bool lua_less_than(const LuaValue& a, const LuaValue& b);
 bool lua_greater_than(const LuaValue& a, const LuaValue& b);
 bool lua_less_equals(const LuaValue& a, const LuaValue& b);
 bool lua_greater_equals(const LuaValue& a, const LuaValue& b);
-
 
 // Optimized Single-Character Access (replaces str:sub(i, i))
 inline const LuaValue& lua_string_char_at(const LuaValue& str, long long i) {
@@ -1008,7 +981,6 @@ inline LuaValue lua_get_length(const LuaValue& val) {
 	if (auto* sv = std::get_if<std::string_view>(&val)) return static_cast<long long>(sv->length());
 	if (auto* obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&val)) {
 		auto& obj = *obj_ptr;
-		LUAX_LOCK(obj.get());
 		if (obj->metatable) {
 			auto len_meta = obj->metatable->get_item("__len");
 			if (!std::holds_alternative<std::monostate>(len_meta)) {
@@ -1027,7 +999,6 @@ inline long long lua_get_length_int(const LuaValue& val) {
 	if (auto* sv = std::get_if<std::string_view>(&val)) return static_cast<long long>(sv->length());
 	if (auto* obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&val)) {
 		auto& obj = *obj_ptr;
-		LUAX_LOCK(obj.get());
 		if (obj->metatable) {
 			auto len_meta = obj->metatable->get_item("__len");
 			if (!std::holds_alternative<std::monostate>(len_meta)) {

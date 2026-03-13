@@ -250,7 +250,6 @@ void math_ult(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	return;
 }
 
-
 std::shared_ptr<LuaObject> create_math_library() {
 	static std::shared_ptr<LuaObject> math_lib;
 	if (math_lib) return math_lib;

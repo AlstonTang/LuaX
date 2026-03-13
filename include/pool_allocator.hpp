@@ -8,11 +8,15 @@
 
 class LuaObjectPool {
 public:
-    // Moved constants inside the class to avoid polluting the global namespace
     static constexpr std::size_t BUCKET_COUNT = 8;
     static constexpr std::size_t BUCKET_SIZES[BUCKET_COUNT] = {32, 64, 96, 128, 192, 256, 512, 1024};
 
     [[nodiscard]] static void* allocate(std::size_t n) {
+        // If thread is shutting down, skip the pool to prevent accessing dead vectors
+        if (is_destroyed()) {
+            return ::operator new(n);
+        }
+
         for (std::size_t i = 0; i < BUCKET_COUNT; ++i) {
             if (n <= BUCKET_SIZES[i]) {
                 auto& pool = get_thread_pool().buckets[i];
@@ -21,7 +25,6 @@ public:
                     pool.pop_back();
                     return ptr;
                 }
-                // Allocate the full bucket size to allow safe, predictable reuse
                 return ::operator new(BUCKET_SIZES[i]);
             }
         }
@@ -31,14 +34,19 @@ public:
     static void deallocate(void* p, std::size_t n) noexcept {
         if (!p) return;
 
+        // CRITICAL FIX: If the ThreadPool is destroyed, vectors are dead. 
+        // Send memory directly to the OS to avoid memory corruption.
+        if (is_destroyed()) {
+            ::operator delete(p);
+            return;
+        }
+
         for (std::size_t i = 0; i < BUCKET_COUNT; ++i) {
             if (n <= BUCKET_SIZES[i]) {
                 auto& pool = get_thread_pool().buckets[i];
                 try {
                     pool.push_back(p);
                 } catch (...) {
-                    // std::vector::push_back can throw std::bad_alloc.
-                    // If we cannot store the pointer for reuse, we must gracefully delete it.
                     ::operator delete(p);
                 }
                 return;
@@ -48,6 +56,7 @@ public:
     }
 
     static void cleanup() noexcept {
+        if (is_destroyed()) return;
         auto& pool = get_thread_pool();
         for (std::size_t i = 0; i < BUCKET_COUNT; ++i) {
             auto& bucket = pool.buckets[i];
@@ -59,19 +68,24 @@ public:
     }
 
 private:
-    // A wrapper object ensures that when a thread exits, the pooled memory is actually freed.
-    // The original code leaked the allocations because the vector destructor only frees the pointers.
+    // This flag ensures we know when C++ has destroyed our ThreadPool object.
+    static bool& is_destroyed() {
+        thread_local bool destroyed = false;
+        return destroyed;
+    }
+
     struct ThreadPool {
         std::vector<void*> buckets[BUCKET_COUNT];
 
         ThreadPool() {
-            // Reserve capacity once at thread startup, removing branch overhead in get_pool()
             for (auto& b : buckets) {
                 b.reserve(128);
             }
         }
 
         ~ThreadPool() {
+            // Immediately mark as destroyed so subsequent destructors bypass us
+            is_destroyed() = true; 
             for (auto& b : buckets) {
                 for (void* ptr : b) {
                     ::operator delete(ptr);
@@ -89,7 +103,6 @@ private:
 template <typename T>
 struct PoolAllocator {
     using value_type = T;
-    // Signals to STL containers that allocators of this type can be safely swapped/moved
     using is_always_equal = std::true_type; 
 
     PoolAllocator() noexcept = default;
@@ -98,7 +111,6 @@ struct PoolAllocator {
     PoolAllocator(const PoolAllocator<U>&) noexcept {}
 
     [[nodiscard]] T* allocate(std::size_t n) {
-        // Prevent multiplication integer overflow
         if (n > static_cast<std::size_t>(-1) / sizeof(T)) {
             throw std::bad_alloc();
         }

@@ -13,7 +13,7 @@ LuaX is a transpiler that converts Lua 5.4 source code into C++20, allowing you 
 	*   `io`: File I/O, `popen`, `tmpfile`, `lines`, and more.
 	*   `os`: System interaction, date/time, and execution.
 	*   `utf8`: UTF-8 string support.
-	*   `coroutine`: **Thread-based implementation** supporting parallelism (using `await` and `create_parallel`)
+	*   `coroutine`: **Thread-based implementation** (Parallelism removed for now, but will be readded later once LuaX is more stable)
 	*   `package`: Basic module loading support.
 *   **C++ Integration**: Generates readable C++ code that uses a custom runtime library (`LuaValue`, `LuaObject`) to emulate Lua's dynamic typing.
 *   **Standalone Executables**: Compiles your Lua scripts directly into native binaries.
@@ -73,7 +73,7 @@ LuaX works by traversing the Lua AST (Abstract Syntax Tree) and generating equiv
 *   **`debug` Library**: Not implemented.
 *   **Dynamic Loading**: `load`, `loadfile`, and `dofile` are not supported because the C++ code is compiled ahead-of-time. Use `require` for static dependencies.
 *   **Garbage Collection**: The runtime uses C++ smart pointers (`std::shared_ptr`) for memory management, which differs from Lua's garbage collector (e.g., reference counting vs. mark-and-sweep). Cycle detection is not currently implemented.
-*   **Speed**: Partially faster depending on what you are trying to do.
+*   **Speed**: Partially faster depending on what you are trying to do, though the performance gap is closing in.
 
 ### Build System Philosophy
 

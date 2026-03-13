@@ -273,7 +273,6 @@ void string_byte(const LuaValue* args, size_t n_args, LuaValueVector& out) {
     lua_string_byte(args[0], i, j, out);
 }
 
-
 // string.char
 void string_char(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string result;

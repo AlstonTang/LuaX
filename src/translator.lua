@@ -10,7 +10,6 @@ end
 local Parser = {}
 Parser.__index = Parser
 
-
 function Parser:new(code)
 	local instance = setmetatable({{}, 1}, Parser)
 	instance.code = code
@@ -690,7 +689,6 @@ function Parser:parse_while_statement()
 	return while_node
 end
 
-
 function Parser:parse_if_statement()
 	self[2] = self[2] + 1 -- consume 'if'
 	local if_node = Node:new("if_statement")
@@ -885,7 +883,6 @@ function Parser:parse(name)
 
 	return root
 end
-
 
 -- Translator function
 local function translate(code, name)

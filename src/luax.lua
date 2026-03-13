@@ -14,8 +14,6 @@ local BUILD_DIR = "build"
 local CXX = "clang++"
 local keep_files = false
 local do_compile = true
-local force_single_threaded = false
-local compile_no_thread_safe = false
 local input_lua_file = nil
 local path_to_out_file = nil
 local no_format = false
@@ -30,8 +28,6 @@ Options:
   -o, --output <file>    Path/name of the resulting executable (default: input name)
   -b, --build-dir <dir>  Directory for intermediate files (default: "build")
   -t, --translate-only   Only generate C++ files, do not compile.
-  -s, --single-threaded  Run transpilation in single-threaded mode (runtime only).
-  --no-thread-safe       Compile output without thread safety (faster single-threaded binary).
   -r, --raw              Do not format C++ files.
   -k, --keep             Preserve generated source/object files after compilation.
   -h, --help             Show this help message.
@@ -47,10 +43,6 @@ while i <= #arg do
 	elseif a == "-t" or a == "--translate-only" then
 		do_compile = false
 		keep_files = true -- Implicitly keep if we aren't compiling
-	elseif a == "-s" or a == "--single-threaded" then
-		force_single_threaded = true
-	elseif a == "--no-thread-safe" then
-		compile_no_thread_safe = true
 	elseif a == "-o" or a == "--output" then
 		path_to_out_file = arg[i+1]
 		i = i + 1
@@ -184,7 +176,7 @@ local function find_dependencies(lua_file_path)
 	return dependencies
 end
 
-local function generate_cmake(output_path, generated_basenames, thread_safe)
+local function generate_cmake(output_path, generated_basenames)
 	local cmake_path = BUILD_DIR .. "/CMakeLists.txt"
 	local luax_root = get_abs_path(script_dir)
 	local abs_target = get_abs_path(output_path)
@@ -204,9 +196,6 @@ local function generate_cmake(output_path, generated_basenames, thread_safe)
 	for _, basename in ipairs(generated_basenames) do table.insert(gen_srcs, '"' .. basename .. ".cpp" .. '"') end
 
 	local compile_opts = "-O2"
-	if thread_safe then
-		compile_opts = compile_opts .. " -DLUAX_THREAD_SAFE"
-	end
 
 	local cmake_content = {
 		"cmake_minimum_required(VERSION 3.10)",
@@ -258,14 +247,6 @@ while head <= #queue do
 end
 
 local generated_basenames = {}
-local threads = {}
-local has_parallel = (not force_single_threaded) and (type(coroutine.create_parallel) == "function")
-
-if has_parallel then
-	print("Parallel translation enabled.")
-else
-	print("Parallel translation unavailable (bootstrapping). Running sequentially.")
-end
 
 for file_path, output_name in pairs(files_to_translate) do
 	table.insert(generated_basenames, output_name)
@@ -275,38 +256,11 @@ for file_path, output_name in pairs(files_to_translate) do
 		print("Up to date: " .. output_name)
 	else
 		local is_main_entry = (file_path == input_lua_file)
-
-		if has_parallel then
-			local co = coroutine.create_parallel(function(fp, out, main, keep) 
-				return translate_file(fp, out, main, keep) 
-			end)
-			coroutine.resume(co, file_path, output_name, is_main_entry, keep_files and (not no_format))
-			table.insert(threads, co)
-		else
-			translate_file(file_path, output_name, is_main_entry, keep_files and (not no_format))
-		end
+		translate_file(file_path, output_name, is_main_entry, keep_files and (not no_format))
 	end
 end
 
--- Synchronization Barrier
-if has_parallel and #threads > 0 then
-	local error_count = 0
-	for _, co in ipairs(threads) do
-		local success, val = coroutine.await(co) 
-		
-		if not success then
-			print("Error in thread: " .. tostring(val))
-			error_count = error_count + 1
-		end
-	end
-	
-	if error_count > 0 then
-		error("Compilation failed with " .. error_count .. " errors.")
-	end
-end
-
-local needs_thread_safe = not compile_no_thread_safe
-generate_cmake(path_to_out_file, generated_basenames, needs_thread_safe)
+generate_cmake(path_to_out_file, generated_basenames)
 
 if do_compile then
 	run_cmake()
