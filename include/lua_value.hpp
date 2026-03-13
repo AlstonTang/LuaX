@@ -161,6 +161,7 @@ struct LuaValueEq {
 };
 
 #include "pool_allocator.hpp"
+#include <vector>
 
 // Define a standardized vector type using the pool allocator
 // This allows all LuaValue vectors (args, returns, props) to share the thread-local pool.

@@ -141,43 +141,48 @@ LuaValue LuaObject::get_item_internal(const LuaValue& key, int depth) {
 	LuaValue metamethod = std::monostate{};
 
 	{
-
 		// a. Check Array Part
 		if (key.index() == INDEX_INTEGER) {
 			long long idx = std::get<INDEX_INTEGER>(key);
 			if (idx >= 1 && idx <= (long long)array_part.size()) {
 				result = array_part[idx - 1];
-				if (!std::holds_alternative<std::monostate>(result)) return result;
+				// Check if the result is not nil
+				if (result.index() != INDEX_NIL) return result;
 			}
 		}
 
 		// b. Check Hash Part
 		LuaValue* val_ptr = find_prop(key);
-		if (val_ptr && !std::holds_alternative<std::monostate>(*val_ptr)) {
+		if (val_ptr && val_ptr->index() != INDEX_NIL) {
 			return *val_ptr;
 		}
 
 		// c. Check Metatable (Get the next step in the chain)
 		auto [idx_meta, _] = get_cached_metamethods();
-		if (std::holds_alternative<std::monostate>(idx_meta)) return std::monostate{};
+		
+		// FIXED: idx_meta is already a pointer. Do not use '&'
+		if (idx_meta->index() == INDEX_NIL) return std::monostate{};
 
-		if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&idx_meta)) {
+		// FIXED: Pass 'idx_meta' directly (it is const LuaValue*)
+		if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(idx_meta)) {
 			next_target = *next_obj_ptr;
-		} else if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&idx_meta)) {
+		} 
+		else if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(idx_meta)) {
+			// Assigning from pointer to variant element
 			metamethod = *func_ptr;
 		}
-	} // LOCK IS RELEASED HERE
-
-	// 2. RECURSE OR CALL WITHOUT HOLDING THE LOCK
-	// This prevents the "Recursive Deadlock" because we aren't holding 'mtx' anymore.
+	}
 	
+	// Tail-call optimization: recurse if the __index is another table
 	if (next_target) {
 		return next_target->get_item_internal(key, depth + 1);
 	}
 
-	if (!std::holds_alternative<std::monostate>(metamethod)) {
+	// Call the __index function if it exists
+	if (metamethod.index() != INDEX_NIL) {
 		LuaValue args[] = {shared_from_this(), key};
 		LuaValueVector results;
+		// Use the specialized call signature for 2 arguments if available
 		std::get<std::shared_ptr<LuaCallable>>(metamethod)->call(args, 2, results);
 		return results.empty() ? std::monostate{} : std::move(results[0]);
 	}
@@ -243,13 +248,13 @@ void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
 
 	// 3. Metatable
 	if (!key_exists) { // Only check metatable if key doesn't exist in current object
-		auto [idx_meta, next_meta] = get_cached_metamethods();
-		if (!std::holds_alternative<std::monostate>(next_meta)) {
-			if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&next_meta)) {
+		auto [_, next_meta] = get_cached_metamethods();
+		if (next_meta->index() != INDEX_NIL) {
+			if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(next_meta)) {
 				(*next_obj_ptr)->set_item(key, value);
 				return;
 			}
-			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&next_meta)) {
+			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(next_meta)) {
 				LuaValue args[] = {shared_from_this(), key, value};
 				LuaValueVector results;
 				results.clear();
@@ -267,13 +272,13 @@ void LuaObject::set_item(std::string_view key, const LuaValue& value) {
 	bool key_exists = find_prop(key) != nullptr;
 
 	if (!key_exists) {
-		auto [idx_meta, next_meta] = get_cached_metamethods();
-		if (!std::holds_alternative<std::monostate>(next_meta)) {
-			if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&next_meta)) {
+		auto [_, next_meta] = get_cached_metamethods();
+		if (next_meta->index() != INDEX_NIL) {
+			if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(next_meta)) {
 				(*next_obj_ptr)->set_item(key, value);
 				return;
 			}
-			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&next_meta)) {
+			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(next_meta)) {
 				LuaValue key_val = key; // Use std::string_view directly
 				LuaValue args[] = {shared_from_this(), key_val, value};
 				LuaValueVector results;
@@ -408,26 +413,22 @@ LuaValue* LuaObject::find_prop(const LuaValue& key) {
 }
 
 LuaValue* LuaObject::find_prop(std::string_view key) {
-	// 1. Check small_props using Pointer Equality (Hot Path)
 	for (auto& p : small_props) {
-		if (p.first.index() == INDEX_STRING_VIEW) [[likely]] {
-			std::string_view sv = std::get<INDEX_STRING_VIEW>(p.first);
-			
-			// POINTER EQUALITY: If the memory addresses are identical, 
-			// the strings are identical because they are both interned.
-			if (sv.data() == key.data()) [[unlikely]] {
-				return &p.second;
-			}
+		auto idx = p.first.index();
+		// Check for both string types used in your engine
+		if (idx == INDEX_STRING_VIEW) [[likely]] {
+			if (std::get<INDEX_STRING_VIEW>(p.first).data() == key.data()) return &p.second;
+		} else if (idx == INDEX_STRING) {
+			if (std::get<INDEX_STRING>(p.first).data() == key.data()) return &p.second;
 		}
 	}
 
-	// 2. Fallback to Map (if properties exists)
 	if (properties) [[unlikely]] {
-		// We still use the key here; we must ensure LuaValueEq is also optimized.
+		// Optimized path for map: ensure your LuaValueHash uses the same 
+		// pointer-equality interning logic.
 		auto it = properties->find(key); 
 		if (it != properties->end()) return &it->second;
 	}
-	
 	return nullptr;
 }
 

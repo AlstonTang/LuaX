@@ -34,7 +34,7 @@ struct LuaCallable {
 
 // Generic template to wrap ANY lambda/callable without std::function overhead
 template <typename F>
-struct LuaLambdaCallable : public LuaCallable {
+struct LuaLambdaCallable final : public LuaCallable {
 	F func;
 	LuaLambdaCallable(F&& f) : func(std::forward<F>(f)) {}
 
@@ -53,7 +53,7 @@ template <size_t Arity, typename FVar, typename... FExt>
 struct LuaSpecializedCallable;
 
 template <typename FVar, typename F0>
-struct LuaSpecializedCallable<0, FVar, F0> : public LuaCallable {
+struct LuaSpecializedCallable<0, FVar, F0> final : public LuaCallable {
 	FVar f_var; F0 f0;
 	LuaSpecializedCallable(FVar&& v, F0&& s) : f_var(std::forward<FVar>(v)), f0(std::forward<F0>(s)) {}
 	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
@@ -61,7 +61,7 @@ struct LuaSpecializedCallable<0, FVar, F0> : public LuaCallable {
 };
 
 template <typename FVar, typename F1>
-struct LuaSpecializedCallable<1, FVar, F1> : public LuaCallable {
+struct LuaSpecializedCallable<1, FVar, F1> final : public LuaCallable {
 	FVar f_var; F1 f1;
 	LuaSpecializedCallable(FVar&& v, F1&& s) : f_var(std::forward<FVar>(v)), f1(std::forward<F1>(s)) {}
 	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
@@ -69,7 +69,7 @@ struct LuaSpecializedCallable<1, FVar, F1> : public LuaCallable {
 };
 
 template <typename FVar, typename F2>
-struct LuaSpecializedCallable<2, FVar, F2> : public LuaCallable {
+struct LuaSpecializedCallable<2, FVar, F2> final : public LuaCallable {
 	FVar f_var; F2 f2;
 	LuaSpecializedCallable(FVar&& v, F2&& s) : f_var(std::forward<FVar>(v)), f2(std::forward<F2>(s)) {}
 	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
@@ -77,7 +77,7 @@ struct LuaSpecializedCallable<2, FVar, F2> : public LuaCallable {
 };
 
 template <typename FVar, typename F3>
-struct LuaSpecializedCallable<3, FVar, F3> : public LuaCallable {
+struct LuaSpecializedCallable<3, FVar, F3> final : public LuaCallable {
 	FVar f_var; F3 f3;
 	LuaSpecializedCallable(FVar&& v, F3&& s) : f_var(std::forward<FVar>(v)), f3(std::forward<F3>(s)) {}
 	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
@@ -92,6 +92,11 @@ inline std::shared_ptr<LuaCallable> make_specialized_callable(FVar&& v, FSpec&& 
 // LuaObject Definition
 class LuaObject : public std::enable_shared_from_this<LuaObject> {
 public:
+	struct MetamethodRef {
+		const LuaValue* index;
+		const LuaValue* newindex;
+	};
+	
 	virtual ~LuaObject() = default;
 	
 	// Hybrid storage: small vector for few properties, map for many.
@@ -172,13 +177,14 @@ public:
 	LuaValue cached_index;
 	LuaValue cached_newindex;
 	std::atomic<bool> metamethods_initialized{false}; 
-
-	std::pair<LuaValue, LuaValue> get_cached_metamethods() {
-		// Acquire-Release fence ensures that if this is true, the data IS ready
+	
+	// Inside class LuaObject:
+	inline MetamethodRef get_cached_metamethods() {
+		// Acquire-Release ensures thread safety for the initialization check
 		if (!metamethods_initialized.load(std::memory_order_acquire)) {
 			ensure_metamethods();
 		}
-		return {cached_index, cached_newindex};
+		return { &cached_index, &cached_newindex };
 	}
 
 	void ensure_metamethods() {
@@ -471,9 +477,17 @@ inline bool is_lua_truthy(bool val) { return val; }
 inline bool is_lua_truthy(long long val) { return val != -1; } // -1 is sentinel for nil in raw byte ops
 inline bool is_lua_truthy(double val) { return true; } // Numbers are always truthy in Lua (except sentinel)
 inline bool is_lua_truthy(const LuaValue& val) {
-	auto idx = val.index();
+	const size_t idx = val.index();
+	
+	// Check for Nil (most common falsy)
 	if (idx == INDEX_NIL) [[unlikely]] return false;
-	if (idx == INDEX_BOOLEAN) return std::get<bool>(val);
+	
+	// Check for Boolean
+	if (idx == INDEX_BOOLEAN) [[unlikely]] {
+		return std::get<INDEX_BOOLEAN>(val);
+	}
+	
+	// Numbers, Strings, Tables, Functions are always truthy
 	return true;
 }
 
@@ -511,16 +525,14 @@ inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_
 			if (obj && obj->metatable) {
 				LuaValue call_handler = obj->metatable->get_item("__call");
 				if (is_lua_truthy(call_handler)) {
-					// Inject 'self' into the arguments
-					LuaValueVector new_args;
-					new_args.reserve(n_args + 1);
-					new_args.push_back(callable); 
-					if (n_args > 0) {
-						new_args.insert(new_args.end(), args, args + n_args);
-					}
+					// Optimization: Reuse a thread-local buffer to avoid heap allocation
+					thread_local LuaValueVector scratch_args;
+					scratch_args.clear();
+					scratch_args.reserve(n_args + 1);
+					scratch_args.push_back(callable); 
+					for(size_t i=0; i<n_args; ++i) scratch_args.push_back(args[i]);
 					
-					// Tail-call into the handler
-					call_lua_value(call_handler, new_args.data(), new_args.size(), out_result);
+					call_lua_value(call_handler, scratch_args.data(), scratch_args.size(), out_result);
 					return;
 				}
 			}
@@ -880,11 +892,27 @@ inline LuaValue operator-(const LuaValue& a) {
 }
 
 inline LuaValue operator+(const LuaValue& a, const LuaValue& b) {
-	if (const long long* ai = std::get_if<long long>(&a)) [[likely]] {
-		if (const long long* bi = std::get_if<long long>(&b)) [[likely]] return *ai + *bi;
+	// Combined type key for single-branch dispatch
+	const uint32_t dispatch = (static_cast<uint32_t>(a.index()) << 8) | static_cast<uint32_t>(b.index());
+
+	switch (dispatch) {
+		case (INDEX_INTEGER << 8) | INDEX_INTEGER:
+			return std::get<INDEX_INTEGER>(a) + std::get<INDEX_INTEGER>(b);
+		
+		case (INDEX_INTEGER << 8) | INDEX_DOUBLE:
+			return static_cast<double>(std::get<INDEX_INTEGER>(a)) + std::get<INDEX_DOUBLE>(b);
+			
+		case (INDEX_DOUBLE << 8) | INDEX_INTEGER:
+			return std::get<INDEX_DOUBLE>(a) + static_cast<double>(std::get<INDEX_INTEGER>(b));
+			
+		case (INDEX_DOUBLE << 8) | INDEX_DOUBLE:
+			return std::get<INDEX_DOUBLE>(a) + std::get<INDEX_DOUBLE>(b);
+
+		default: [[unlikely]]
+			return to_double(a) + to_double(b);
 	}
-	return to_double(a) + to_double(b);
 }
+// ... repeat pattern for - and * ...
 
 inline LuaValue operator+(const LuaValue& a, double b) { return to_double(a) + b; }
 inline LuaValue operator+(double a, const LuaValue& b) { return a + to_double(b); }
@@ -900,10 +928,25 @@ inline LuaValue operator+(const LuaValue& a, int b) { return a + static_cast<lon
 inline LuaValue operator+(int a, const LuaValue& b) { return static_cast<long long>(a) + b; }
 
 inline LuaValue operator-(const LuaValue& a, const LuaValue& b) {
-	if (const long long* ai = std::get_if<long long>(&a)) [[likely]] {
-		if (const long long* bi = std::get_if<long long>(&b)) [[likely]] return *ai - *bi;
+	// Combined type key for single-branch dispatch
+	const uint32_t dispatch = (static_cast<uint32_t>(a.index()) << 8) | static_cast<uint32_t>(b.index());
+
+	switch (dispatch) {
+		case (INDEX_INTEGER << 8) | INDEX_INTEGER:
+			return std::get<INDEX_INTEGER>(a) - std::get<INDEX_INTEGER>(b);
+		
+		case (INDEX_INTEGER << 8) | INDEX_DOUBLE:
+			return static_cast<double>(std::get<INDEX_INTEGER>(a)) - std::get<INDEX_DOUBLE>(b);
+			
+		case (INDEX_DOUBLE << 8) | INDEX_INTEGER:
+			return std::get<INDEX_DOUBLE>(a) - static_cast<double>(std::get<INDEX_INTEGER>(b));
+			
+		case (INDEX_DOUBLE << 8) | INDEX_DOUBLE:
+			return std::get<INDEX_DOUBLE>(a) - std::get<INDEX_DOUBLE>(b);
+
+		default: [[unlikely]]
+			return to_double(a) - to_double(b);
 	}
-	return to_double(a) - to_double(b);
 }
 
 inline LuaValue operator-(const LuaValue& a, double b) { return to_double(a) - b; }
@@ -918,10 +961,25 @@ inline LuaValue operator-(long long a, const LuaValue& b) {
 }
 
 inline LuaValue operator*(const LuaValue& a, const LuaValue& b) {
-	if (const long long* ai = std::get_if<long long>(&a)) [[likely]] {
-		if (const long long* bi = std::get_if<long long>(&b)) [[likely]] return *ai * *bi;
+	// Combined type key for single-branch dispatch
+	const uint32_t dispatch = (static_cast<uint32_t>(a.index()) << 8) | static_cast<uint32_t>(b.index());
+
+	switch (dispatch) {
+		case (INDEX_INTEGER << 8) | INDEX_INTEGER:
+			return std::get<INDEX_INTEGER>(a) * std::get<INDEX_INTEGER>(b);
+		
+		case (INDEX_INTEGER << 8) | INDEX_DOUBLE:
+			return static_cast<double>(std::get<INDEX_INTEGER>(a)) * std::get<INDEX_DOUBLE>(b);
+			
+		case (INDEX_DOUBLE << 8) | INDEX_INTEGER:
+			return std::get<INDEX_DOUBLE>(a) * static_cast<double>(std::get<INDEX_INTEGER>(b));
+			
+		case (INDEX_DOUBLE << 8) | INDEX_DOUBLE:
+			return std::get<INDEX_DOUBLE>(a) * std::get<INDEX_DOUBLE>(b);
+
+		default: [[unlikely]]
+			return to_double(a) * to_double(b);
 	}
-	return to_double(a) * to_double(b);
 }
 
 inline LuaValue operator*(const LuaValue& a, double b) { return to_double(a) * b; }
