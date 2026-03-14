@@ -1,11 +1,3 @@
---- START OF FILE Paste March 11, 2026 - 9:46AM ---
-
--- C++ Translator Module
--- Refactored for Void-Return / Output-Parameter Architecture
--- Optimized to reuse a single output buffer (_func_ret_buf) per function scope
--- Hoists side-effects to eliminate lambda wrappers for function calls
--- Fixes: std::monostate spam, argument vector detection, side-effect duplication, exponential translation blow-up
-
 local CppTranslator = {}
 CppTranslator.__index = CppTranslator
 
@@ -325,6 +317,8 @@ local function is_table_unpack_call(node)
 			if base[3] == "table" and member[3] == "unpack" then
 				return true
 			end
+		elseif call_func[1] == "identifier" and call_func[3] == "unpack" then
+			return true
 		end
 	end
 	return false
@@ -361,7 +355,7 @@ local function build_args_code(ctx, node, start_index, depth, self_arg)
 			local arg_node = children[i]
 			if i == count and (is_multiret(arg_node) or is_table_unpack_call(arg_node)) then
 				local ret_buf_name = translate_node(ctx, arg_node, depth + 1, { multiret = true })
-				ctx:add_statement(vec_var .. ".insert(" .. vec_var .. ".end(), " .. ret_buf_name .. ".begin(), " .. ret_buf_name .. ".end());\n")
+				ctx:add_statement(vec_var .. ".insert(" .. vec_var .. ".end(), std::make_move_iterator(" .. ret_buf_name .. ".begin()), std::make_move_iterator(" .. ret_buf_name .. ".end()));\n")
 			else
 				local arg_val = translate_node(ctx, arg_node, depth + 1)
 				ctx:add_statement(vec_var .. ".push_back(" .. arg_val .. ");\n")
@@ -747,17 +741,17 @@ register_handler("expression_statement", function(ctx, node, depth)
 	local expr_node = node[5][1]
 	local is_call = (expr_node[1] == "call_expression" or expr_node[1] == "method_call_expression")
 	
-	local code = translate_node(ctx, expr_node, depth + 1, { multiret = is_call })
+	local code = translate_node(ctx, expr_node, depth + 1, { discard = true, multiret = is_call })
 	local stmts = ctx:flush_statements()
 	
 	if stmts ~= "" then
-		if code == ctx:use_ret_buf() or code == "std::monostate{}" then
+		if code == ctx:use_ret_buf() or code == "std::monostate{}" or code == "" then
 			return stmts
 		else
 			return stmts .. code .. ";\n"
 		end
 	else
-		if code == "std::monostate{}" then
+		if code == "std::monostate{}" or code == "" then
 			return "" 
 		end
 		return code .. ";\n"
@@ -772,9 +766,9 @@ register_handler("varargs", function(ctx, node, depth, opts)
 	local start_index = ctx.current_function_fixed_params_count
 	
 	if opts.multiret then
-		ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
-		ctx:add_statement("if (n_args > " .. start_index .. ") [[likely]]" .. ctx:use_ret_buf() .. ".insert(" .. ctx:use_ret_buf() .. ".end(), args + " .. start_index .. ", args + n_args);\n")
-		return ctx:use_ret_buf()
+		local ret_buf = ctx:use_ret_buf()
+		ctx:add_statement("if (n_args > " .. start_index .. ") [[likely]] " .. ret_buf .. ".assign(args + " .. start_index .. ", args + n_args); else " .. ret_buf .. ".clear();\n")
+		return ret_buf
 	else
 		local temp_var = "vararg_" .. ctx:get_unique_id()
 		ctx:add_statement("LuaValue " .. temp_var  .. ";\n")
@@ -845,7 +839,7 @@ register_handler("table_constructor", function(ctx, node, depth)
 			if stmt[1] == "multiret" then
 				local varargs_buf = translate_node(ctx, stmt[2], depth + 1, { multiret = true })
 				ctx:add_statement("for (size_t i = 0; i < " .. varargs_buf .. ".size(); ++i) {\n")
-				ctx:add_statement("  " .. temp_table_var .. "->set_item(LuaValue(static_cast<long long>(" .. stmt[3] .. " + i)), " .. varargs_buf .. "[i]);\n")
+				ctx:add_statement("  " .. temp_table_var .. "->set_item(LuaValue(static_cast<long long>(" .. stmt[3] .. " + i)), std::move(" .. varargs_buf .. "[i]));\n")
 				ctx:add_statement("}\n")
 			end
 		end
@@ -882,7 +876,9 @@ BuiltinCallHandlers["print"] = function(ctx, node, depth, opts)
 	end
 	ctx:add_statement("std::cout << std::endl;\n")
 	
-	if opts.multiret then
+	if opts.discard then
+		return ""
+	elseif opts.multiret then
 		ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 		return ctx:use_ret_buf()
 	else
@@ -897,6 +893,8 @@ BuiltinCallHandlers["table.insert"] = function(ctx, node, depth, opts)
 		local table_code = translate_node(ctx, children[2], depth + 1)
 		local value_code = translate_node(ctx, children[3], depth + 1)
 		ctx:add_statement("lua_table_insert(" .. table_code .. ", " .. value_code .. ");\n")
+		
+		if opts.discard then return "" end
 		if opts.multiret then
 			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 			return ctx:use_ret_buf()
@@ -908,6 +906,8 @@ BuiltinCallHandlers["table.insert"] = function(ctx, node, depth, opts)
 		local pos_code = translate_node(ctx, children[3], depth + 1)
 		local value_code = translate_node(ctx, children[4], depth + 1)
 		ctx:add_statement("lua_table_insert(" .. table_code .. ", static_cast<long long>(get_double(" .. pos_code .. ")), " .. value_code .. ");\n")
+		
+		if opts.discard then return "" end
 		if opts.multiret then
 			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 			return ctx:use_ret_buf()
@@ -919,6 +919,7 @@ BuiltinCallHandlers["table.insert"] = function(ctx, node, depth, opts)
 end
 
 BuiltinCallHandlers["table.unpack"] = function(ctx, node, depth, opts)
+	if opts.discard then return "" end
 	if not opts.multiret then return nil end
 	local children = node[5]
 	if #children >= 2 then
@@ -929,6 +930,8 @@ BuiltinCallHandlers["table.unpack"] = function(ctx, node, depth, opts)
 	return nil
 end
 
+BuiltinCallHandlers["unpack"] = BuiltinCallHandlers["table.unpack"]
+
 BuiltinCallHandlers["require"] = function(ctx, node, depth, opts)
 	local module_name_node = node[5][2]
 	if module_name_node and module_name_node[1] == "string" then
@@ -936,7 +939,10 @@ BuiltinCallHandlers["require"] = function(ctx, node, depth, opts)
 		ctx:add_required_module(module_name)
 		local sanitized_module_name = module_name:gsub("%.", "_")
 		
-		if opts.multiret then
+		if opts.discard then
+			ctx:add_statement(sanitized_module_name .. "::load();\n")
+			return ""
+		elseif opts.multiret then
 			ctx:add_statement(ctx:use_ret_buf() .. " = " .. sanitized_module_name .. "::load();\n")
 			return ctx:use_ret_buf()
 		else
@@ -954,8 +960,9 @@ BuiltinCallHandlers["setmetatable"] = function(ctx, node, depth, opts)
 	
 	ctx:add_statement("get_object(" .. translated_table .. ")->set_metatable(get_object(" .. translated_metatable .. "));\n")
 	
+	if opts.discard then return "" end
 	if opts.multiret then
-		ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. translated_table .. ");\n")
+		ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, " .. translated_table .. ");\n")
 		return ctx:use_ret_buf()
 	else
 		return translated_table
@@ -982,10 +989,11 @@ local function handle_string_method(method_name, ctx, node, base_node, depth, op
 		call_stmt = "lua_string_gsub("..base_code..", "..pattern_code..", "..replacement_code..", " .. ctx:use_ret_buf() .. ");\n"
 	end
 	
-	ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 	ctx:add_statement(call_stmt)
 	
-	if opts.multiret then
+	if opts.discard then
+		return ""
+	elseif opts.multiret then
 		return ctx:use_ret_buf()
 	else
 		local temp_var = "str_res_" .. ctx:get_unique_id()
@@ -1053,8 +1061,10 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 			local arg_node = node[5][2]
 			if arg_node then
 				local arg_code = translate_node(ctx, arg_node, depth + 1)
-				if opts.multiret then
-					ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(LuaValue(lua_to_bool(" .. inline_func .. "(" .. arg_code .. "))));\n")
+				if opts.discard then
+					return inline_func .. "(" .. arg_code .. ")"
+				elseif opts.multiret then
+					ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, LuaValue(lua_to_bool(" .. inline_func .. "(" .. arg_code .. "))));\n")
 					return ctx:use_ret_buf()
 				else
 					return inline_func .. "(" .. arg_code .. ")"
@@ -1087,21 +1097,25 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	end
 	
 	if not opts.multiret and not is_vector and num_args <= 3 then
-		local temp_var = "call_res_" .. ctx:get_unique_id()
 		local call_expr
 		if is_known_local then
 			call_expr = "get_callable(" .. translated_func_access .. ")->call" .. num_args .. "(" .. args_code .. ")"
 		else
 			call_expr = "lua_call" .. num_args .. "(" .. translated_func_access .. ", " .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
 		end
+		
 		if opts.no_temp then
 			return call_expr, "LuaValue"
+		elseif opts.discard then
+			ctx:add_statement(call_expr .. ";\n")
+			return ""
+		else
+			local temp_var = "call_res_" .. ctx:get_unique_id()
+			ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
+			return temp_var
 		end
-		ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
-		return temp_var
 	elseif is_vector then
 		if is_known_local then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 			ctx:add_statement("get_callable(" .. translated_func_access .. ")->call(" .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
 		else
 			ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
@@ -1109,16 +1123,14 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	else
 		if args_code == "" then
 			if is_known_local then
-				ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 				ctx:add_statement("get_callable(" .. translated_func_access .. ")->call(nullptr, 0, " .. ctx:use_ret_buf() .. ");\n")
 			else
-				ctx:add_statement("call_lua_value(" .. translated_func_access .. ", {}, 0, " .. ctx:use_ret_buf() .. ");\n")
+				ctx:add_statement("call_lua_value(" .. translated_func_access .. ", nullptr, 0, " .. ctx:use_ret_buf() .. ");\n")
 			end
 		else
 			if is_known_local then
 				local args_arr = "args_" .. ctx:get_unique_id()
 				ctx:add_statement("const LuaValue " .. args_arr .. "[] = {" .. args_code .. "};\n")
-				ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 				ctx:add_statement("get_callable(" .. translated_func_access .. ")->call(" .. args_arr .. ", " .. num_args .. ", " .. ctx:use_ret_buf() .. ");\n")
 			else
 				ctx:add_statement("call_lua_value(" .. translated_func_access .. ", " .. ctx:use_ret_buf() .. ", " .. args_code .. ");\n")
@@ -1126,7 +1138,9 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 		end
 	end
 	
-	if opts.multiret then
+	if opts.discard then
+		return ""
+	elseif opts.multiret then
 		return ctx:use_ret_buf()
 	else
 		local temp_var = "call_res_" .. ctx:get_unique_id()
@@ -1151,8 +1165,8 @@ MethodCallHandlers["byte"] = function(ctx, node, base_node, depth, opts)
 	
 	if not arg1 then
 		local base_code = translate_node(ctx, base_node, depth + 1)
+		if opts.discard then return "lua_string_byte_at_raw(" .. base_code .. ", 1LL)" end
 		if opts.multiret then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 			ctx:add_statement("lua_string_byte(" .. base_code .. ", 1LL, 1LL, " .. ctx:use_ret_buf() .. ");\n")
 			return ctx:use_ret_buf()
 		else
@@ -1162,8 +1176,8 @@ MethodCallHandlers["byte"] = function(ctx, node, base_node, depth, opts)
 		local arg1_code = translate_node(ctx, arg1, depth + 1)
 		local base_code = translate_node(ctx, base_node, depth + 1)
 		
+		if opts.discard then return "lua_string_byte_at_raw(" .. base_code .. ", " .. arg1_code .. ")" end
 		if opts.multiret then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 			ctx:add_statement("lua_string_byte(" .. base_code .. ", " .. arg1_code .. ", " .. arg1_code .. ", " .. ctx:use_ret_buf() .. ");\n")
 			return ctx:use_ret_buf()
 		else
@@ -1173,8 +1187,9 @@ MethodCallHandlers["byte"] = function(ctx, node, base_node, depth, opts)
 		if arg1[1] == arg2[1] and arg1[2] == arg2[2] and (arg1[1] == "number" or arg1[1] == "integer") then
 			local arg1_code = translate_node(ctx, arg1, depth + 1)
 			local base_code = translate_node(ctx, base_node, depth + 1)
+			
+			if opts.discard then return "lua_string_byte_at_raw(" .. base_code .. ", " .. arg1_code .. ")" end
 			if opts.multiret then
-				ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 				ctx:add_statement("lua_string_byte(" .. base_code .. ", " .. arg1_code .. ", " .. arg1_code .. ", " .. ctx:use_ret_buf() .. ");\n")
 				return ctx:use_ret_buf()
 			else
@@ -1193,6 +1208,7 @@ MethodCallHandlers["insert"] = function(ctx, node, base_node, depth, opts)
 		local base_code = translate_node(ctx, base_node, depth + 1)
 		local value_code = translate_node(ctx, arg1, depth + 1)
 		ctx:add_statement("lua_table_insert(" .. base_code .. ", " .. value_code .. ");\n")
+		if opts.discard then return "" end
 		if opts.multiret then
 			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 			return ctx:use_ret_buf()
@@ -1212,8 +1228,10 @@ MethodCallHandlers["sub"] = function(ctx, node, base_node, depth, opts)
 		if arg1[1] == arg2[1] and arg1[2] == arg2[2] and (arg1[1] == "number" or arg1[1] == "integer") then
 			local arg1_code = translate_node(ctx, arg1, depth + 1)
 			local base_code = translate_node(ctx, base_node, depth + 1)
+			
+			if opts.discard then return "lua_string_char_at(" .. base_code .. ", " .. arg1_code .. ")" end
 			if opts.multiret then
-				ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(lua_string_char_at(" .. base_code .. ", " .. arg1_code .. "));\n")
+				ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, lua_string_char_at(" .. base_code .. ", " .. arg1_code .. "));\n")
 				return ctx:use_ret_buf()
 			else
 				return "lua_string_char_at(" .. base_code .. ", " .. arg1_code .. ")"
@@ -1223,13 +1241,17 @@ MethodCallHandlers["sub"] = function(ctx, node, base_node, depth, opts)
 		local arg1_code = translate_node(ctx, arg1, depth + 1)
 		local arg2_code = translate_node(ctx, arg2, depth + 1)
 		local base_code = translate_node(ctx, base_node, depth + 1)
-		if not opts.multiret then
+		if opts.discard then
+			return "lua_string_sub(" .. base_code .. ", static_cast<long long>(get_double(" .. arg1_code .. ")), static_cast<long long>(get_double(" .. arg2_code .. ")))"
+		elseif not opts.multiret then
 			return "lua_string_sub(" .. base_code .. ", static_cast<long long>(get_double(" .. arg1_code .. ")), static_cast<long long>(get_double(" .. arg2_code .. ")))"
 		end
 	elseif arg1 and not arg2 then
 		local arg1_code = translate_node(ctx, arg1, depth + 1)
 		local base_code = translate_node(ctx, base_node, depth + 1)
-		if not opts.multiret then
+		if opts.discard then
+			return "lua_string_sub(" .. base_code .. ", static_cast<long long>(get_double(" .. arg1_code .. ")), -1)"
+		elseif not opts.multiret then
 			return "lua_string_sub(" .. base_code .. ", static_cast<long long>(get_double(" .. arg1_code .. ")), -1)"
 		end
 	end
@@ -1261,18 +1283,25 @@ register_handler("method_call_expression", function(ctx, node, depth, opts)
 	local args_code, is_vector, num_args = build_args_code(ctx, node, 3, depth, base_code)
 	
 	if not opts.multiret and not is_vector and num_args <= 3 then
-		local temp_var = "mcall_res_" .. ctx:get_unique_id()
 		local call_expr
 		if is_known_local_base then
 			call_expr = "get_callable(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "))->call" .. num_args .. "(" .. (args_code ~= "" and args_code or "") .. ")"
 		else
 			call_expr = "lua_call" .. num_args .. "(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
 		end
-		ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
-		return temp_var
+		
+		if opts.no_temp then
+			return call_expr, "LuaValue"
+		elseif opts.discard then
+			ctx:add_statement(call_expr .. ";\n")
+			return ""
+		else
+			local temp_var = "mcall_res_" .. ctx:get_unique_id()
+			ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
+			return temp_var
+		end
 	elseif is_vector then
 		if is_known_local_base then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 			ctx:add_statement("get_callable(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "))->call(" .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
 		else
 			ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
@@ -1281,14 +1310,15 @@ register_handler("method_call_expression", function(ctx, node, depth, opts)
 		if is_known_local_base then
 			local args_arr = "args_" .. ctx:get_unique_id()
 			ctx:add_statement("const LuaValue " .. args_arr .. "[] = {" .. args_code .. "};\n")
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 			ctx:add_statement("get_callable(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "))->call(" .. args_arr .. ", " .. num_args .. ", " .. ctx:use_ret_buf() .. ");\n")
 		else
 			ctx:add_statement("call_lua_value(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. ctx:use_ret_buf() .. ", " .. args_code .. ");\n")
 		end
 	end
 	
-	if opts.multiret then
+	if opts.discard then
+		return ""
+	elseif opts.multiret then
 		return ctx:use_ret_buf()
 	else
 		local temp_var = "mcall_res_" .. ctx:get_unique_id()
@@ -1555,7 +1585,15 @@ local function translate_function_body(ctx, node, depth)
 	local body_stmts = ctx:capture_end()
 	
 	local buffer_decl = ctx.uses_ret_buf and ("    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n") or ""
-	local var_lambda = "[=](const LuaValue* args, size_t n_args, LuaValueVector& out_result) mutable -> void {\n" .. buffer_decl .. params_extraction .. body_code .. body_stmts .. "}"
+	
+	local combined_body = body_code .. body_stmts
+	local has_terminal_return = combined_body:match("return[^;]*;%s*$")
+	
+	local var_lambda = "[=](const LuaValue* args, size_t n_args, LuaValueVector& out_result) mutable -> void {\n" .. buffer_decl .. params_extraction .. combined_body
+	if not has_terminal_return then
+		var_lambda = var_lambda .. "\n    out_result.clear();"
+	end
+	var_lambda = var_lambda .. "\n}"
 	
 	local spec_lambda = nil
 	local body_children = body_node[5] or empty_table
@@ -1582,17 +1620,18 @@ local function translate_function_body(ctx, node, depth)
 		
 		local spec_body_code = translate_node(ctx, body_node, depth + 1, { no_braces = true })
 		local spec_body_stmts = ctx:capture_end()
+		local spec_combined = spec_body_code .. spec_body_stmts
 		
 		local spec_buffer_decl = ctx.uses_ret_buf and ("    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n") or ""
 		
 		local terminal_return = ""
-		if not spec_body_code:match("return%s+[^;]+;") then
+		if not spec_combined:match("return%s+[^;]+;%s*$") then
 			terminal_return = "\n    return LuaValue(std::monostate{});\n"
 		end
 		
 		spec_lambda = "[=](" .. spec_params_list .. ") mutable -> LuaValue {\n" .. 
 					spec_buffer_decl .. spec_params_extraction .. 
-					spec_body_code .. spec_body_stmts .. 
+					spec_combined .. 
 					terminal_return .. "}"
 	end
 
@@ -1783,16 +1822,37 @@ register_handler("return_statement", function(ctx, node, depth)
 			return cpp_code .. stmts .. "return " .. val .. ";\n"
 		else
 			local num_exprs = #(expr_list_node[5] or empty_table)
+			local eval_stmts = ""
+			local push_stmts = ""
+			
+			if num_exprs > 1 then
+				push_stmts = "out_result.clear();\n"
+			end
+			
 			for i, expr_node in ipairs(expr_list_node[5] or empty_table) do
 				local is_last = (i == num_exprs)
 				local val = translate_node(ctx, expr_node, depth + 1, { multiret = is_last })
-				local stmts = ctx:flush_statements()
+				eval_stmts = eval_stmts .. ctx:flush_statements()
+				
 				if is_last and val == RET_BUF_NAME then
-					cpp_code = cpp_code .. stmts .. "out_result.insert(out_result.end(), " .. RET_BUF_NAME .. ".begin(), " .. RET_BUF_NAME .. ".end());\n"
+					if num_exprs == 1 then
+                        push_stmts = push_stmts .. "out_result = std::move(" .. RET_BUF_NAME .. ");\n"
+                    else
+                        push_stmts = push_stmts .. "out_result.insert(out_result.end(), std::make_move_iterator(" .. RET_BUF_NAME .. ".begin()), std::make_move_iterator(" .. RET_BUF_NAME .. ".end()));\n"
+                    end
 				else
-					cpp_code = cpp_code .. stmts .. "out_result.push_back(" .. val .. ");\n"
+					if num_exprs == 1 then
+                        push_stmts = push_stmts .. "out_result.assign(1, " .. val .. ");\n"
+                    else
+                        push_stmts = push_stmts .. "out_result.push_back(" .. val .. ");\n"
+                    end
 				end
 			end
+			cpp_code = cpp_code .. eval_stmts .. push_stmts
+		end
+	else
+		if not ctx.specialized_return_mode then
+			cpp_code = cpp_code .. "out_result.clear();\n"
 		end
 	end
 	return cpp_code .. ctx.current_return_stmt .. "\n"
@@ -1955,9 +2015,9 @@ register_handler("for_generic_statement", function(ctx, node, depth)
 		cpp_code = cpp_code .. "LuaValueVector " .. results_var .. " = " .. iterator_values_code .. ";\n"
 	end
 	
-	cpp_code = cpp_code .. "LuaValue " .. iter_func_var .. " = " .. results_var .. "[0];\n"
-	cpp_code = cpp_code .. "LuaValue " .. iter_state_var .. " = " .. results_var .. "[1];\n"
-	cpp_code = cpp_code .. "LuaValue " .. iter_value_var .. " = " .. results_var .. "[2];\n"
+	cpp_code = cpp_code .. "LuaValue " .. iter_func_var .. " = (" .. results_var .. ".size() > 0) ? " .. results_var .. "[0] : LuaValue(std::monostate{});\n"
+	cpp_code = cpp_code .. "LuaValue " .. iter_state_var .. " = (" .. results_var .. ".size() > 1) ? " .. results_var .. "[1] : LuaValue(std::monostate{});\n"
+	cpp_code = cpp_code .. "LuaValue " .. iter_value_var .. " = (" .. results_var .. ".size() > 2) ? " .. results_var .. "[2] : LuaValue(std::monostate{});\n"
 	
 	cpp_code = cpp_code .. "LuaValueVector " .. current_vals_var .. ";\n"
 	cpp_code = cpp_code .. current_vals_var .. ".reserve(3);\n"
@@ -1974,7 +2034,7 @@ register_handler("for_generic_statement", function(ctx, node, depth)
 	for i, var_cpp_name in ipairs(loop_vars) do
 		cpp_code = cpp_code .. "    LuaValue " .. var_cpp_name .. " = (" .. 
 				current_vals_var .. ".size() > " .. (i - 1) .. ") ? " .. 
-				current_vals_var .. "[" .. (i - 1) .. "] : std::monostate{};\n"
+				current_vals_var .. "[" .. (i - 1) .. "] : LuaValue(std::monostate{});\n"
 	end
 	
 	cpp_code = cpp_code .. "    " .. iter_value_var .. " = " .. loop_vars[1] .. ";\n"
@@ -2128,8 +2188,9 @@ for name, cpp_func in pairs(MathHandlers) do
 				expr = cpp_func .. "(" .. ctx:to_double(arg_code) .. ")"
 			end
 			
+			if opts.discard then return expr end
 			if opts.multiret then
-				ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+				ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, " .. expr .. ");\n")
 				return ctx:use_ret_buf()
 			else
 				return expr
@@ -2144,8 +2205,10 @@ BuiltinCallHandlers["math.random"] = function(ctx, node, depth, opts)
 	local call_args = get_call_args(node)
 	if #call_args == 0 then
 		local expr = "(static_cast<double>(std::rand()) / RAND_MAX)"
+		
+		if opts.discard then return expr end
 		if opts.multiret then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, " .. expr .. ");\n")
 			return ctx:use_ret_buf()
 		else
 			return expr
@@ -2163,8 +2226,10 @@ BuiltinCallHandlers["math.max"] = function(ctx, node, depth, opts)
 		local da = ctx:to_double(a)
 		local db = ctx:to_double(b)
 		local expr = "(" .. da .. " > " .. db .. " ? " .. da .. " : " .. db .. ")"
+		
+		if opts.discard then return expr end
 		if opts.multiret then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, " .. expr .. ");\n")
 			return ctx:use_ret_buf()
 		else
 			return expr
@@ -2182,8 +2247,10 @@ BuiltinCallHandlers["math.min"] = function(ctx, node, depth, opts)
 		local da = ctx:to_double(a)
 		local db = ctx:to_double(b)
 		local expr = "(" .. da .. " < " .. db .. " ? " .. da .. " : " .. db .. ")"
+		
+		if opts.discard then return expr end
 		if opts.multiret then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, " .. expr .. ");\n")
 			return ctx:use_ret_buf()
 		else
 			return expr
@@ -2202,6 +2269,8 @@ BuiltinCallHandlers["string.byte"] = function(ctx, node, depth, opts)
 	if #call_args == 1 then
 		local str = translate_node(ctx, call_args[1], depth + 1)
 		local expr = "lua_string_byte_at_raw(" .. str .. ", 1)"
+		
+		if opts.discard then return expr end
 		if opts.multiret then
 			ctx:add_statement(ctx:use_ret_buf() .. ".clear();\n")
 			ctx:add_statement("{\n    long long _b = " .. expr .. ";\n")
@@ -2221,8 +2290,10 @@ BuiltinCallHandlers["string.len"] = function(ctx, node, depth, opts)
 	if #call_args == 1 then
 		local str = translate_node(ctx, call_args[1], depth + 1)
 		local expr = "lua_get_length_int(" .. str .. ")"
+		
+		if opts.discard then return expr end
 		if opts.multiret then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, " .. expr .. ");\n")
 			return ctx:use_ret_buf()
 		else
 			return expr
@@ -2237,8 +2308,10 @@ BuiltinCallHandlers["string.char"] = function(ctx, node, depth, opts)
 	if #call_args == 1 then
 		local arg = translate_node(ctx, call_args[1], depth + 1)
 		local expr = "LuaValue(std::string(1, static_cast<char>(get_double(" .. arg .. "))))"
+		
+		if opts.discard then return expr end
 		if opts.multiret then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, " .. expr .. ");\n")
 			return ctx:use_ret_buf()
 		else
 			return expr
@@ -2254,8 +2327,9 @@ end
 BuiltinCallHandlers["os.clock"] = function(ctx, node, depth, opts)
 	if ctx.overrides and ctx.overrides.os then return nil end
 	local expr = "(static_cast<double>(std::clock()) / CLOCKS_PER_SEC)"
+	if opts.discard then return expr end
 	if opts.multiret then
-		ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+		ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, " .. expr .. ");\n")
 		return ctx:use_ret_buf()
 	else
 		return expr
@@ -2267,8 +2341,9 @@ BuiltinCallHandlers["os.time"] = function(ctx, node, depth, opts)
 	local call_args = get_call_args(node)
 	if #call_args == 0 then
 		local expr = "static_cast<long long>(std::time(nullptr))"
+		if opts.discard then return expr end
 		if opts.multiret then
-			ctx:add_statement(ctx:use_ret_buf() .. ".clear(); " .. ctx:use_ret_buf() .. ".push_back(" .. expr .. ");\n")
+			ctx:add_statement(ctx:use_ret_buf() .. ".assign(1, " .. expr .. ");\n")
 			return ctx:use_ret_buf()
 		else
 			return expr
@@ -2358,9 +2433,9 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 			
 			if not explicit_return_found then
 				if module_identifier ~= "" then
-					load_function_body = load_function_body .. "    out_result.push_back(" .. sanitize_cpp_identifier(module_identifier) .. ");\n"
+					load_function_body = load_function_body .. "    out_result.assign(1, " .. sanitize_cpp_identifier(module_identifier) .. ");\n"
 				else
-					load_function_body = load_function_body .. "    out_result.push_back(LuaObject::create());\n"
+					load_function_body = load_function_body .. "    out_result.assign(1, LuaObject::create());\n"
 				end
 				load_function_body = load_function_body .. "    return out_result;\n"
 			end
