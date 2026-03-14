@@ -152,6 +152,12 @@ function TranslatorContext:to_bool(expr, tp)
 	return "is_lua_truthy(" .. expr .. ")"
 end
 
+function TranslatorContext:to_string_view(expr, tp)
+	if tp == "std::string_view" then return expr end
+	if tp == "std::string" then return "std::string_view(" .. expr .. ")" end
+	return "get_string_view(" .. expr .. ")"
+end
+
 function TranslatorContext:getCppType(var_name, init_tp)
 	local analysis = self.var_types and self.var_types[var_name]
 	if not analysis then return "LuaValue" end
@@ -159,16 +165,26 @@ function TranslatorContext:getCppType(var_name, init_tp)
 	local has_int = analysis["long long"]
 	local has_double = analysis["double"]
 	local has_bool = analysis["bool"]
-	local has_str = analysis["std::string"] or analysis["std::string_view"]
+	local has_str_view = analysis["std::string_view"]
+	local has_str = analysis["std::string"]
+	local has_obj = analysis["LuaObject"]
 	local has_other = analysis["LuaValue"]
 
-	if not has_bool and not has_str and not has_other then
+	local types_count = 0
+	for _ in pairs(analysis) do types_count = types_count + 1 end
+
+	if types_count == 1 then
+		if has_int then return "long long" end
 		if has_double then return "double" end
-		return "long long"
+		if has_bool then return "bool" end
+		if has_str_view then return "std::string_view" end
+		if has_str or has_obj or has_other then return "LuaValue" end
 	end
 
-	if has_bool and not has_int and not has_double and not has_str and not has_other then
-		return "bool"
+	-- Mixing numeric types
+	if not has_bool and not has_str_view and not has_str and not has_obj and not has_other then
+		if has_double then return "double" end
+		return "long long"
 	end
 
 	return "LuaValue"
@@ -218,9 +234,9 @@ function TranslatorContext:get_string_expr(s)
 			if #safe_s > 15 then safe_s = safe_s:sub(1, 15) end
 			self.string_literals[s] = "_cache_str_" .. safe_s .. "_" .. self:get_unique_id()
 		end
-		return self.string_literals[s]
+		return self.string_literals[s], "LuaValue"
 	else
-		return 'std::string_view("' .. escape_cpp_string(s) .. '")'
+		return 'std::string_view("' .. escape_cpp_string(s) .. '")', "std::string_view"
 	end
 end
 
@@ -231,7 +247,7 @@ function TranslatorContext:get_string_cache(s)
 		local id = self:get_unique_id()
 		self.string_literals[s] = "_cache_str_" .. safe_s .. "_" .. id
 	end
-	return self.string_literals[s]
+	return self.string_literals[s], "LuaValue"
 end
 
 function TranslatorContext:get_global_cache(name)
@@ -423,7 +439,7 @@ end
 --------------------------------------------------------------------------------
 
 register_handler("string", function(ctx, node, depth)
-	return ctx:get_string_expr(node[2]), "std::string_view"
+	return ctx:get_string_expr(node[2])
 end)
 
 register_handler("number", function(ctx, node, depth)
@@ -645,6 +661,9 @@ register_handler("binary_expression", function(ctx, node, depth)
 	elseif operator == "//" then
 		return "static_cast<long long>(" .. left .. " / " .. right .. ")", "long long"
 	elseif operator == "%" then
+		if math_type == "double" then
+			return "std::fmod(" .. left .. ", " .. right .. ")", "double"
+		end
 		return "(" .. left .. " % " .. right .. ")", "long long"
 	elseif operator == "^" then
 		return "std::pow(" .. left .. ", " .. right .. ")", "double"
@@ -1358,6 +1377,8 @@ register_handler("local_declaration", function(ctx, node, depth)
 				val = ctx:to_double(val, tp)
 			elseif cpp_type == "bool" then
 				val = ctx:to_bool(val, tp)
+			elseif cpp_type == "std::string_view" then
+				val = ctx:to_string_view(val, tp)
 			end
 			
 			cpp_code = cpp_code .. stmts
@@ -1428,6 +1449,7 @@ register_handler("local_declaration", function(ctx, node, depth)
 		elseif has_function_call_expr and i >= first_call_expr_index then
 			local offset = i - first_call_expr_index
 			initial_value_code = "get_return_value(" .. function_call_results_var .. ", " .. offset .. ")"
+			tp = "LuaValue"
 		end
 		
 		local cpp_type = ctx:getCppType(var_node[3], tp)
@@ -1438,6 +1460,8 @@ register_handler("local_declaration", function(ctx, node, depth)
 			initial_value_code = ctx:to_double(initial_value_code, tp)
 		elseif cpp_type == "bool" then
 			initial_value_code = ctx:to_bool(initial_value_code, tp)
+		elseif cpp_type == "std::string_view" then
+			initial_value_code = ctx:to_string_view(initial_value_code, tp)
 		end
 		
 		cpp_code = cpp_code .. cpp_type .. " " .. var_name .. " = " .. initial_value_code .. ";\n"
@@ -1508,7 +1532,20 @@ register_handler("assignment", function(ctx, node, depth)
 			
 			if decl then
 				local cpp_name = decl.cpp_name or sanitize_cpp_identifier(var_name)
-				target_code = cpp_name .. " = " .. value_code .. ";\n"
+				local cpp_type = decl.cpp_type or "LuaValue"
+				
+				local final_value = value_code
+				if cpp_type == "long long" then
+					final_value = ctx:to_long_long(value_code, tp)
+				elseif cpp_type == "double" then
+					final_value = ctx:to_double(value_code, tp)
+				elseif cpp_type == "bool" then
+					final_value = ctx:to_bool(value_code, tp)
+				elseif cpp_type == "std::string_view" then
+					final_value = ctx:to_string_view(value_code, tp)
+				end
+				
+				target_code = cpp_name .. " = " .. final_value .. ";\n"
 			else
 				target_code = translate_assignment_target(ctx, var_node, value_code, depth)
 			end
@@ -2100,62 +2137,146 @@ local function analyze_overrides(ast, ctx)
 		elseif tag == "number" then return "double"
 		elseif tag == "boolean" then return "bool"
 		elseif tag == "string" then return "std::string_view"
+		elseif tag == "table_constructor" then return "LuaObject"
+		elseif tag == "function_declaration" then return "LuaObject"
 		
 		elseif tag == "identifier" then
-			local known = current_var_types[node[3]]
-			if known then
+			local name = node[3]
+			if name == "true" or name == "false" then return "bool" end
+			if name == "nil" then return "LuaValue" end
+
+			local types = current_var_types[name]
+			if types then
 				local count = 0
 				local last_t
-				for t, _ in pairs(known) do count = count + 1; last_t = t end
+				for t, _ in pairs(types) do
+					count = count + 1
+					last_t = t
+				end
 				if count == 1 then return last_t end
 			end
 			return "LuaValue"
 	
 		elseif tag == "binary_expression" then
+			local op = node[2]
+			if op == "==" or op == "~=" or op == "<" or op == ">" or op == "<=" or op == ">=" then
+				return "bool"
+			end
+
 			local left = infer_node_type(node[5][1], current_var_types)
 			local right = infer_node_type(node[5][2], current_var_types)
-			local op = node[2]
+
+			if op == "and" or op == "or" then
+				if left == right then return left end
+				if (left == "long long" or left == "double") and (right == "long long" or right == "double") then
+					return "double"
+				end
+				return "LuaValue"
+			end
 	
 			if (left == "long long" or left == "double") and (right == "long long" or right == "double") then
 				if op == "/" or op == "^" then return "double" end
 				if left == "double" or right == "double" then return "double" end
 				return "long long"
 			end
-			if op == ".." then return "std::string" end
-			if op == "==" or op == "<" or op == ">" then return "bool" end
+			if op == ".." then return "LuaValue" end
+		elseif tag == "unary_expression" then
+			local op = node[2]
+			if op == "not" then return "bool" end
+			if op == "#" then return "long long" end
+			if op == "-" or op == "~" then
+				return infer_node_type(node[5][1], current_var_types)
+			end
+		elseif tag == "call_expression" or tag == "method_call_expression" then
+			-- Some builtins we can infer
+			local func_node = node[5][1]
+			if func_node[1] == "member_expression" then
+				local base = func_node[5][1]
+				local member = func_node[5][2]
+				if base[3] == "math" then
+					if member[3] == "random" or member[3] == "sin" or member[3] == "cos" or member[3] == "tan" or member[3] == "sqrt" or member[3] == "log" or member[3] == "exp" then
+						return "double"
+					end
+					if member[3] == "abs" or member[3] == "floor" or member[3] == "ceil" then
+						return infer_node_type(node[5][2], current_var_types)
+					end
+				elseif base[3] == "string" then
+					if member[3] == "len" or member[3] == "byte" then return "long long" end
+					-- Dynamic string operations should return LuaValue for C++ compatibility
+					if member[3] == "sub" or member[3] == "format" or member[3] == "char" then return "LuaValue" end
+				end
+			elseif func_node[1] == "identifier" then
+				if func_node[3] == "tonumber" then return "double" end
+				if func_node[3] == "tostring" then return "LuaValue" end
+				if func_node[3] == "type" then return "std::string_view" end
+			end
 		end
 		
 		return "LuaValue"
 	end
 
-	local function scan(node)
+	local function scan(node, current_var_types)
 		if not node or type(node) ~= "table" then return end
 		
-		if node[1] == "string" then
+		local tag = node[1]
+		if tag == "string" then
 			local s = node[2]
 			ctx.string_counts[s] = (ctx.string_counts[s] or 0) + 1
 		
-		elseif node[1] == "identifier" then
+		elseif tag == "identifier" then
 			local name = node[3]
-			if not ctx:is_declared(name) then
+			if not (name == "true" or name == "false" or name == "nil") then
 				ctx.string_counts[name] = (ctx.string_counts[name] or 0) + 1
 			end
 
-		elseif node[1] == "member_expression" or node[1] == "method_call_expression" then
+		elseif tag == "member_expression" or tag == "method_call_expression" then
 			local member_node = node[5][2]
 			if member_node and member_node[3] then
 				local s = member_node[3]
 				ctx.string_counts[s] = (ctx.string_counts[s] or 0) + 1
 			end
+		
+		elseif tag == "local_declaration" then
+			local var_list = node[5][1][5]
+			local expr_list = node[5][2] and node[5][2][5] or {}
+			for i, var_node in ipairs(var_list) do
+				local name = var_node[3]
+				local tp = "LuaValue"
+				if i <= #expr_list then
+					tp = infer_node_type(expr_list[i], current_var_types)
+				end
+				if not var_types[name] then var_types[name] = {} end
+				var_types[name][tp] = true
+				current_var_types[name] = var_types[name]
+			end
+		
+		elseif tag == "assignment" then
+			local var_list = node[5][1][5]
+			local expr_list = node[5][2][5]
+			for i, var_node in ipairs(var_list) do
+				if var_node[1] == "identifier" then
+					local name = var_node[3]
+					reassigned_vars[name] = true
+					local tp = "LuaValue"
+					if i <= #expr_list then
+						tp = infer_node_type(expr_list[i], current_var_types)
+					end
+					if not var_types[name] then var_types[name] = {} end
+					var_types[name][tp] = true
+					current_var_types[name] = var_types[name]
+				end
+			end
 		end
 
 		local children = node[5]
 		if children then
-			for i = 1, #children do scan(children[i]) end
+			for i = 1, #children do 
+				scan(children[i], current_var_types) 
+			end
 		end
 	end
 	
-	scan(ast)
+	scan(ast, {})
 	ctx.overrides = overrides
 	ctx.reassigned_vars = reassigned_vars
 	ctx.var_types = var_types

@@ -258,6 +258,16 @@ error:
 	throw std::runtime_error("Type error: expected number.");
 }
 
+inline std::string_view get_string_view(const LuaValue& value) {
+	if (const std::string_view* sv = std::get_if<std::string_view>(&value)) [[likely]] {
+		return *sv;
+	}
+	if (const std::string* s = std::get_if<std::string>(&value)) [[likely]] {
+		return *s;
+	}
+	throw std::runtime_error("Type error: expected string.");
+}
+
 inline long long get_long_long(const LuaValue& value) {
 	if (std::holds_alternative<long long>(value)) [[likely]] {
 		return std::get<long long>(value);
