@@ -1095,11 +1095,17 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	local args_code, is_vector, num_args = build_args_code(ctx, node, 2, depth, nil)
 	local translated_func_access
 	local is_known_local = false
+	local is_direct_callable = false
+	local direct_callable_info = nil
 	if func_node[1] == "identifier" then
 		local decl_info = ctx:is_declared(func_node[3])
 		if decl_info then
 			is_known_local = true
-			if type(decl_info) == "table" and decl_info.is_ptr then
+			if type(decl_info) == "table" and decl_info.is_direct_callable then
+				is_direct_callable = true
+				direct_callable_info = decl_info
+				translated_func_access = sanitize_cpp_identifier(func_node[3])
+			elseif type(decl_info) == "table" and decl_info.is_ptr then
 				translated_func_access = "(*" .. decl_info.ptr_name .. ")"
 			else
 				translated_func_access = sanitize_cpp_identifier(func_node[3])
@@ -1113,6 +1119,45 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 		end
 	else
 		translated_func_access = translate_node(ctx, func_node, depth + 1)
+	end
+	
+	-- Direct callable path: call the auto lambda directly without virtual dispatch
+	if is_direct_callable then
+		if not opts.multiret and not is_vector and num_args <= 3 and direct_callable_info.has_specialized then
+			-- Use the specialized lambda for single-return, small arity calls
+			local call_expr = direct_callable_info.specialized_name .. "(" .. args_code .. ")"
+			if opts.no_temp then
+				return call_expr, "LuaValue"
+			elseif opts.discard then
+				ctx:add_statement(call_expr .. ";\n")
+				return ""
+			else
+				local temp_var = "call_res_" .. ctx:get_unique_id()
+				ctx:add_statement("LuaValue " .. temp_var .. " = " .. call_expr .. ";\n")
+				return temp_var
+			end
+		else
+			-- Use the variadic lambda directly
+			if is_vector then
+				ctx:add_statement(translated_func_access .. "(" .. args_code .. ".data(), " .. args_code .. ".size(), " .. ctx:use_ret_buf() .. ");\n")
+			elseif args_code == "" then
+				ctx:add_statement(translated_func_access .. "(nullptr, 0, " .. ctx:use_ret_buf() .. ");\n")
+			else
+				local args_arr = "args_" .. ctx:get_unique_id()
+				ctx:add_statement("const LuaValue " .. args_arr .. "[] = {" .. args_code .. "};\n")
+				ctx:add_statement(translated_func_access .. "(" .. args_arr .. ", " .. num_args .. ", " .. ctx:use_ret_buf() .. ");\n")
+			end
+			
+			if opts.discard then
+				return ""
+			elseif opts.multiret then
+				return ctx:use_ret_buf()
+			else
+				local temp_var = "call_res_" .. ctx:get_unique_id()
+				ctx:add_statement("LuaValue " .. temp_var .. " = get_return_value(" .. ctx:use_ret_buf() .. ", 0);\n")
+				return temp_var
+			end
+		end
 	end
 	
 	if not opts.multiret and not is_vector and num_args <= 3 then
@@ -1692,14 +1737,34 @@ end)
 
 register_handler("function_declaration", function(ctx, node, depth)
 	local ptr_name = nil
-	
-	if node:meta().is_local and node[3] then
-		ptr_name = node[3] .. "_ptr_" .. ctx:get_unique_id()
-		local sanitized_var_name = sanitize_cpp_identifier(node[3])
+	local func_name = node[3]
+	local is_local = node:meta().is_local
+	local is_non_escaping = is_local and func_name and ctx.non_escaping_functions and ctx.non_escaping_functions[func_name]
+
+	-- Non-escaping path: skip shared_ptr pre-declaration
+	if is_local and func_name and not is_non_escaping then
+		ptr_name = func_name .. "_ptr_" .. ctx:get_unique_id()
+		local sanitized_var_name = sanitize_cpp_identifier(func_name)
 		ctx:declare_variable(sanitized_var_name, { is_ptr = true, ptr_name = ptr_name })
 	end
 	
 	local var_lambda, spec_lambda, arity = translate_function_body(ctx, node, depth)
+	
+	-- Non-escaping local functions: emit direct auto lambdas
+	if is_non_escaping then
+		local var_name = sanitize_cpp_identifier(func_name)
+		local spec_name = var_name .. "_spec_" .. ctx:get_unique_id()
+		local decl_info = { is_direct_callable = true, has_specialized = (spec_lambda ~= nil), specialized_name = spec_name }
+		ctx:declare_variable(func_name, decl_info)
+		
+		local prev_stmts = ctx:flush_statements()
+		local result = prev_stmts .. "auto " .. var_name .. " = " .. var_lambda .. ";\n"
+		if spec_lambda then
+			result = result .. "auto " .. spec_name .. " = " .. spec_lambda .. ";\n"
+		end
+		return result
+	end
+	
 	local callable_expr
 	if spec_lambda then
 		callable_expr = "make_specialized_callable<" .. arity .. ">(" .. var_lambda .. ", " .. spec_lambda .. ")"
@@ -1707,23 +1772,23 @@ register_handler("function_declaration", function(ctx, node, depth)
 		callable_expr = "make_lua_callable(" .. var_lambda .. ")"
 	end
 	
-	if node:meta().is_local and node[3] then
-		local var_name = sanitize_cpp_identifier(node[3])
-		ctx:declare_variable(node[3])
+	if is_local and func_name then
+		local var_name = sanitize_cpp_identifier(func_name)
+		ctx:declare_variable(func_name)
 	end
 	
 	if node:meta().method_name  ~= nil then
 		local prev_stmts = ctx:flush_statements()
-		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(node[3]) .. ")->set(\"" .. node:meta().method_name .. "\", " .. callable_expr .. ");\n"
-	elseif node[3] ~= nil then
+		return prev_stmts .. "get_object(" .. sanitize_cpp_identifier(func_name) .. ")->set(\"" .. node:meta().method_name .. "\", " .. callable_expr .. ");\n"
+	elseif func_name ~= nil then
 		local prev_stmts = ctx:flush_statements()
-		if node:meta().is_local  then
-			local var_name = sanitize_cpp_identifier(node[3])
+		if is_local then
+			local var_name = sanitize_cpp_identifier(func_name)
 			return prev_stmts .. "auto " .. ptr_name .. " = std::make_shared<LuaValue>();\n" ..
 				"*" .. ptr_name .. " = " .. callable_expr .. ";\n" ..
 				"LuaValue " .. var_name .. " = *" .. ptr_name .. ";\n"
 		else
-			return prev_stmts .. "_G->set(\"" .. node[3] .. "\", " .. callable_expr .. ");\n"
+			return prev_stmts .. "_G->set(\"" .. func_name .. "\", " .. callable_expr .. ");\n"
 		end
 	else
 		return callable_expr
@@ -2123,11 +2188,28 @@ end
 -- Analysis: Override Detection
 --------------------------------------------------------------------------------
 
+-- Helper: Check if a subtree contains an identifier with the given name
+local function tree_contains_identifier(node, name)
+	if not node or type(node) ~= "table" then return false end
+	if node[1] == "identifier" and node[3] == name then return true end
+	local children = node[5]
+	if children then
+		for i = 1, #children do
+			if tree_contains_identifier(children[i], name) then return true end
+		end
+	end
+	return false
+end
+
 local function analyze_overrides(ast, ctx)
 	local overrides = { math = false, string = false, os = false }
 	local reassigned_vars = {}
 	local var_types = {}
 	ctx.string_counts = {}
+
+	-- Escape analysis state
+	local local_functions = {}      -- name -> function_declaration node
+	local escaping_functions = {}   -- name -> true
 
 	local function infer_node_type(node, current_var_types)
 		if not node then return "LuaValue" end
@@ -2215,6 +2297,13 @@ local function analyze_overrides(ast, ctx)
 		return "LuaValue"
 	end
 
+	-- Helper to mark an identifier as escaping if it's a tracked local function
+	local function mark_if_escaping(node)
+		if node and node[1] == "identifier" and local_functions[node[3]] then
+			escaping_functions[node[3]] = true
+		end
+	end
+
 	local function scan(node, current_var_types)
 		if not node or type(node) ~= "table" then return end
 		
@@ -2265,7 +2354,46 @@ local function analyze_overrides(ast, ctx)
 					var_types[name][tp] = true
 					current_var_types[name] = var_types[name]
 				end
+				-- Escape: value assigned to table member/index
+				if (var_node[1] == "member_expression" or var_node[1] == "table_index_expression") and i <= #expr_list then
+					mark_if_escaping(expr_list[i])
+				end
 			end
+		end
+
+		-- Escape: function_declaration tracks local functions
+		if tag == "function_declaration" then
+			if node[6] and node[6].is_local and node[3] then
+				local_functions[node[3]] = node
+			end
+		end
+
+		-- Escape: call arguments (not callee) that are local function identifiers
+		if tag == "call_expression" and node[5] then
+			for i = 2, #node[5] do
+				mark_if_escaping(node[5][i])
+			end
+		end
+		if tag == "method_call_expression" and node[5] then
+			for i = 3, #node[5] do
+				mark_if_escaping(node[5][i])
+			end
+		end
+
+		-- Escape: return statement values
+		if tag == "return_statement" and node[5] then
+			local expr_list = node[5][1]
+			if expr_list and expr_list[5] then
+				for _, expr in ipairs(expr_list[5]) do
+					mark_if_escaping(expr)
+				end
+			end
+		end
+
+		-- Escape: table field values
+		if tag == "table_field" and node[5] then
+			local value_node = node[5][2] or node[5][1]
+			mark_if_escaping(value_node)
 		end
 
 		local children = node[5]
@@ -2277,9 +2405,23 @@ local function analyze_overrides(ast, ctx)
 	end
 	
 	scan(ast, {})
+
+	-- Build non_escaping_functions: local functions that don't escape and aren't self-recursive
+	local non_escaping_functions = {}
+	for name, func_node in pairs(local_functions) do
+		if not escaping_functions[name] and not reassigned_vars[name] then
+			-- Check for self-recursion: does the function body reference its own name?
+			local body_node = func_node[5] and func_node[5][2]
+			if body_node and not tree_contains_identifier(body_node, name) then
+				non_escaping_functions[name] = true
+			end
+		end
+	end
+
 	ctx.overrides = overrides
 	ctx.reassigned_vars = reassigned_vars
 	ctx.var_types = var_types
+	ctx.non_escaping_functions = non_escaping_functions
 end
 
 --------------------------------------------------------------------------------
