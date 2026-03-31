@@ -194,9 +194,14 @@ namespace LuaPattern {
 // --- Helper Functions ---
 
 inline std::string_view get_sv(const LuaValue& v) {
-	if (const auto* s = std::get_if<std::string>(&v)) return *s;
-	if (const auto* sv = std::get_if<std::string_view>(&v)) return *sv;
-	return "";
+	switch (v.index()) {
+		case INDEX_STRING:
+			return std::get<std::string>(v);
+		case INDEX_STRING_VIEW:
+			return std::get<std::string_view>(v);
+		default:
+			return "";
+	}
 }
 
 std::string fast_get_string(const LuaValue& v) {
@@ -500,12 +505,48 @@ void string_gsub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 			// Handle replacement logic
 			std::string_view r_text;
 			bool is_string_repl = false;
-			if (const auto* s = std::get_if<std::string>(&repl)) {
-				r_text = *s;
-				is_string_repl = true;
-			} else if (const auto* sv = std::get_if<std::string_view>(&repl)) {
-				r_text = *sv;
-				is_string_repl = true;
+
+			switch (repl.index()) {
+				case INDEX_STRING:
+					r_text = std::get<std::string>(repl);
+					is_string_repl = true;
+					break;
+				case INDEX_STRING_VIEW:
+					r_text = std::get<std::string_view>(repl);
+					is_string_repl = true;
+					break;
+				case INDEX_FUNCTION: {
+					auto& r_func = std::get<std::shared_ptr<LuaCallable>>(repl);
+					// Function replacement
+					callback_args.clear();
+					if (ms.level == 0) callback_args.push_back(std::string(curr, res - curr));
+					else {
+						for (int i = 0; i < ms.level; ++i)
+							callback_args.push_back(std::string(ms.capture[i].init, ms.capture[i].len));
+					}
+					LuaValueVector cb_res;
+					r_func->call(callback_args.data(), callback_args.size(), cb_res);
+					if (!cb_res.empty() && cb_res[0].index() != INDEX_NIL)
+						result.append(fast_get_string(cb_res[0]));
+					else
+						result.append(curr, res - curr);
+					break;
+				}
+				case INDEX_OBJECT: {
+					auto& r_obj = std::get<std::shared_ptr<LuaObject>>(repl);
+					// Table replacement
+					std::string key = (ms.level == 0)
+						                  ? std::string(curr, res - curr)
+						                  : std::string(ms.capture[0].init, ms.capture[0].len);
+					auto val = r_obj->get(key);
+					if (val.index() != INDEX_NIL)
+						result.append(fast_get_string(val));
+					else
+						result.append(curr, res - curr);
+					break;
+				}
+				default:
+					break;
 			}
 
 			if (is_string_repl) {
@@ -531,32 +572,6 @@ void string_gsub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 						result += r_text[i];
 					}
 				}
-			}
-			else if (auto* r_func = std::get_if<std::shared_ptr<LuaCallable>>(&repl)) {
-				// Function replacement
-				callback_args.clear();
-				if (ms.level == 0) callback_args.push_back(std::string(curr, res - curr));
-				else {
-					for (int i = 0; i < ms.level; ++i)
-						callback_args.push_back(std::string(ms.capture[i].init, ms.capture[i].len));
-				}
-				LuaValueVector cb_res;
-				(*r_func)->call(callback_args.data(), callback_args.size(), cb_res);
-				if (!cb_res.empty() && !std::holds_alternative<std::monostate>(cb_res[0]))
-					result.append(fast_get_string(cb_res[0]));
-				else
-					result.append(curr, res - curr);
-			}
-			else if (auto* r_obj = std::get_if<std::shared_ptr<LuaObject>>(&repl)) {
-				// Table replacement
-				std::string key = (ms.level == 0)
-					                  ? std::string(curr, res - curr)
-					                  : std::string(ms.capture[0].init, ms.capture[0].len);
-				auto val = (*r_obj)->get(key);
-				if (!std::holds_alternative<std::monostate>(val))
-					result.append(fast_get_string(val));
-				else
-					result.append(curr, res - curr);
 			}
 
 			last_match_end = res;

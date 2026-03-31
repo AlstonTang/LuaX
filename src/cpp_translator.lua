@@ -1163,7 +1163,7 @@ register_handler("call_expression", function(ctx, node, depth, opts)
 	if not opts.multiret and not is_vector and num_args <= 3 then
 		local call_expr
 		if is_known_local then
-			call_expr = "get_callable(" .. translated_func_access .. ")->call" .. num_args .. "(" .. args_code .. ")"
+			call_expr = "get_callable(" .. translated_func_access .. ")->call" .. num_args .. "(" .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
 		else
 			call_expr = "lua_call" .. num_args .. "(" .. translated_func_access .. ", " .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
 		end
@@ -1349,7 +1349,7 @@ register_handler("method_call_expression", function(ctx, node, depth, opts)
 	if not opts.multiret and not is_vector and num_args <= 3 then
 		local call_expr
 		if is_known_local_base then
-			call_expr = "get_callable(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "))->call" .. num_args .. "(" .. (args_code ~= "" and args_code or "") .. ")"
+			call_expr = "get_callable(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "))->call" .. num_args .. "(" .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
 		else
 			call_expr = "lua_call" .. num_args .. "(lua_get_member(" .. base_code .. ", " .. method_cache_var .. "), " .. ctx:use_ret_buf() .. (args_code ~= "" and (", " .. args_code) or "") .. ")"
 		end

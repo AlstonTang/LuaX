@@ -11,12 +11,22 @@
 void package_searchpath(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string name = to_cpp_string(args[0]);
 	std::string path = to_cpp_string(args[1]);
-	std::string sep = n_args >= 3 && std::holds_alternative<std::string>(args[2])
-		                  ? std::get<std::string>(args[2])
-		                  : ".";
-	std::string rep = n_args >= 4 && std::holds_alternative<std::string>(args[3])
-		                  ? std::get<std::string>(args[3])
-		                  : "/";
+	std::string sep = ".";
+	if (n_args >= 3) {
+		switch (args[2].index()) {
+			case INDEX_STRING: sep = std::get<std::string>(args[2]); break;
+			case INDEX_STRING_VIEW: sep = std::string(std::get<std::string_view>(args[2])); break;
+			default: break;
+		}
+	}
+	std::string rep = "/";
+	if (n_args >= 4) {
+		switch (args[3].index()) {
+			case INDEX_STRING: rep = std::get<std::string>(args[3]); break;
+			case INDEX_STRING_VIEW: rep = std::string(std::get<std::string_view>(args[3])); break;
+			default: break;
+		}
+	}
 
 	// Replace dots in name with replacement string
 	std::string filename = name;

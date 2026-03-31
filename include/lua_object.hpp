@@ -26,10 +26,10 @@ struct LuaCallable {
 	virtual void call(const LuaValue* args, size_t n_args, LuaValueVector& out_result) = 0;
 
 	// Optimization: Direct overloads for single-return calls
-	virtual LuaValue call0();
-	virtual LuaValue call1(const LuaValue& a1);
-	virtual LuaValue call2(const LuaValue& a1, const LuaValue& a2);
-	virtual LuaValue call3(const LuaValue& a1, const LuaValue& a2, const LuaValue& a3);
+	virtual LuaValue call0(LuaValueVector& out);
+	virtual LuaValue call1(LuaValueVector& out, const LuaValue& a1);
+	virtual LuaValue call2(LuaValueVector& out, const LuaValue& a1, const LuaValue& a2);
+	virtual LuaValue call3(LuaValueVector& out, const LuaValue& a1, const LuaValue& a2, const LuaValue& a3);
 };
 
 // Generic template to wrap ANY lambda/callable without std::function overhead
@@ -57,7 +57,7 @@ struct LuaSpecializedCallable<0, FVar, F0> final : public LuaCallable {
 	FVar f_var; F0 f0;
 	LuaSpecializedCallable(FVar&& v, F0&& s) : f_var(std::forward<FVar>(v)), f0(std::forward<F0>(s)) {}
 	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
-	LuaValue call0() override { return f0(); }
+	LuaValue call0(LuaValueVector& /*out*/) override { return f0(); }
 };
 
 template <typename FVar, typename F1>
@@ -65,7 +65,7 @@ struct LuaSpecializedCallable<1, FVar, F1> final : public LuaCallable {
 	FVar f_var; F1 f1;
 	LuaSpecializedCallable(FVar&& v, F1&& s) : f_var(std::forward<FVar>(v)), f1(std::forward<F1>(s)) {}
 	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
-	LuaValue call1(const LuaValue& a1) override { return f1(a1); }
+	LuaValue call1(LuaValueVector& /*out*/, const LuaValue& a1) override { return f1(a1); }
 };
 
 template <typename FVar, typename F2>
@@ -73,7 +73,7 @@ struct LuaSpecializedCallable<2, FVar, F2> final : public LuaCallable {
 	FVar f_var; F2 f2;
 	LuaSpecializedCallable(FVar&& v, F2&& s) : f_var(std::forward<FVar>(v)), f2(std::forward<F2>(s)) {}
 	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
-	LuaValue call2(const LuaValue& a1, const LuaValue& a2) override { return f2(a1, a2); }
+	LuaValue call2(LuaValueVector& /*out*/, const LuaValue& a1, const LuaValue& a2) override { return f2(a1, a2); }
 };
 
 template <typename FVar, typename F3>
@@ -81,7 +81,7 @@ struct LuaSpecializedCallable<3, FVar, F3> final : public LuaCallable {
 	FVar f_var; F3 f3;
 	LuaSpecializedCallable(FVar&& v, F3&& s) : f_var(std::forward<FVar>(v)), f3(std::forward<F3>(s)) {}
 	void call(const LuaValue* args, size_t n, LuaValueVector& out) override { f_var(args, n, out); }
-	LuaValue call3(const LuaValue& a1, const LuaValue& a2, const LuaValue& a3) override { return f3(a1, a2, a3); }
+	LuaValue call3(LuaValueVector& /*out*/, const LuaValue& a1, const LuaValue& a2, const LuaValue& a3) override { return f3(a1, a2, a3); }
 };
 
 template <size_t Arity, typename FVar, typename FSpec>
@@ -232,26 +232,34 @@ void print_value(const LuaValue& value);
 void luax_cleanup();
 
 inline double get_double(const LuaValue& value) {
-	if (const double* val = std::get_if<double>(&value)) [[likely]] {
-		return *val;
-	}
-
-	if (const long long* val = std::get_if<long long>(&value)) [[likely]] {
-		return static_cast<double>(*val);
-	}
-
-	if (const std::string* str = std::get_if<std::string>(&value)) {
-		if (str->empty()) {
-			// Original stod throws on empty, so we fall through to the error
-			goto error;
+	switch (value.index()) {
+		case INDEX_DOUBLE:
+			return std::get<double>(value);
+		case INDEX_INTEGER:
+			return static_cast<double>(std::get<long long>(value));
+		case INDEX_STRING: {
+			const std::string& s = std::get<std::string>(value);
+			if (s.empty()) goto error;
+			char* end;
+			double result = std::strtod(s.c_str(), &end);
+			if (end != s.c_str()) return result;
+			break;
 		}
-
-		char* end;
-		double result = std::strtod(str->c_str(), &end);
-
-		if (end != str->c_str()) {
-			return result;
+		case INDEX_STRING_VIEW: {
+			std::string_view sv = std::get<std::string_view>(value);
+			if (sv.empty()) goto error;
+			// For string_view, we need a null-terminated string or a different parser
+			// Standard behavior for Lua's tonumber is to use strtod
+			// For efficiency, we just convert to string and use strtod for now
+			// Alternatively, use from_chars if available for double (C++17)
+			std::string s(sv);
+			char* end;
+			double result = std::strtod(s.c_str(), &end);
+			if (end != s.c_str()) return result;
+			break;
 		}
+		default:
+			break;
 	}
 
 error:
@@ -259,47 +267,46 @@ error:
 }
 
 inline std::string_view get_string_view(const LuaValue& value) {
-	if (const std::string_view* sv = std::get_if<std::string_view>(&value)) [[likely]] {
-		return *sv;
+	switch (value.index()) {
+		case INDEX_STRING_VIEW:
+			return std::get<std::string_view>(value);
+		case INDEX_STRING:
+			return std::get<std::string>(value);
+		default:
+			throw std::runtime_error("Type error: expected string.");
 	}
-	if (const std::string* s = std::get_if<std::string>(&value)) [[likely]] {
-		return *s;
-	}
-	throw std::runtime_error("Type error: expected string.");
 }
 
 inline long long get_long_long(const LuaValue& value) {
-	if (std::holds_alternative<long long>(value)) [[likely]] {
-		return std::get<long long>(value);
-	}
-	else if (std::holds_alternative<double>(value)) [[likely]] {
-		return static_cast<long long>(std::get<double>(value));
-	}
-	else if (std::holds_alternative<std::string>(value)) {
-		try {
-			return std::stoll(std::get<std::string>(value));
-		}
-		catch (...) {
-			// Fall through
-		}
+	switch (value.index()) {
+		case INDEX_INTEGER:
+			return std::get<long long>(value);
+		case INDEX_DOUBLE:
+			return static_cast<long long>(std::get<double>(value));
+		case INDEX_STRING:
+			try {
+				return std::stoll(std::get<std::string>(value));
+			} catch (...) {}
+			break;
+		default:
+			break;
 	}
 	throw std::runtime_error("Type error: expected integer.");
 }
 
 inline const std::shared_ptr<LuaObject>& get_object(const LuaValue& value) {
-	if (std::holds_alternative<std::shared_ptr<LuaObject>>(value)) [[likely]] {
-		return std::get<std::shared_ptr<LuaObject>>(value);
+	switch (value.index()) {
+		case INDEX_OBJECT:
+			return std::get<std::shared_ptr<LuaObject>>(value);
+		case INDEX_NIL:
+			throw std::runtime_error("Type error: expected table or userdata, got nil.");
+		case INDEX_DOUBLE:
+			throw std::runtime_error("Type error: expected table or userdata, got number.");
+		case INDEX_INTEGER:
+			throw std::runtime_error("Type error: expected table or userdata, got integer.");
+		default:
+			throw std::runtime_error("Type error: expected table or userdata, got unknown.");
 	}
-	if (std::holds_alternative<std::monostate>(value))
-		throw std::runtime_error(
-			"Type error: expected table or userdata, got nil.");
-	if (std::holds_alternative<double>(value))
-		throw std::runtime_error(
-			"Type error: expected table or userdata, got number.");
-	if (std::holds_alternative<long long>(value))
-		throw std::runtime_error(
-			"Type error: expected table or userdata, got integer.");
-	throw std::runtime_error("Type error: expected table or userdata, got unknown.");
 }
 
 inline const std::shared_ptr<LuaObject>& get_object(const std::shared_ptr<LuaObject>& obj) {
@@ -360,7 +367,7 @@ inline LuaValue lua_call0(const LuaValue& callable, LuaValueVector& out) {
 		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
 	}
 	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) {
-		return (*callable_ptr)->call0();
+		return (*callable_ptr)->call0(out);
 	}
 	call_lua_value(callable, nullptr, 0, out);
 	return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
@@ -374,7 +381,7 @@ inline LuaValue lua_call1(const LuaValue& callable, LuaValueVector& out, const L
 		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
 	}
 	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) {
-		return (*callable_ptr)->call1(a1);
+		return (*callable_ptr)->call1(out, a1);
 	}
 	const LuaValue args[] = {a1};
 	call_lua_value(callable, args, 1, out);
@@ -389,7 +396,7 @@ inline LuaValue lua_call2(const LuaValue& callable, LuaValueVector& out, const L
 		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
 	}
 	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) {
-		return (*callable_ptr)->call2(a1, a2);
+		return (*callable_ptr)->call2(out, a1, a2);
 	}
 	const LuaValue args[] = {a1, a2};
 	call_lua_value(callable, args, 2, out);
@@ -404,7 +411,7 @@ inline LuaValue lua_call3(const LuaValue& callable, LuaValueVector& out, const L
 		return out.empty() ? LuaValue(std::monostate{}) : std::move(out[0]);
 	}
 	if (const auto* callable_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&callable)) {
-		return (*callable_ptr)->call3(a1, a2, a3);
+		return (*callable_ptr)->call3(out, a1, a2, a3);
 	}
 	const LuaValue args[] = {a1, a2, a3};
 	call_lua_value(callable, args, 3, out);
@@ -535,14 +542,19 @@ inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_
 			if (obj && obj->metatable) {
 				LuaValue call_handler = obj->metatable->get_item("__call");
 				if (is_lua_truthy(call_handler)) {
-					// Optimization: Reuse a thread-local buffer to avoid heap allocation
-					thread_local LuaValueVector scratch_args;
-					scratch_args.clear();
-					scratch_args.reserve(n_args + 1);
-					scratch_args.push_back(callable); 
-					for(size_t i=0; i<n_args; ++i) scratch_args.push_back(args[i]);
-					
-					call_lua_value(call_handler, scratch_args.data(), scratch_args.size(), out_result);
+					// Optimization: Use a fast stack array for most calls, avoiding TLS and heap overhead.
+					if (n_args <= 7) [[likely]] {
+						LuaValue stack_args[8];
+						stack_args[0] = callable;
+						for (size_t i = 0; i < n_args; ++i) stack_args[i + 1] = args[i];
+						call_lua_value(call_handler, stack_args, n_args + 1, out_result);
+					} else {
+						LuaValueVector heap_args;
+						heap_args.reserve(n_args + 1);
+						heap_args.push_back(callable); 
+						for (size_t i = 0; i < n_args; ++i) heap_args.push_back(args[i]);
+						call_lua_value(call_handler, heap_args.data(), heap_args.size(), out_result);
+					}
 					return;
 				}
 			}

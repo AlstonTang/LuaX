@@ -190,18 +190,29 @@ void LuaCoroutine::yield(const LuaValue* yield_args, size_t n_args, LuaValueVect
 // --- Bindings ---
 
 void coroutine_create(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCallable>>(args[0])) {
-		out.push_back(LuaValue(std::make_shared<LuaCoroutine>(std::get<std::shared_ptr<LuaCallable>>(args[0]))));
-		return;
+	if (n_args > 0) {
+		switch (args[0].index()) {
+			case INDEX_FUNCTION:
+				out.push_back(LuaValue(std::make_shared<LuaCoroutine>(std::get<std::shared_ptr<LuaCallable>>(args[0]))));
+				return;
+			default:
+				break;
+		}
 	}
 	throw std::runtime_error("function expected");
 }
 
 void coroutine_resume(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) {
-		auto co = std::get<std::shared_ptr<LuaCoroutine>>(args[0]);
-		co->resume(n_args > 1 ? args + 1 : nullptr, n_args > 1 ? n_args - 1 : 0, out);
-		return;
+	if (n_args > 0) {
+		switch (args[0].index()) {
+			case INDEX_COROUTINE: {
+				auto co = std::get<std::shared_ptr<LuaCoroutine>>(args[0]);
+				co->resume(n_args > 1 ? args + 1 : nullptr, n_args > 1 ? n_args - 1 : 0, out);
+				return;
+			}
+			default:
+				break;
+		}
 	}
 	throw std::runtime_error("thread expected");
 }
@@ -211,11 +222,17 @@ void coroutine_yield(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void coroutine_status(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) {
-		auto co = std::get<std::shared_ptr<LuaCoroutine>>(args[0]);
-		const char* s = (co->status == LuaCoroutine::Status::DEAD) ? "dead" : "suspended";
-		out.push_back(LuaValue(std::string_view(s)));
-		return;
+	if (n_args > 0) {
+		switch (args[0].index()) {
+			case INDEX_COROUTINE: {
+				auto co = std::get<std::shared_ptr<LuaCoroutine>>(args[0]);
+				const char* s = (co->status == LuaCoroutine::Status::DEAD) ? "dead" : "suspended";
+				out.push_back(LuaValue(std::string_view(s)));
+				return;
+			}
+			default:
+				break;
+		}
 	}
 	out.push_back(LuaValue(std::string_view("invalid")));
 }
@@ -234,8 +251,14 @@ void coroutine_wrap(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		co->resume(a, n, w_out);
 		if (w_out.empty()) return;
 		
-		if (std::holds_alternative<bool>(w_out[0]) && !std::get<bool>(w_out[0])) {
-			throw std::runtime_error(w_out.size() > 1 ? to_cpp_string(w_out[1]) : "unknown error");
+		switch (w_out[0].index()) {
+			case INDEX_BOOLEAN:
+				if (!std::get<bool>(w_out[0])) {
+					throw std::runtime_error(w_out.size() > 1 ? to_cpp_string(w_out[1]) : "unknown error");
+				}
+				break;
+			default:
+				break;
 		}
 		w_out.erase(w_out.begin());
 		o = std::move(w_out);

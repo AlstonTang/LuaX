@@ -26,30 +26,28 @@ static void ensure_seeded() {
 
 // Helper function to get a number from a LuaValue
 double get_number(const LuaValue& v) {
-	if (const double* val = std::get_if<double>(&v)) {
-		return *val;
-	}
-
-	if (const long long* val = std::get_if<long long>(&v)) {
-		return static_cast<double>(*val);
-	}
-
-	if (const std::string* pStr = std::get_if<std::string>(&v)) {
-		const std::string& s = *pStr;
-
-		if (s.empty()) return 0.0;
-		double result;
-		const char* start = s.data();
-		const char* end = start + s.size();
-
-		auto [ptr, ec] = std::from_chars(start, end, result);
-
-		if (ec == std::errc()) {
-			return result;
+	switch (v.index()) {
+		case INDEX_DOUBLE:
+			return std::get<double>(v);
+		case INDEX_INTEGER:
+			return static_cast<double>(std::get<long long>(v));
+		case INDEX_STRING: {
+			const std::string& s = std::get<std::string>(v);
+			if (s.empty()) return 0.0;
+			double result;
+			auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
+			return (ec == std::errc()) ? result : 0.0;
 		}
+		case INDEX_STRING_VIEW: {
+			std::string_view sv = std::get<std::string_view>(v);
+			if (sv.empty()) return 0.0;
+			double result;
+			auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), result);
+			return (ec == std::errc()) ? result : 0.0;
+		}
+		default:
+			return 0.0;
 	}
-
-	return 0.0;
 }
 
 // math.randomseed
@@ -67,26 +65,30 @@ void math_random(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue arg1 = n_args >= 1 ? args[0] : std::monostate{};
 	LuaValue arg2 = n_args >= 2 ? args[1] : std::monostate{};
 
-	if (std::holds_alternative<std::monostate>(arg1)) {
-		// math.random() returns a float in [0,1)
-		std::uniform_real_distribution<double> distribution(0.0, 1.0);
-		out.assign({distribution(generator)});
-		return;
-	}
-	else if (std::holds_alternative<std::monostate>(arg2)) {
-		// math.random(m) returns an integer in [1, m]
-		int m = static_cast<int>(get_number(arg1));
-		std::uniform_int_distribution<int> distribution(1, m);
-		out.assign({static_cast<double>(distribution(generator))});
-		return;
-	}
-	else {
-		// math.random(m, n) returns an integer in [m, n]
-		int m = static_cast<int>(get_number(arg1));
-		int n = static_cast<int>(get_number(arg2));
-		std::uniform_int_distribution<int> distribution(m, n);
-		out.assign({static_cast<double>(distribution(generator))});
-		return;
+	switch (arg1.index()) {
+		case INDEX_NIL: {
+			// math.random() returns a float in [0,1)
+			std::uniform_real_distribution<double> distribution(0.0, 1.0);
+			out.assign({distribution(generator)});
+			return;
+		}
+		default: {
+			if (arg2.index() == INDEX_NIL) {
+				// math.random(m) returns an integer in [1, m]
+				int m = static_cast<int>(get_number(arg1));
+				std::uniform_int_distribution<int> distribution(1, m);
+				out.assign({static_cast<double>(distribution(generator))});
+				return;
+			}
+			else {
+				// math.random(m, n) returns an integer in [m, n]
+				int m = static_cast<int>(get_number(arg1));
+				int n = static_cast<int>(get_number(arg2));
+				std::uniform_int_distribution<int> distribution(m, n);
+				out.assign({static_cast<double>(distribution(generator))});
+				return;
+			}
+		}
 	}
 }
 
@@ -230,15 +232,17 @@ void math_type(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		out.assign({LuaValue(std::string_view("nil"))});
 		return;
 	}
-	if (std::holds_alternative<double>(args[0])) {
-		out.assign({LuaValue(std::string_view("float"))});
-		return;
+	switch (args[0].index()) {
+		case INDEX_DOUBLE:
+			out.assign({LuaValue(std::string_view("float"))});
+			break;
+		case INDEX_INTEGER:
+			out.assign({LuaValue(std::string_view("integer"))});
+			break;
+		default:
+			out.assign({LuaValue(std::string_view("nil"))});
+			break;
 	}
-	else if (std::holds_alternative<long long>(args[0])) {
-		out.assign({LuaValue(std::string_view("integer"))});
-		return;
-	}
-	out.assign({LuaValue(std::string_view("nil"))});
 	return;
 }
 

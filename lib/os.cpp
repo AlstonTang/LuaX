@@ -20,17 +20,19 @@ void os_execute(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 // os.exit
 void os_exit(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	double code_double = n_args >= 1 && std::holds_alternative<double>(args[0]) ? std::get<double>(args[0]) : 0.0;
-	// bool close = n_args >= 2 && std::holds_alternative<bool>(args[1]) ? std::get<bool>(args[1]) : false;
-	// Lua 5.4 close argument
-
 	int code = 0;
 
-	if (n_args >= 1 && std::holds_alternative<long long>(args[0])) {
-		code = static_cast<int>(std::get<long long>(args[0]));
-	}
-	else {
-		code = static_cast<int>(code_double);
+	if (n_args >= 1) {
+		switch (args[0].index()) {
+			case INDEX_DOUBLE:
+				code = static_cast<int>(std::get<double>(args[0]));
+				break;
+			case INDEX_INTEGER:
+				code = static_cast<int>(std::get<long long>(args[0]));
+				break;
+			default:
+				break;
+		}
 	}
 	// In a real Lua interpreter, 'close' would handle closing the Lua state.
 	// Here, we just exit the C++ program.
@@ -112,12 +114,22 @@ void os_tmpname(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 // os.date
 void os_date(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	std::string format = n_args >= 1 && std::holds_alternative<std::string>(args[0])
-		                     ? std::get<std::string>(args[0])
-		                     : "%c";
+	std::string format = "%c";
+	if (n_args >= 1) {
+		switch (args[0].index()) {
+			case INDEX_STRING: format = std::get<std::string>(args[0]); break;
+			case INDEX_STRING_VIEW: format = std::string(std::get<std::string_view>(args[0])); break;
+			default: break;
+		}
+	}
+
 	time_t timer;
-	if (n_args >= 2 && std::holds_alternative<double>(args[1])) {
-		timer = static_cast<time_t>(std::get<double>(args[1]));
+	if (n_args >= 2) {
+		switch (args[1].index()) {
+			case INDEX_DOUBLE: timer = static_cast<time_t>(std::get<double>(args[1])); break;
+			case INDEX_INTEGER: timer = static_cast<time_t>(std::get<long long>(args[1])); break;
+			default: timer = std::time(nullptr); break;
+		}
 	}
 	else {
 		timer = std::time(nullptr);

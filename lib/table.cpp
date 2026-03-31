@@ -46,14 +46,20 @@ void table_sort(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	}
 
 	LuaValue comp_func_val = (n_args >= 2) ? args[1] : LuaValue(std::monostate{});
-	bool has_comp = std::holds_alternative<std::shared_ptr<LuaCallable>>(comp_func_val);
-	auto comp_func = has_comp ? std::get<std::shared_ptr<LuaCallable>>(comp_func_val) : nullptr;
+	std::shared_ptr<LuaCallable> comp_func = nullptr;
+	switch (comp_func_val.index()) {
+		case INDEX_FUNCTION:
+			comp_func = std::get<std::shared_ptr<LuaCallable>>(comp_func_val);
+			break;
+		default:
+			break;
+	}
 
 	// table.sort usually only sorts the array part (1 to #list)
 	// Since we are using std::vector, we sort the array_part directly.
 	std::sort(table->array_part.begin(), table->array_part.end(),
 	          [&](const LuaValue& a, const LuaValue& b) {
-		          if (has_comp) {
+		          if (comp_func) {
 			          LuaValueVector comp_buffer;
 			          comp_buffer.clear();
 			          LuaValue func_args[] = {a, b};
@@ -127,7 +133,7 @@ void table_concat(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 			               ? table->array_part[k - 1]
 			               : table->get_item(static_cast<double>(k));
 
-		if (std::holds_alternative<std::monostate>(val)) {
+		if (val.index() == INDEX_NIL) {
 			throw std::runtime_error("invalid value (nil) at index " + std::to_string(k) + " in table.concat");
 		}
 

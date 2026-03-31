@@ -20,10 +20,17 @@
 void lua_setmetatable(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (n_args < 2) [[unlikely]] throw std::runtime_error("bad argument #2 to 'setmetatable' (nil or table expected)");
 	if (auto obj = get_object(args[0])) {
-		if (std::holds_alternative<std::monostate>(args[1])) {
-			obj->set_metatable(nullptr);
-		} else if (auto mt = get_object(args[1])) {
-			obj->set_metatable(mt);
+		switch (args[1].index()) {
+			case INDEX_NIL:
+				obj->set_metatable(nullptr);
+				break;
+			case INDEX_OBJECT: {
+				auto mt = std::get<std::shared_ptr<LuaObject>>(args[1]);
+				obj->set_metatable(mt);
+				break;
+			}
+			default:
+				throw std::runtime_error("bad argument #2 to 'setmetatable' (nil or table expected)");
 		}
 		out.assign({args[0]});
 		return;

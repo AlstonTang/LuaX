@@ -345,12 +345,17 @@ void io_tmpfile(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 void io_type(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue val = args[0];
-	if (std::holds_alternative<std::shared_ptr<LuaObject>>(val)) {
-		auto obj = std::get<std::shared_ptr<LuaObject>>(val);
-		if (auto file_handle = std::dynamic_pointer_cast<LuaFile>(obj)) {
-			out.assign({LuaValue(std::string_view(file_handle->is_closed ? "closed file" : "file"))});
-			return;
+	switch (val.index()) {
+		case INDEX_OBJECT: {
+			auto obj = std::get<std::shared_ptr<LuaObject>>(val);
+			if (auto file_handle = std::dynamic_pointer_cast<LuaFile>(obj)) {
+				out.assign({LuaValue(std::string_view(file_handle->is_closed ? "closed file" : "file"))});
+				return;
+			}
+			break;
 		}
+		default:
+			break;
 	}
 	out.assign({std::monostate{}});
 }
@@ -363,29 +368,32 @@ void io_input(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	}
 
 	LuaValue arg = args[0];
-	if (std::holds_alternative<std::monostate>(arg)) {
-		out.assign({current_input_file});
-	}
-	else if (std::holds_alternative<std::string>(arg)) {
-		// Open the file
-		LuaValue open_args[] = {arg, LuaValue(std::string_view("r"))};
-		LuaValueVector res;
-		io_open(open_args, 2, res);
-
-		if (!res.empty() && std::holds_alternative<std::shared_ptr<LuaObject>>(res[0])) {
-			current_input_file = std::get<std::shared_ptr<LuaObject>>(res[0]);
+	switch (arg.index()) {
+		case INDEX_NIL:
 			out.assign({current_input_file});
+			break;
+		case INDEX_STRING: {
+			// Open the file
+			LuaValue open_args[] = {arg, LuaValue(std::string_view("r"))};
+			LuaValueVector res;
+			io_open(open_args, 2, res);
+
+			if (!res.empty() && res[0].index() == INDEX_OBJECT) {
+				current_input_file = std::get<std::shared_ptr<LuaObject>>(res[0]);
+				out.assign({current_input_file});
+			}
+			else {
+				out.assign(res.begin(), res.end()); // Error
+			}
+			break;
 		}
-		else {
-			out.assign(res.begin(), res.end()); // Error
-		}
-	}
-	else if (std::holds_alternative<std::shared_ptr<LuaObject>>(arg)) {
-		current_input_file = std::get<std::shared_ptr<LuaObject>>(arg);
-		out.assign({current_input_file});
-	}
-	else {
-		out.assign({std::monostate{}});
+		case INDEX_OBJECT:
+			current_input_file = std::get<std::shared_ptr<LuaObject>>(arg);
+			out.assign({current_input_file});
+			break;
+		default:
+			out.assign({std::monostate{}});
+			break;
 	}
 }
 
@@ -397,28 +405,31 @@ void io_output(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	}
 
 	LuaValue arg = args[0];
-	if (std::holds_alternative<std::monostate>(arg)) {
-		out.assign({current_output_file});
-	}
-	else if (std::holds_alternative<std::string>(arg)) {
-		LuaValue open_args[] = {arg, LuaValue(std::string_view("w"))};
-		LuaValueVector res;
-		io_open(open_args, 2, res);
-
-		if (!res.empty() && std::holds_alternative<std::shared_ptr<LuaObject>>(res[0])) {
-			current_output_file = std::get<std::shared_ptr<LuaObject>>(res[0]);
+	switch (arg.index()) {
+		case INDEX_NIL:
 			out.assign({current_output_file});
+			break;
+		case INDEX_STRING:
+		case INDEX_STRING_VIEW: {
+			LuaValue open_args[] = {arg, LuaValue(std::string_view("w"))};
+			LuaValueVector res;
+			io_open(open_args, 2, res);
+
+			if (!res.empty() && res[0].index() == INDEX_OBJECT) {
+				current_output_file = std::get<std::shared_ptr<LuaObject>>(res[0]);
+				out.assign({current_output_file});
+			} else {
+				out.assign(res.begin(), res.end());
+			}
+			break;
 		}
-		else {
-			out.assign(res.begin(), res.end());
-		}
-	}
-	else if (std::holds_alternative<std::shared_ptr<LuaObject>>(arg)) {
-		current_output_file = std::get<std::shared_ptr<LuaObject>>(arg);
-		out.assign({current_output_file});
-	}
-	else {
-		out.assign({std::monostate{}});
+		case INDEX_OBJECT:
+			current_output_file = std::get<std::shared_ptr<LuaObject>>(arg);
+			out.assign({current_output_file});
+			break;
+		default:
+			out.assign({std::monostate{}});
+			break;
 	}
 }
 
@@ -428,13 +439,17 @@ void io_close(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 	if (auto file_obj = get_object(file_val)) {
 		auto close_func_val = file_obj->get("close");
-		if (std::holds_alternative<std::shared_ptr<LuaCallable>>(close_func_val)) {
-			auto close_func = std::get<std::shared_ptr<LuaCallable>>(close_func_val);
-			LuaValue args_to_pass[] = {file_obj};
-			// Forward call with our output buffer
-			out.clear();
-			close_func->call(args_to_pass, 1, out);
-			return;
+		switch (close_func_val.index()) {
+			case INDEX_FUNCTION: {
+				auto close_func = std::get<std::shared_ptr<LuaCallable>>(close_func_val);
+				LuaValue args_to_pass[] = {file_obj};
+				// Forward call with our output buffer
+				out.clear();
+				close_func->call(args_to_pass, 1, out);
+				return;
+			}
+			default:
+				break;
 		}
 	}
 	out.assign({std::monostate{}, LuaValue(std::string_view("invalid file handle"))});
@@ -442,38 +457,50 @@ void io_close(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 void io_read(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto read_func_val = current_input_file->get("read");
-	if (std::holds_alternative<std::shared_ptr<LuaCallable>>(read_func_val)) {
-		auto read_func = std::get<std::shared_ptr<LuaCallable>>(read_func_val);
-		LuaValueVector method_args = {current_input_file};
-		for (size_t i = 0; i < n_args; i++) method_args.push_back(args[i]);
-		out.clear();
-		read_func->call(method_args.data(), method_args.size(), out);
-		return;
+	switch (read_func_val.index()) {
+		case INDEX_FUNCTION: {
+			auto read_func = std::get<std::shared_ptr<LuaCallable>>(read_func_val);
+			LuaValueVector method_args = {current_input_file};
+			for (size_t i = 0; i < n_args; i++) method_args.push_back(args[i]);
+			out.clear();
+			read_func->call(method_args.data(), method_args.size(), out);
+			return;
+		}
+		default:
+			break;
 	}
 	out.assign({std::monostate{}, LuaValue(std::string_view("input file is not readable"))});
 }
 
 void io_write(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto write_func_val = current_output_file->get("write");
-	if (std::holds_alternative<std::shared_ptr<LuaCallable>>(write_func_val)) {
-		auto write_func = std::get<std::shared_ptr<LuaCallable>>(write_func_val);
-		LuaValueVector method_args = {current_output_file};
-		for (size_t i = 0; i < n_args; i++) method_args.push_back(args[i]);
-		out.clear();
-		write_func->call(method_args.data(), method_args.size(), out);
-		return;
+	switch (write_func_val.index()) {
+		case INDEX_FUNCTION: {
+			auto write_func = std::get<std::shared_ptr<LuaCallable>>(write_func_val);
+			LuaValueVector method_args = {current_output_file};
+			for (size_t i = 0; i < n_args; i++) method_args.push_back(args[i]);
+			out.clear();
+			write_func->call(method_args.data(), method_args.size(), out);
+			return;
+		}
+		default:
+			break;
 	}
 	out.assign({std::monostate{}, LuaValue(std::string_view("output file is not writable"))});
 }
 
 void io_flush(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	auto flush_func_val = current_output_file->get("flush");
-	if (std::holds_alternative<std::shared_ptr<LuaCallable>>(flush_func_val)) {
-		auto flush_func = std::get<std::shared_ptr<LuaCallable>>(flush_func_val);
-		LuaValue f_args[] = {current_output_file};
-		out.clear();
-		flush_func->call(f_args, 1, out);
-		return;
+	switch (flush_func_val.index()) {
+		case INDEX_FUNCTION: {
+			auto flush_func = std::get<std::shared_ptr<LuaCallable>>(flush_func_val);
+			LuaValue f_args[] = {current_output_file};
+			out.clear();
+			flush_func->call(f_args, 1, out);
+			return;
+		}
+		default:
+			break;
 	}
 	out.assign({std::monostate{}, LuaValue(std::string_view("output file is not flushable"))});
 }
@@ -481,15 +508,19 @@ void io_flush(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 void io_lines(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue filename_val = (n_args > 0) ? args[0] : LuaValue(std::monostate{});
 
-	if (std::holds_alternative<std::monostate>(filename_val)) {
+	if (filename_val.index() == INDEX_NIL) {
 		// io.lines() -> read from default input
 		auto lines_func_val = current_input_file->get("lines");
-		if (std::holds_alternative<std::shared_ptr<LuaCallable>>(lines_func_val)) {
-			auto lines_func = std::get<std::shared_ptr<LuaCallable>>(lines_func_val);
-			LuaValue l_args[] = {current_input_file};
-			out.clear();
-			lines_func->call(l_args, 1, out);
-			return;
+		switch (lines_func_val.index()) {
+			case INDEX_FUNCTION: {
+				auto lines_func = std::get<std::shared_ptr<LuaCallable>>(lines_func_val);
+				LuaValue l_args[] = {current_input_file};
+				out.clear();
+				lines_func->call(l_args, 1, out);
+				return;
+			}
+			default:
+				break;
 		}
 	}
 	else {
@@ -498,40 +529,45 @@ void io_lines(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		LuaValueVector open_res;
 		io_open(open_args, 2, open_res);
 
-		if (!open_res.empty() && std::holds_alternative<std::shared_ptr<LuaObject>>(open_res[0])) {
+		if (!open_res.empty() && open_res[0].index() == INDEX_OBJECT) {
 			auto file_obj = std::get<std::shared_ptr<LuaObject>>(open_res[0]);
 			auto lines_func_val = file_obj->get("lines");
 
-			if (std::holds_alternative<std::shared_ptr<LuaCallable>>(lines_func_val)) {
-				auto lines_func = std::get<std::shared_ptr<LuaCallable>>(lines_func_val);
+			switch (lines_func_val.index()) {
+				case INDEX_FUNCTION: {
+					auto lines_func = std::get<std::shared_ptr<LuaCallable>>(lines_func_val);
 
-				// Get the file iterator: file:lines() returns (iter, self, nil)
-				LuaValueVector iter_res;
-				LuaValue l_args[] = {file_obj};
-				lines_func->call(l_args, 1, iter_res);
+					// Get the file iterator: file:lines() returns (iter, self, nil)
+					LuaValueVector iter_res;
+					LuaValue l_args[] = {file_obj};
+					lines_func->call(l_args, 1, iter_res);
 
-				if (!iter_res.empty() && std::holds_alternative<std::shared_ptr<LuaCallable>>(iter_res[0])) {
-					auto original_iter = std::get<std::shared_ptr<LuaCallable>>(iter_res[0]);
+					if (!iter_res.empty() && iter_res[0].index() == INDEX_FUNCTION) {
+						auto original_iter = std::get<std::shared_ptr<LuaCallable>>(iter_res[0]);
 
-					// Wrap the iterator to close the file on nil
-					auto iter_wrapper = make_lua_callable(
-						[original_iter, file_obj](const LuaValue* w_args, size_t w_n_args,
-						                          LuaValueVector& w_out) {
-							// Call original iterator
-							original_iter->call(w_args, w_n_args, w_out);
+						// Wrap the iterator to close the file on nil
+						auto iter_wrapper = make_lua_callable(
+							[original_iter, file_obj](const LuaValue* w_args, size_t w_n_args,
+													  LuaValueVector& w_out) {
+								// Call original iterator
+								original_iter->call(w_args, w_n_args, w_out);
 
-							// If returns nil, close the file
-							if (w_out.empty() || std::holds_alternative<std::monostate>(w_out[0])) {
-								if (auto f = std::dynamic_pointer_cast<LuaFile>(file_obj)) {
-									LuaValueVector ignored_out;
-									f->close(nullptr, 0, ignored_out);
+								// If returns nil, close the file
+								if (w_out.empty() || w_out[0].index() == INDEX_NIL) {
+									if (auto f = std::dynamic_pointer_cast<LuaFile>(file_obj)) {
+										LuaValueVector ignored_out;
+										f->close(nullptr, 0, ignored_out);
+									}
 								}
-							}
-						});
+							});
 
-					out.assign({iter_wrapper, std::monostate{}, std::monostate{}});
-					return;
+						out.assign({iter_wrapper, std::monostate{}, std::monostate{}});
+						return;
+					}
+					break;
 				}
+				default:
+					break;
 			}
 		}
 		else {
