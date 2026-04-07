@@ -54,7 +54,6 @@ local BYTE_b = 98 -- byte('b')
 local BYTE_a_esc = 97 -- byte('a')
 local BYTE_v = 118 -- byte('v')
 
-
 local function is_digit(c)
 	return c and c >= BYTE_0 and c <= BYTE_9
 end
@@ -207,7 +206,6 @@ function Tokenizer.tokenize(parser)
 			elseif value == "until" then table.insert(tokens, KW_UNTIL)
 			else table.insert(tokens, { "identifier", value }) end
 			token_processed = true
-
 
 		elseif char_byte == BYTE_MINUS then
 			if current_pos + 1 <= len and code:byte(current_pos + 1) == BYTE_MINUS then

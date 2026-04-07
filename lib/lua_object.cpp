@@ -7,71 +7,61 @@
 #include <iomanip>
 #include <limits>
 #include <charconv>
+#include <deque>
 #include "coroutine.hpp" // Ensure full definition of LuaCoroutine is available
 #include <unordered_set>
-#ifdef LUAX_THREAD_SAFE
-#include <mutex>
-#endif
 
 // ==========================================
 // String Intern Pool
 // ==========================================
 
 struct TransparentStringHash {
-    using is_transparent = void;
-    size_t operator()(std::string_view sv) const { return std::hash<std::string_view>{}(sv); }
-    size_t operator()(const std::string& s) const { return std::hash<std::string>{}(s); }
+	using is_transparent = void;
+	size_t operator()(std::string_view sv) const { return std::hash<std::string_view>{}(sv); }
+	size_t operator()(const std::string& s) const { return std::hash<std::string>{}(s); }
 };
 
 struct TransparentStringEq {
-    using is_transparent = void;
-    bool operator()(std::string_view lhs, std::string_view rhs) const { return lhs == rhs; }
+	using is_transparent = void;
+	bool operator()(std::string_view lhs, std::string_view rhs) const { return lhs == rhs; }
 };
 
 static std::unordered_set<std::string, TransparentStringHash, TransparentStringEq>& get_string_pool() {
-    static std::unordered_set<std::string, TransparentStringHash, TransparentStringEq> pool;
-    return pool;
+	static std::unordered_set<std::string, TransparentStringHash, TransparentStringEq> pool;
+	return pool;
 }
 
-#ifdef LUAX_THREAD_SAFE
-static std::mutex& get_pool_mutex() {
-    static std::mutex mtx;
-    return mtx;
-}
-#endif
-
+// Updated function in lua_object.cpp
 std::string_view LuaObject::intern(std::string_view sv) {
-    if (sv.empty()) return "";
-    
-    // Fast MRU (Most Recently Used) thread-local cache
-    struct CacheEntry {
-        std::string_view key;
-        std::string_view val;
-    };
-    constexpr size_t CACHE_SIZE = 64; 
-    thread_local CacheEntry cache[CACHE_SIZE] = {};
-    
-    size_t h = std::hash<std::string_view>{}(sv);
-    size_t idx = h % CACHE_SIZE;
-    if (cache[idx].key == sv) [[likely]] return cache[idx].val;
+	if (sv.empty()) return "";
+	
+	constexpr size_t CACHE_SIZE = 64; 
+	struct CacheEntry { std::string_view key; std::string_view val; };
+	thread_local CacheEntry cache[CACHE_SIZE] = {};
+	
+	size_t h = std::hash<std::string_view>{}(sv);
+	size_t idx = h % CACHE_SIZE;
+	
+	// 1. Ultra-fast MRU check
+	if (cache[idx].key.data() == sv.data() && cache[idx].key.size() == sv.size()) [[likely]] 
+		return cache[idx].val;
+	if (cache[idx].key == sv) [[likely]] return cache[idx].val;
 
-    auto& pool = get_string_pool();
-#ifdef LUAX_THREAD_SAFE
-    auto& mtx = get_pool_mutex();
-    std::lock_guard<std::mutex> lock(mtx);
-#endif
-    
-    auto it_pool = pool.find(sv);
-    if (it_pool != pool.end()) {
-        std::string_view pooled_view = *it_pool;
-        cache[idx] = {pooled_view, pooled_view}; // Use the stable view for both key and val
-        return pooled_view;
-    }
-    
-    auto [inserted_it, success] = pool.insert(std::string(sv));
-    std::string_view pooled_view = *inserted_it;
-    cache[idx] = {pooled_view, pooled_view};
-    return pooled_view;
+	auto& pool = get_string_pool();
+	
+	// 2. Transparent lookup (avoids std::string allocation)
+	auto it_pool = pool.find(sv);
+	if (it_pool != pool.end()) {
+		std::string_view pooled_view = *it_pool;
+		cache[idx] = {pooled_view, pooled_view};
+		return pooled_view;
+	}
+	
+	// 3. Slow path: Only allocate string when it's genuinely new
+	auto [inserted_it, success] = pool.insert(std::string(sv));
+	std::string_view pooled_view = *inserted_it;
+	cache[idx] = {pooled_view, pooled_view};
+	return pooled_view;
 }
 
 // ==========================================
@@ -98,40 +88,39 @@ std::string value_to_key_string(const LuaValue& key) {
 // LuaObject Class Implementation
 // ==========================================
 
-static char static_chars[256];
-static LuaValue single_char_cache[256];
-static std::once_flag char_cache_flag;
-
-static void ensure_char_cache() {
-    std::call_once(char_cache_flag, []() {
-        for (int i = 0; i < 256; ++i) {
-            static_chars[i] = static_cast<char>(i);
-            single_char_cache[i] = LuaValue(std::string_view(&static_chars[i], 1));
-        }
-    });
-}
-
 const LuaValue& LuaObject::get_single_char(unsigned char c) {
-    ensure_char_cache();
-    return single_char_cache[c];
+	struct CharCache {
+		char chars[256];
+		LuaValue values[256];
+
+		CharCache() {
+			for (int i = 0; i < 256; ++i) {
+				chars[i] = static_cast<char>(i);
+				values[i] = LuaValue(std::string_view(&chars[i], 1));
+			}
+		}
+	};
+	static const CharCache cache;
+
+	return cache.values[c];
 }
 
 std::shared_ptr<LuaObject> LuaObject::create(
-    std::initializer_list<PropPair> props,
-    std::initializer_list<LuaValue> arr,
-    std::shared_ptr<LuaObject> mt) {
-    auto obj = std::allocate_shared<LuaObject>(PoolAllocator<LuaObject>{});
-    if (props.size() > SMALL_TABLE_THRESHOLD) {
-        obj->properties = std::make_unique<PropMap>();
-        for (const auto& p : props) (*obj->properties)[intern_key(p.first)] = p.second;
-    } else {
-        obj->small_props.reserve(props.size());
-        for (const auto& p : props) obj->small_props.push_back({intern_key(p.first), p.second});
-    }
-    // Convert initializer_list to vector for array_part
-    obj->array_part.assign(arr.begin(), arr.end());
-    obj->metatable = mt;
-    return obj;
+	std::initializer_list<PropPair> props,
+	std::initializer_list<LuaValue> arr,
+	std::shared_ptr<LuaObject> mt) {
+	auto obj = std::allocate_shared<LuaObject>(PoolAllocator<LuaObject>{});
+	if (props.size() > SMALL_TABLE_THRESHOLD) {
+		obj->properties = std::make_unique<PropMap>();
+		for (const auto& p : props) (*obj->properties)[intern_key(p.first)] = p.second;
+	} else {
+		obj->small_props.reserve(props.size());
+		for (const auto& p : props) obj->small_props.push_back({intern_key(p.first), p.second});
+	}
+	// Convert initializer_list to vector for array_part
+	obj->array_part.assign(arr.begin(), arr.end());
+	obj->metatable = mt;
+	return obj;
 }
 
 LuaValue LuaObject::get(std::string_view key) {
@@ -143,133 +132,72 @@ void LuaObject::set(std::string_view key, const LuaValue& value) {
 }
 
 void LuaObject::set_metatable(const std::shared_ptr<LuaObject>& mt) {
-	LUAX_LOCK_LOCAL();
 	metatable = mt;
 	invalidate_metamethods();
 }
 
-LuaValue LuaObject::get_item(const LuaValue& key) {
-	LUAX_LOCK_LOCAL();
-	// Optimization: Fast path for string keys to skip array checks
-	if (key.index() == INDEX_STRING_VIEW) return get_item(std::get<std::string_view>(key));
-	if (key.index() == INDEX_STRING) return get_item(std::string_view(std::get<std::string>(key)));
+LuaValue LuaObject::get_item_internal(const LuaValue& key, int depth) {
+	if (depth > 100) [[unlikely]] return std::monostate{};
 
-	LuaObject* current_obj = this;
-
-	for (int depth = 0; depth < 100; ++depth) {
-		// 1. Array Part Dispatch
-		long long idx = -1;
-		bool is_int = false;
-
-		if (const auto* i_ptr = std::get_if<long long>(&key)) {
-			idx = *i_ptr;
-			is_int = true;
+	// a. Check Array Part
+	if (key.index() == INDEX_INTEGER) {
+		long long idx = std::get<INDEX_INTEGER>(key);
+		if (idx >= 1 && idx <= (long long)array_part.size()) {
+			const LuaValue& res = array_part[idx - 1];
+			if (res.index() != INDEX_NIL) return res;
 		}
-		else if (const auto* d_ptr = std::get_if<double>(&key)) {
-			is_int = is_integer_key(*d_ptr, idx);
-		}
-
-		if (is_int && idx >= 1 && idx <= (long long)current_obj->array_part.size()) {
-			const auto& val = current_obj->array_part[idx - 1];
-			if (!std::holds_alternative<std::monostate>(val)) return val;
-		}
-
-		// 2. Hash Part
-		LuaValue val = current_obj->get_prop(key);
-		if (!std::holds_alternative<std::monostate>(val)) {
-			return val;
-		}
-
-		// 3. Metatable
-		auto [idx_meta, newidx_meta] = current_obj->get_cached_metamethods();
-		if (std::holds_alternative<std::monostate>(idx_meta)) break;
-
-		if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&idx_meta)) {
-			current_obj = next_obj_ptr->get();
-			if (!current_obj) break;
-			continue;
-		}
-		if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&idx_meta)) {
-			LuaValue args[] = {current_obj->shared_from_this(), key};
-			LuaValueVector results;
-			results.clear();
-			if (results.capacity() < 1) results.reserve(1);
-			(*func_ptr)->call(args, 2, results);
-			return results.empty() ? LuaValue(std::monostate{}) : std::move(results[0]);
-		}
-		break;
 	}
+
+	// b. Check Hash Part
+	LuaValue* val_ptr = find_prop(key);
+	if (val_ptr && val_ptr->index() != INDEX_NIL) return *val_ptr;
+
+	// c. Optimized Metatable Check
+	// If no metatable exists, we can stop immediately without checking atomics
+	if (!metatable) return std::monostate{};
+
+	auto [idx_meta, _] = get_cached_metamethods();
+	if (idx_meta->index() == INDEX_NIL) return std::monostate{};
+
+	if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(idx_meta)) {
+		return (*next_obj_ptr)->get_item_internal(key, depth + 1);
+	} 
+	
+	if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(idx_meta)) {
+		LuaValue args[] = {shared_from_this(), key};
+		LuaValueVector results;
+		(*func_ptr)->call(args, 2, results);
+		return results.empty() ? std::monostate{} : std::move(results[0]);
+	}
+
 	return std::monostate{};
+}
+
+LuaValue LuaObject::get_item(const LuaValue& key) {
+	// Fast dispatch happens BEFORE the lock to avoid deadlock and redundant checks
+	switch (key.index()) {
+		case INDEX_INTEGER:     return get_item(std::get<INDEX_INTEGER>(key));
+		case INDEX_STRING_VIEW: return get_item(std::get<INDEX_STRING_VIEW>(key));
+		case INDEX_STRING:      return get_item(std::string_view(std::get<INDEX_STRING>(key)));
+		case INDEX_DOUBLE: {
+			long long i;
+			if (is_integer_key(std::get<double>(key), i)) return get_item(i);
+			break;
+		}
+	}
+	return get_item_internal(key, 0);
 }
 
 LuaValue LuaObject::get_item(long long idx) {
-	LUAX_LOCK_LOCAL();
-	if (idx >= 1 && idx <= (long long)array_part.size()) {
-		return array_part[idx - 1];
-	}
-
-	LuaValue key = idx;
-	if (properties) {
-		auto it = properties->find(key);
-		if (it != properties->end()) return it->second;
-	} else {
-		for (auto& p : small_props) {
-			if (p.first.index() == INDEX_INTEGER && std::get<INDEX_INTEGER>(p.first) == idx) return p.second;
-		}
-	}
-
-	if (metatable) {
-		LuaValue res = metatable->get_item("__index");
-		if (const auto* obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&res)) {
-			return (*obj_ptr)->get_item(idx);
-		}
-		if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&res)) {
-			LuaValue args[] = {shared_from_this(), key};
-			LuaValueVector results;
-			results.clear();
-			(*func_ptr)->call(args, 2, results);
-			return results.empty() ? LuaValue(std::monostate{}) : std::move(results[0]);
-		}
-	}
-
-	return std::monostate{};
+	return get_item_internal(idx, 0);
 }
 
 LuaValue LuaObject::get_item(std::string_view key) {
-	LUAX_LOCK_LOCAL();
-	LuaObject* current_obj = this;
-
-	for (int depth = 0; depth < 100; ++depth) {
-		LuaValue val = current_obj->get_prop(key);
-		if (!std::holds_alternative<std::monostate>(val)) {
-			return val;
-		}
-
-		// 2. Metatable
-		auto [idx_meta, newidx_meta] = current_obj->get_cached_metamethods();
-		if (std::holds_alternative<std::monostate>(idx_meta)) break;
-
-		if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&idx_meta)) {
-			current_obj = next_obj_ptr->get();
-			if (!current_obj) break;
-			continue;
-		}
-		if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&idx_meta)) {
-			LuaValue key_val = key;
-			LuaValue args[] = {current_obj->shared_from_this(), key_val};
-			LuaValueVector results;
-			results.clear();
-			if (results.capacity() < 1) results.reserve(1);
-			(*func_ptr)->call(args, 2, results);
-			return results.empty() ? LuaValue(std::monostate{}) : std::move(results[0]);
-		}
-		break;
-	}
-	return std::monostate{};
+	// We convert to LuaValue once and pass it down
+	return get_item_internal(LuaValue(key), 0);
 }
 
 void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
-	LUAX_LOCK_LOCAL();
 	long long idx = -1;
 	bool is_int = false;
 
@@ -303,13 +231,13 @@ void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
 
 	// 3. Metatable
 	if (!key_exists) { // Only check metatable if key doesn't exist in current object
-		auto [idx_meta, next_meta] = get_cached_metamethods();
-		if (!std::holds_alternative<std::monostate>(next_meta)) {
-			if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&next_meta)) {
+		auto [_, next_meta] = get_cached_metamethods();
+		if (next_meta->index() != INDEX_NIL) {
+			if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(next_meta)) {
 				(*next_obj_ptr)->set_item(key, value);
 				return;
 			}
-			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&next_meta)) {
+			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(next_meta)) {
 				LuaValue args[] = {shared_from_this(), key, value};
 				LuaValueVector results;
 				results.clear();
@@ -323,18 +251,17 @@ void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
 }
 
 void LuaObject::set_item(std::string_view key, const LuaValue& value) {
-	LUAX_LOCK_LOCAL();
-    // Simplified set_item
+	// Simplified set_item
 	bool key_exists = find_prop(key) != nullptr;
 
 	if (!key_exists) {
-		auto [idx_meta, next_meta] = get_cached_metamethods();
-		if (!std::holds_alternative<std::monostate>(next_meta)) {
-			if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(&next_meta)) {
+		auto [_, next_meta] = get_cached_metamethods();
+		if (next_meta->index() != INDEX_NIL) {
+			if (const auto* next_obj_ptr = std::get_if<std::shared_ptr<LuaObject>>(next_meta)) {
 				(*next_obj_ptr)->set_item(key, value);
 				return;
 			}
-			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(&next_meta)) {
+			if (const auto* func_ptr = std::get_if<std::shared_ptr<LuaCallable>>(next_meta)) {
 				LuaValue key_val = key; // Use std::string_view directly
 				LuaValue args[] = {shared_from_this(), key_val, value};
 				LuaValueVector results;
@@ -349,8 +276,7 @@ void LuaObject::set_item(std::string_view key, const LuaValue& value) {
 }
 
 void LuaObject::set_item(long long idx, const LuaValue& value) {
-	LUAX_LOCK_LOCAL();
-    // Simplified set_item
+	// Simplified set_item
 	if (idx >= 1) {
 		if (idx <= (long long)array_part.size()) {
 			array_part[idx - 1] = value;
@@ -426,7 +352,6 @@ void LuaObject::set_item(long long idx, const LuaValue& value) {
 }
 
 LuaValue LuaObject::get_prop(const LuaValue& key) {
-	LUAX_LOCK_LOCAL();
 	if (properties) {
 		auto it = properties->find(key);
 		if (it != properties->end()) return it->second;
@@ -439,7 +364,6 @@ LuaValue LuaObject::get_prop(const LuaValue& key) {
 }
 
 LuaValue LuaObject::get_prop(std::string_view key) {
-	LUAX_LOCK_LOCAL();
 	if (properties) {
 		auto it = properties->find(key);
 		if (it != properties->end()) return it->second;
@@ -460,7 +384,6 @@ LuaValue LuaObject::get_prop(std::string_view key) {
 }
 
 LuaValue* LuaObject::find_prop(const LuaValue& key) {
-	LUAX_LOCK_LOCAL();
 	if (properties) {
 		auto it = properties->find(key);
 		if (it != properties->end()) return &it->second;
@@ -472,46 +395,37 @@ LuaValue* LuaObject::find_prop(const LuaValue& key) {
 	return nullptr;
 }
 
+// Updated function in lua_object.cpp
 LuaValue* LuaObject::find_prop(std::string_view key) {
-	LUAX_LOCK_LOCAL();
-	LuaValue* res = nullptr;
-	if (properties) {
-		auto it = properties->find(key);
-		if (it != properties->end()) res = &it->second;
-	} else {
-		for (auto& p : small_props) {
-			const auto& k = p.first;
-			auto idx = k.index();
-			if (idx == INDEX_STRING_VIEW) {
-				auto sv = std::get<INDEX_STRING_VIEW>(k);
-				if (sv.data() == key.data() && sv.size() == key.size()) [[likely]] {
-					res = &p.second;
-					break;
-				}
-				if (sv == key) {
-					res = &p.second;
-					break;
-				}
-			} else if (idx == INDEX_STRING) {
-				if (std::get<INDEX_STRING>(k) == key) {
-					res = &p.second;
-					break;
-				}
-			}
+	// 1. Check small_props with pointer-first logic
+	for (auto& p : small_props) {
+		const size_t idx = p.first.index();
+		if (idx == INDEX_STRING_VIEW) [[likely]] {
+			auto sv = std::get<INDEX_STRING_VIEW>(p.first);
+			// If pointers match, it's the same interned string
+			if (sv.data() == key.data()) return &p.second;
+		} else if (idx == INDEX_STRING) {
+			if (std::get<INDEX_STRING>(p.first).data() == key.data()) return &p.second;
 		}
 	}
 
-	return res;
+	// 2. Check Hash Part (Map)
+	if (properties) [[unlikely]] {
+		// Because LuaValueHash/Eq are transparent, this uses the string_view 
+		// without creating a std::string or LuaValue temporary.
+		auto it = properties->find(key); 
+		if (it != properties->end()) return &it->second;
+	}
+	return nullptr;
 }
 
 void LuaObject::set_prop(const LuaValue& key, const LuaValue& value) {
-	LUAX_LOCK_LOCAL();
-    LuaValue interned_key = key;
-    if (key.index() == INDEX_STRING) {
-        interned_key = intern(std::get<std::string>(key));
-    } else if (key.index() == INDEX_STRING_VIEW) {
-        interned_key = intern(std::get<std::string_view>(key));
-    }
+	LuaValue interned_key = key;
+	if (key.index() == INDEX_STRING) {
+		interned_key = intern(std::get<std::string>(key));
+	} else if (key.index() == INDEX_STRING_VIEW) {
+		interned_key = intern(std::get<std::string_view>(key));
+	}
 
 	if (properties) {
 		if (std::holds_alternative<std::monostate>(value)) {
@@ -522,7 +436,7 @@ void LuaObject::set_prop(const LuaValue& key, const LuaValue& value) {
 		return;
 	}
 
-    LuaValueEq eq;
+	LuaValueEq eq;
 	for (auto it = small_props.begin(); it != small_props.end(); ++it) {
 		if (eq(it->first, interned_key)) {
 			if (std::holds_alternative<std::monostate>(value)) {
@@ -536,10 +450,12 @@ void LuaObject::set_prop(const LuaValue& key, const LuaValue& value) {
 
 	if (!std::holds_alternative<std::monostate>(value)) {
 		if (small_props.size() >= SMALL_TABLE_THRESHOLD) {
-			properties = std::make_unique<LuaObject::PropMap>();
-			for (auto& p : small_props) (*properties)[p.first] = p.second;
+			properties = std::make_unique<LuaObject::PropMap>(); 
+			for (auto& p : small_props) {
+				properties->emplace(std::move(p.first), std::move(p.second));
+			}
 			small_props.clear();
-			(*properties)[interned_key] = value;
+			properties->emplace(std::move(interned_key), std::move(value));
 		} else {
 			small_props.push_back({interned_key, value});
 		}
@@ -547,7 +463,7 @@ void LuaObject::set_prop(const LuaValue& key, const LuaValue& value) {
 }
 
 void LuaObject::set_prop(std::string_view key, const LuaValue& value) {
-    std::string_view interned = intern(key);
+	std::string_view interned = intern(key);
 
 	if (properties) {
 		if (std::holds_alternative<std::monostate>(value)) {
@@ -560,7 +476,7 @@ void LuaObject::set_prop(std::string_view key, const LuaValue& value) {
 		return;
 	}
 
-    LuaValueEq eq;
+	LuaValueEq eq;
 	for (auto it = small_props.begin(); it != small_props.end(); ++it) {
 		if (eq(it->first, interned)) {
 			if (std::holds_alternative<std::monostate>(value)) {
@@ -590,30 +506,28 @@ void LuaObject::set_item(const LuaValue& key, const LuaValueVector& value) {
 }
 
 void LuaObject::table_insert(const LuaValue& value) {
-	LUAX_LOCK_LOCAL();
-    
+	
 	array_part.push_back(value);
 }
 
 void LuaObject::table_insert(long long pos, const LuaValue& value) {
-	LUAX_LOCK_LOCAL();
-    long long current_size = static_cast<long long>(array_part.size());
-    if (pos >= 1 && pos <= current_size + 1) {
-        
-        array_part.insert(array_part.begin() + (pos - 1), value);
-    }
+	long long current_size = static_cast<long long>(array_part.size());
+	if (pos >= 1 && pos <= current_size + 1) {
+		
+		array_part.insert(array_part.begin() + (pos - 1), value);
+	}
 }
 
 void lua_table_insert(const LuaValue& t, const LuaValue& v) {
-    if (auto obj = std::get_if<std::shared_ptr<LuaObject>>(&t)) {
-        (*obj)->table_insert(v);
-    }
+	if (auto obj = std::get_if<std::shared_ptr<LuaObject>>(&t)) {
+		(*obj)->table_insert(v);
+	}
 }
 
 void lua_table_insert(const LuaValue& t, long long pos, const LuaValue& v) {
-    if (auto obj = std::get_if<std::shared_ptr<LuaObject>>(&t)) {
-        (*obj)->table_insert(pos, v);
-    }
+	if (auto obj = std::get_if<std::shared_ptr<LuaObject>>(&t)) {
+		(*obj)->table_insert(pos, v);
+	}
 }
 
 // ==========================================
@@ -702,7 +616,7 @@ bool lua_less_than(const LuaValue& a, const LuaValue& b) {
 	}
 	// 2. String vs String
 	else if ((a.index() == INDEX_STRING || a.index() == INDEX_STRING_VIEW) &&
-	         (b.index() == INDEX_STRING || b.index() == INDEX_STRING_VIEW)) {
+			 (b.index() == INDEX_STRING || b.index() == INDEX_STRING_VIEW)) {
 		std::string_view sa = (a.index() == INDEX_STRING) ? std::string_view(std::get<std::string>(a)) : std::get<std::string_view>(a);
 		std::string_view sb = (b.index() == INDEX_STRING) ? std::string_view(std::get<std::string>(b)) : std::get<std::string_view>(b);
 		return sa < sb;
@@ -753,7 +667,7 @@ bool lua_less_equals(const LuaValue& a, const LuaValue& b) {
 	}
 	// 2. String vs String
 	else if ((a.index() == INDEX_STRING || a.index() == INDEX_STRING_VIEW) &&
-	         (b.index() == INDEX_STRING || b.index() == INDEX_STRING_VIEW)) {
+			 (b.index() == INDEX_STRING || b.index() == INDEX_STRING_VIEW)) {
 		std::string_view sa = (a.index() == INDEX_STRING) ? std::string_view(std::get<std::string>(a)) : std::get<std::string_view>(a);
 		std::string_view sb = (b.index() == INDEX_STRING) ? std::string_view(std::get<std::string>(b)) : std::get<std::string_view>(b);
 		return sa <= sb;
@@ -796,41 +710,44 @@ bool lua_greater_than(const LuaValue& a, const LuaValue& b) { return lua_less_th
 bool lua_greater_equals(const LuaValue& a, const LuaValue& b) { return lua_less_equals(b, a); }
 bool lua_not_equals(const LuaValue& a, const LuaValue& b) { return !lua_equals(a, b); }
 
+// Updated function in lua_object.cpp
 bool lua_equals(const LuaValue& a, const LuaValue& b) {
-	if (a.index() != b.index()) {
-		if ((a.index() == INDEX_STRING || a.index() == INDEX_STRING_VIEW) &&
-		    (b.index() == INDEX_STRING || b.index() == INDEX_STRING_VIEW)) {
-			std::string_view sa = (a.index() == INDEX_STRING) ? std::string_view(std::get<std::string>(a)) : std::get<std::string_view>(a);
-			std::string_view sb = (b.index() == INDEX_STRING) ? std::string_view(std::get<std::string>(b)) : std::get<std::string_view>(b);
+	size_t lidx = a.index();
+	size_t ridx = b.index();
+
+	if (lidx != ridx) {
+		// Handle cross-type number equality (1 == 1.0)
+		if (lidx == INDEX_DOUBLE && ridx == INDEX_INTEGER)
+			return std::get<double>(a) == static_cast<double>(std::get<long long>(b));
+		if (lidx == INDEX_INTEGER && ridx == INDEX_DOUBLE)
+			return static_cast<double>(std::get<long long>(a)) == std::get<double>(b);
+		
+		// Handle String vs StringView
+		if ((lidx == INDEX_STRING || lidx == INDEX_STRING_VIEW) &&
+			(ridx == INDEX_STRING || ridx == INDEX_STRING_VIEW)) {
+			std::string_view sa = (lidx == INDEX_STRING) ? std::string_view(std::get<std::string>(a)) : std::get<std::string_view>(a);
+			std::string_view sb = (ridx == INDEX_STRING) ? std::string_view(std::get<std::string>(b)) : std::get<std::string_view>(b);
 			return sa == sb;
 		}
-		if (std::holds_alternative<double>(a) && std::holds_alternative<long long>(b))
-			return std::get<double>(a) == static_cast<double>(std::get<long long>(b));
-		if (std::holds_alternative<long long>(a) && std::holds_alternative<double>(b))
-			return static_cast<double>(std::get<long long>(a)) == std::get<double>(b);
 		return false;
 	}
 
-	if (std::holds_alternative<std::monostate>(a)) return true;
-	if (std::holds_alternative<bool>(a)) return std::get<bool>(a) == std::get<bool>(b);
-	if (std::holds_alternative<double>(a)) return std::get<double>(a) == std::get<double>(b);
-	if (std::holds_alternative<long long>(a)) return std::get<long long>(a) == std::get<long long>(b);
-	if (a.index() == INDEX_STRING || a.index() == INDEX_STRING_VIEW) {
-		std::string_view sa = (a.index() == INDEX_STRING) ? std::string_view(std::get<std::string>(a)) : std::get<std::string_view>(a);
-		std::string_view sb = (b.index() == INDEX_STRING) ? std::string_view(std::get<std::string>(b)) : std::get<std::string_view>(b);
-		return sa == sb;
+	// Same types: Single switch is much faster than multiple holds_alternative
+	switch (lidx) {
+		case INDEX_NIL:     return true;
+		case INDEX_BOOLEAN: return std::get<bool>(a) == std::get<bool>(b);
+		case INDEX_DOUBLE:  return std::get<double>(a) == std::get<double>(b);
+		case INDEX_INTEGER: return std::get<long long>(a) == std::get<long long>(b);
+		case INDEX_STRING_VIEW: {
+			auto s1 = std::get<std::string_view>(a);
+			auto s2 = std::get<std::string_view>(b);
+			return (s1.data() == s2.data() && s1.size() == s2.size()) || (s1 == s2);
+		}
+		case INDEX_STRING:  return std::get<std::string>(a) == std::get<std::string>(b);
+		case INDEX_OBJECT:  return std::get<std::shared_ptr<LuaObject>>(a) == std::get<std::shared_ptr<LuaObject>>(b);
+		case INDEX_CFUNCTION: return std::get<LuaCFunction>(a).ptr == std::get<LuaCFunction>(b).ptr;
+		default:            return a == b;
 	}
-	if (std::holds_alternative<std::shared_ptr<LuaObject>>(a))
-		return std::get<std::shared_ptr<LuaObject>>(a) ==
-			std::get<std::shared_ptr<LuaObject>>(b);
-
-	// Coroutines are equal if they are the same pointer
-	if (std::holds_alternative<std::shared_ptr<LuaCoroutine>>(a)) {
-		return std::get<std::shared_ptr<LuaCoroutine>>(a) == std::get<std::shared_ptr<LuaCoroutine>>(b);
-	}
-
-	// Functions logic depends on implementation, usually pointer equality
-	return false;
 }
 
 // Helper to create a non-owning view of a string to avoid copy
@@ -912,12 +829,36 @@ LuaValue lua_concat(LuaValue&& a, const LuaValue& b) {
 	return res;
 }
 
+// Optimization: Prepend a value to an existing rvalue string
+LuaValue lua_concat(const LuaValue& a, LuaValue&& b) {
+	if (auto* s_b = std::get_if<std::string>(&b)) {
+		// If 'a' is also a string/number, we can do a smart prepend
+		// This is still slightly slower than append, but way faster than a full copy
+		std::string res;
+		// Optimization: one allocation for the whole thing
+		// (Assuming you have a helper to get string length of a)
+		// res.reserve(get_length(a) + s_b->size()); 
+		
+		append_to_string(a, res);
+		res += *s_b; // Append the temporary's content
+		return res;
+	}
+	
+	// Fallback: Use the standard logic
+	return lua_concat(a, static_cast<const LuaValue&>(b));
+}
+
+LuaValue lua_concat(LuaValue&& a, LuaValue&& b) {
+	// Both are temporaries. We'll pick 'a' to be the primary buffer.
+	return lua_concat(std::move(a), static_cast<const LuaValue&>(b));
+}
+
 // ==========================================
 // Standard Library
 // ==========================================
 
 void lua_rawget(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 2) throw std::runtime_error("bad argument #1 to 'rawget' (table expected)");
+	if (n_args < 2) [[unlikely]] throw std::runtime_error("bad argument #1 to 'rawget' (table expected)");
 	auto table = get_object(args[0]);
 	const LuaValue& key = args[1];
 
@@ -940,12 +881,12 @@ void lua_rawget(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_rawset(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 3) throw std::runtime_error("bad argument #1 to 'rawset' (table expected)");
+	if (n_args < 3) [[unlikely]] throw std::runtime_error("bad argument #1 to 'rawset' (table expected)");
 	auto table = get_object(args[0]);
 	const LuaValue& key = args[1];
 	const LuaValue& value = args[2];
 
-	if (std::holds_alternative<std::monostate>(key)) throw std::runtime_error("table index is nil");
+	if (std::holds_alternative<std::monostate>(key)) [[unlikely]] throw std::runtime_error("table index is nil");
 
 	long long idx;
 	bool is_int = false;
@@ -972,7 +913,7 @@ void lua_rawset(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_rawlen(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) {
+	if (n_args < 1) [[unlikely]] {
 		out.assign({0.0});
 		return;
 	}
@@ -1033,7 +974,7 @@ void lua_rawequal(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_select(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("bad argument #1 to 'select' (value expected)");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("bad argument #1 to 'select' (value expected)");
 	LuaValue index_val = args[0];
 	int count = n_args - 1;
 
@@ -1054,7 +995,7 @@ void lua_select(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_next(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("table expected");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("table expected");
 	auto table = std::get<std::shared_ptr<LuaObject>>(args[0]);
 	LuaValue key = (n_args > 1) ? args[1] : LuaValue(std::monostate{});
 
@@ -1112,7 +1053,7 @@ void pairs_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_pairs(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("bad argument #1 to 'pairs' (table expected)");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("bad argument #1 to 'pairs' (table expected)");
 	auto table = get_object(args[0]);
 
 	out.clear();
@@ -1150,7 +1091,7 @@ void ipairs_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_ipairs(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("bad argument #1 to 'ipairs' (table expected)");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("bad argument #1 to 'ipairs' (table expected)");
 	auto table = get_object(args[0]);
 
 	out.clear();
@@ -1246,9 +1187,8 @@ LuaValue LuaCallable::call3(const LuaValue& a1, const LuaValue& a2, const LuaVal
 	return res.empty() ? LuaValue(std::monostate{}) : std::move(res[0]);
 }
 
-
 void lua_xpcall(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 2) throw std::runtime_error("bad argument #2 to 'xpcall' (value expected)");
+	if (n_args < 2) [[unlikely]] throw std::runtime_error("bad argument #2 to 'xpcall' (value expected)");
 	LuaValue func = args[0];
 	LuaValue errh = args[1];
 
@@ -1283,13 +1223,13 @@ void lua_xpcall(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void lua_assert(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 1) throw std::runtime_error("bad argument #1 to 'assert' (value expected)");
+	if (n_args < 1) [[unlikely]] throw std::runtime_error("bad argument #1 to 'assert' (value expected)");
 
 	if (!is_lua_truthy(args[0])) {
 		LuaValue msg = (n_args > 1) ? args[1] : LuaValue(std::string_view("assertion failed!"));
 		throw std::runtime_error(std::holds_alternative<std::string>(msg)
-			                         ? std::get<std::string>(msg)
-			                         : "assertion failed!");
+									 ? std::get<std::string>(msg)
+									 : "assertion failed!");
 	}
 
 	out.clear();
@@ -1325,13 +1265,30 @@ void lua_collectgarbage(const LuaValue* args, size_t n_args, LuaValueVector& out
 	out.push_back(std::monostate{});
 }
 
-void luax_cleanup() {
-    LuaObjectPool::cleanup();
-    {
-#ifdef LUAX_THREAD_SAFE
-        std::lock_guard<std::mutex> lock(get_pool_mutex());
-#endif
-        get_string_pool().clear();
-    }
+thread_local std::deque<LuaValueVector> _func_ret_buf_stack;
+thread_local size_t _func_ret_buf_depth = 0;
+
+LuaValueVector& luax_get_ret_buf() {
+	if (_func_ret_buf_depth >= _func_ret_buf_stack.size()) {
+		_func_ret_buf_stack.emplace_back();
+		_func_ret_buf_stack.back().reserve(8);
+	}
+	auto& buf = _func_ret_buf_stack[_func_ret_buf_depth++];
+	buf.clear();
+	return buf;
 }
 
+void luax_release_ret_buf() {
+	if (_func_ret_buf_depth > 0) {
+		_func_ret_buf_depth--;
+	}
+}
+
+void luax_flush_thread_pool() {
+	LuaObjectPool::cleanup();
+}
+
+void luax_cleanup() {
+	LuaObjectPool::cleanup();
+	get_string_pool().clear();
+}

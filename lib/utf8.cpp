@@ -304,7 +304,6 @@ void utf8_offset(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	return; // nil for out of bounds
 }
 
-
 std::shared_ptr<LuaObject> create_utf8_library() {
 	static std::shared_ptr<LuaObject> utf8_lib;
 	if (utf8_lib) return utf8_lib;

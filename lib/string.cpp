@@ -266,13 +266,12 @@ void get_captures(const LuaPattern::MatchState& ms, LuaValueVector& out) {
 
 // string.byte
 void string_byte(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args == 0) return;
+	if (n_args == 0) [[unlikely]] return;
 	long long i = (n_args >= 2) ? static_cast<long long>(get_double(args[1])) : 1;
 	long long j = (n_args >= 3) ? static_cast<long long>(get_double(args[2])) : i;
 
     lua_string_byte(args[0], i, j, out);
 }
-
 
 // string.char
 void string_char(const LuaValue* args, size_t n_args, LuaValueVector& out) {
@@ -292,7 +291,7 @@ void string_dump(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 // string.find
 void string_find(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 2) return;
+	if (n_args < 2) [[unlikely]] return;
 	std::string_view s = get_sv(args[0]);
 	std::string_view p = get_sv(args[1]);
 	long long init = (n_args >= 3) ? static_cast<long long>(get_double(args[2])) : 1;
@@ -407,7 +406,7 @@ void string_format(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 // string.gmatch
 void string_gmatch(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 2) return;
+	if (n_args < 2) [[unlikely]] return;
 	// We must copy the strings into shared_ptrs because the iterator might outlive the call
 	auto s_ptr = std::make_shared<std::string>(get_sv(args[0]));
 	auto p_ptr = std::make_shared<std::string>(get_sv(args[1]));
@@ -466,7 +465,7 @@ void string_gmatch(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 // string.gsub
 void string_gsub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 3) return;
+	if (n_args < 3) [[unlikely]] return;
 	std::string_view s = get_sv(args[0]);
 	std::string_view p = get_sv(args[1]);
 	const auto& repl = args[2];
@@ -670,7 +669,7 @@ void string_reverse(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void string_sub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args < 2) return;
+	if (n_args < 2) [[unlikely]] return;
 	long long i = (n_args >= 2) ? static_cast<long long>(get_double(args[1])) : 1;
 	long long j = (n_args >= 3) ? static_cast<long long>(get_double(args[2])) : -1;
 
