@@ -28,18 +28,18 @@ static void ensure_seeded() {
 double get_number(const LuaValue& v) {
 	switch (v.index()) {
 		case INDEX_DOUBLE:
-			return std::get<double>(v);
+			return v.get<double>();
 		case INDEX_INTEGER:
-			return static_cast<double>(std::get<long long>(v));
+			return static_cast<double>(v.get<long long>());
 		case INDEX_STRING: {
-			const std::string& s = std::get<std::string>(v);
+			std::string_view s = v.get<std::string_view>();
 			if (s.empty()) return 0.0;
 			double result;
 			auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), result);
 			return (ec == std::errc()) ? result : 0.0;
 		}
 		case INDEX_STRING_VIEW: {
-			std::string_view sv = std::get<std::string_view>(v);
+			std::string_view sv = v.get<std::string_view>();
 			if (sv.empty()) return 0.0;
 			double result;
 			auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), result);
@@ -55,15 +55,15 @@ void math_randomseed(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	ensure_seeded();
 	long long seed = static_cast<long long>(get_number(args[0]));
 	generator.seed(seed);
-	out.assign({std::monostate{}});
+	out.assign({LuaValue()});
 	return;
 }
 
 // math.random
 void math_random(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	ensure_seeded();
-	LuaValue arg1 = n_args >= 1 ? args[0] : std::monostate{};
-	LuaValue arg2 = n_args >= 2 ? args[1] : std::monostate{};
+	LuaValue arg1 = n_args >= 1 ? args[0] : LuaValue();
+	LuaValue arg2 = n_args >= 2 ? args[1] : LuaValue();
 
 	switch (arg1.index()) {
 		case INDEX_NIL: {
@@ -254,14 +254,14 @@ void math_ult(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	return;
 }
 
-std::shared_ptr<LuaObject> create_math_library() {
-	static std::shared_ptr<LuaObject> math_lib;
+LuaObject* create_math_library() {
+	static LuaObject* math_lib;
 	if (math_lib) return math_lib;
 
 	// Seed the random number generator with current time by default
 	generator.seed(std::chrono::system_clock::now().time_since_epoch().count());
 
-	math_lib = std::make_shared<LuaObject>();
+	math_lib = new LuaObject();
 	math_lib->set("abs", LUA_C_FUNC(math_abs));
 	math_lib->set("acos", LUA_C_FUNC(math_acos));
 	math_lib->set("asin", LUA_C_FUNC(math_asin));

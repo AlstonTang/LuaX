@@ -28,7 +28,7 @@ public:
 };
 
 // Function to create the 'io' library table
-std::shared_ptr<LuaObject> create_io_library();
+LuaObject* create_io_library();
 
 // Global IO functions
 void io_close(const LuaValue* args, size_t n_args, LuaValueVector& out);
@@ -44,10 +44,10 @@ void io_type(const LuaValue* args, size_t n_args, LuaValueVector& out);
 void io_write(const LuaValue* args, size_t n_args, LuaValueVector& out);
 
 // Helper to safely get a LuaFile from a LuaValue. Throws on type error.
-inline std::shared_ptr<LuaFile> get_file(const LuaValue& value) {
-	auto obj = get_object(value); // First, get the base LuaObject
+inline LuaFile* get_file(const LuaValue& value) {
+	auto* obj = get_object(value); // First, get the base LuaObject
 	// Then, safely downcast to a LuaFile. Returns nullptr if the cast fails.
-	auto file_ptr = std::dynamic_pointer_cast<LuaFile>(obj);
+	auto* file_ptr = dynamic_cast<LuaFile*>(obj);
 	if (!file_ptr) {
 		throw std::runtime_error("Type error: expected a file handle.");
 	}

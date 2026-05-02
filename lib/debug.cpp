@@ -66,11 +66,11 @@ void debug_upvaluejoin(const LuaValue* args, size_t n_args, LuaValueVector& out)
 	throw std::runtime_error("debug.upvaluejoin is not supported in the translated environment.");
 }
 
-std::shared_ptr<LuaObject> create_debug_library() {
-	static std::shared_ptr<LuaObject> debug_lib;
+LuaObject* create_debug_library() {
+	static LuaObject* debug_lib;
 	if (debug_lib) return debug_lib;
 
-	debug_lib = std::make_shared<LuaObject>();
+	debug_lib = new LuaObject();
 	debug_lib->set("debug", LUA_C_FUNC(debug_debug));
 	debug_lib->set("getuservalue", LUA_C_FUNC(debug_getuservalue));
 	debug_lib->set("gethook", LUA_C_FUNC(debug_gethook));

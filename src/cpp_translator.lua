@@ -474,7 +474,7 @@ register_handler("identifier", function(ctx, node, depth)
 	end
 	
 	if node[3] == "nil" then
-		return "std::monostate{}"
+		return "LuaValue()"
 	elseif node[3] == "true" then
 		return "true", "bool"
 	elseif node[3] == "false" then
@@ -659,12 +659,9 @@ register_handler("binary_expression", function(ctx, node, depth)
 	elseif operator == "/" then
 		return "(" .. left .. " / " .. right .. ")", "double"
 	elseif operator == "//" then
-		return "static_cast<long long>(" .. left .. " / " .. right .. ")", "long long"
+		return "lua_floor_div(" .. left .. ", " .. right .. ")", "long long"
 	elseif operator == "%" then
-		if math_type == "double" then
-			return "std::fmod(" .. left .. ", " .. right .. ")", "double"
-		end
-		return "(" .. left .. " % " .. right .. ")", "long long"
+		return "lua_mod(" .. left .. ", " .. right .. ")", math_type
 	elseif operator == "^" then
 		return "std::pow(" .. left .. ", " .. right .. ")", "double"
 	elseif operator == "&" then
@@ -764,13 +761,13 @@ register_handler("expression_statement", function(ctx, node, depth)
 	local stmts = ctx:flush_statements()
 	
 	if stmts ~= "" then
-		if code == ctx:use_ret_buf() or code == "std::monostate{}" or code == "" then
+		if code == ctx:use_ret_buf() or code == "LuaValue()" or code == "" then
 			return stmts
 		else
 			return stmts .. code .. ";\n"
 		end
 	else
-		if code == "std::monostate{}" or code == "" then
+		if code == "LuaValue()" or code == "" then
 			return "" 
 		end
 		return code .. ";\n"
@@ -791,7 +788,7 @@ register_handler("varargs", function(ctx, node, depth, opts)
 	else
 		local temp_var = "vararg_" .. ctx:get_unique_id()
 		ctx:add_statement("LuaValue " .. temp_var  .. ";\n")
-		ctx:add_statement("if (n_args > " .. start_index .. ") [[likely]] " .. temp_var .. " = args[" .. start_index .. "]; else " .. temp_var .. "= LuaValue(std::monostate{});\n")
+		ctx:add_statement("if (n_args > " .. start_index .. ") [[likely]] " .. temp_var .. " = args[" .. start_index .. "]; else " .. temp_var .. "= LuaValue();\n")
 		return temp_var
 	end
 end)
@@ -2098,7 +2095,7 @@ register_handler("for_generic_statement", function(ctx, node, depth)
 		if #loop_vars >= 2 then
 			cpp_code = cpp_code .. "    LuaValue " .. loop_vars[2] .. " = " .. t_obj .. "->array_part[" .. idx_var .. "];\n"
 		end
-		cpp_code = cpp_code .. "    if (std::holds_alternative<std::monostate>(" .. (#loop_vars >= 2 and loop_vars[2] or (t_obj .. "->array_part[" .. idx_var .. "]")) .. ")) break;\n"
+		cpp_code = cpp_code .. "    if ((" .. (#loop_vars >= 2 and loop_vars[2] or (t_obj .. "->array_part[" .. idx_var .. "]")) .. ").is_nil()) break;\n"
 		cpp_code = cpp_code .. translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "\n"
 		cpp_code = cpp_code .. "}\n"
 		cpp_code = cpp_code .. "}\n"
@@ -2129,7 +2126,7 @@ register_handler("for_generic_statement", function(ctx, node, depth)
 	
 	cpp_code = cpp_code .. "    call_lua_value(" .. iter_func_var .. ", args_obj, 2, " .. current_vals_var .. ");\n"
 	
-	cpp_code = cpp_code .. "    if (" .. current_vals_var .. ".empty() || std::holds_alternative<std::monostate>(" .. current_vals_var .. "[0])) {\n"
+	cpp_code = cpp_code .. "    if (" .. current_vals_var .. ".empty() || (" .. current_vals_var .. "[0]).is_nil()) {\n"
 	cpp_code = cpp_code .. "        break;\n"
 	cpp_code = cpp_code .. "    }\n"
 	

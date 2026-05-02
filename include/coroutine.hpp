@@ -9,11 +9,11 @@
 #include <vector>
 #include <exception>
 
-class LuaCoroutine {
+class LuaCoroutine : public LuaRefCounted {
 public:
 	enum class Status { SUSPENDED, RUNNING, DEAD };
 
-	std::shared_ptr<LuaCallable> func;
+	LuaCallable* func;
 	Status status = Status::SUSPENDED;
 	std::thread worker;
 	
@@ -37,7 +37,7 @@ public:
 	const LuaValue* out_args_ptr = nullptr;
 	size_t out_args_size = 0;
 
-	LuaCoroutine(const std::shared_ptr<LuaCallable>& f);
+	LuaCoroutine(LuaCallable* f);
 	~LuaCoroutine();
 
 	void run();
@@ -54,6 +54,6 @@ void coroutine_status(const LuaValue* args, size_t n_args, LuaValueVector& out);
 void coroutine_running(const LuaValue* args, size_t n_args, LuaValueVector& out);
 void coroutine_wrap(const LuaValue* args, size_t n_args, LuaValueVector& out);
 
-std::shared_ptr<LuaObject> create_coroutine_library();
+LuaObject* create_coroutine_library();
 
 #endif

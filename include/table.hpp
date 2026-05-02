@@ -4,6 +4,6 @@
 #include "lua_object.hpp"
 #include <memory>
 
-std::shared_ptr<LuaObject> create_table_library();
+LuaObject* create_table_library();
 
 #endif // TABLE_HPP
