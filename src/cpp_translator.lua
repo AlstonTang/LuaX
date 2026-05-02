@@ -2061,7 +2061,7 @@ register_handler("for_generic_statement", function(ctx, node, depth)
 	local results_var = "iter_results_" .. ctx:get_unique_id()
 	local current_vals_var = "current_values_" .. ctx:get_unique_id()
 	
-	local cpp_code = prev_stmts .. "{\n"
+	local parts = { prev_stmts, "{\n" }
 	
 	local is_ipairs = false
 	local is_pairs = false
@@ -2083,64 +2083,63 @@ register_handler("for_generic_statement", function(ctx, node, depth)
 		local call_node = expr_list_node[5][1]
 		table_to_iter = translate_node(ctx, call_node[5][2], depth + 1)
 		local stmts = ctx:flush_statements()
-		cpp_code = cpp_code .. stmts
+		table.insert(parts, stmts)
 		
 		local idx_var = "i_" .. ctx:get_unique_id()
 		local t_obj = "t_obj_" .. ctx:get_unique_id()
-		cpp_code = cpp_code .. "auto " .. t_obj .. " = get_object(" .. table_to_iter .. ");\n"
-		cpp_code = cpp_code .. "for (size_t " .. idx_var .. " = 0; " .. idx_var .. " < " .. t_obj .. "->array_part.size(); ++" .. idx_var .. ") {\n"
+		table.insert(parts, "auto " .. t_obj .. " = get_object(" .. table_to_iter .. ");\n")
+		table.insert(parts, "for (size_t " .. idx_var .. " = 0; " .. idx_var .. " < " .. t_obj .. "->array_part.size(); ++" .. idx_var .. ") {\n")
 		if #loop_vars >= 1 then
-			cpp_code = cpp_code .. "    LuaValue " .. loop_vars[1] .. " = static_cast<long long>(" .. idx_var .. " + 1);\n"
+			table.insert(parts, "    LuaValue " .. loop_vars[1] .. " = static_cast<long long>(" .. idx_var .. " + 1);\n")
 		end
 		if #loop_vars >= 2 then
-			cpp_code = cpp_code .. "    LuaValue " .. loop_vars[2] .. " = " .. t_obj .. "->array_part[" .. idx_var .. "];\n"
+			table.insert(parts, "    LuaValue " .. loop_vars[2] .. " = " .. t_obj .. "->array_part[" .. idx_var .. "];\n")
 		end
-		cpp_code = cpp_code .. "    if ((" .. (#loop_vars >= 2 and loop_vars[2] or (t_obj .. "->array_part[" .. idx_var .. "]")) .. ").is_nil()) break;\n"
-		cpp_code = cpp_code .. translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "\n"
-		cpp_code = cpp_code .. "}\n"
-		cpp_code = cpp_code .. "}\n"
-		return cpp_code
+		table.insert(parts, "    if ((" .. (#loop_vars >= 2 and loop_vars[2] or (t_obj .. "->array_part[" .. idx_var .. "]")) .. ").is_nil()) break;\n")
+		table.insert(parts, translate_node(ctx, body_node, depth + 1, { no_braces = true }))
+		table.insert(parts, "\n}\n}\n")
+		return table.concat(parts)
 	end
 
 	if #(expr_list_node[5] or empty_table) == 1 and (expr_list_node[5][1][1] == "call_expression" or expr_list_node[5][1][1] == "method_call_expression") then
 		local iterator_call_buf = translate_node(ctx, expr_list_node[5][1], depth + 1, { multiret = true })
 		local stmts = ctx:flush_statements()
-		cpp_code = cpp_code .. stmts
-		cpp_code = cpp_code .. "const LuaValueVector& " .. results_var .. " = " .. iterator_call_buf .. ";\n"
+		table.insert(parts, stmts)
+		table.insert(parts, "const LuaValueVector& " .. results_var .. " = " .. iterator_call_buf .. ";\n")
 	else
 		local iterator_values_code = translate_node(ctx, expr_list_node, depth + 1)
 		local stmts = ctx:flush_statements()
-		cpp_code = cpp_code .. stmts
-		cpp_code = cpp_code .. "LuaValueVector " .. results_var .. " = " .. iterator_values_code .. ";\n"
+		table.insert(parts, stmts)
+		table.insert(parts, "LuaValueVector " .. results_var .. " = " .. iterator_values_code .. ";\n")
 	end
 	
-	cpp_code = cpp_code .. "LuaValue " .. iter_func_var .. " = (" .. results_var .. ".size() > 0) ? " .. results_var .. "[0] : LuaValue(std::monostate{});\n"
-	cpp_code = cpp_code .. "LuaValue " .. iter_state_var .. " = (" .. results_var .. ".size() > 1) ? " .. results_var .. "[1] : LuaValue(std::monostate{});\n"
-	cpp_code = cpp_code .. "LuaValue " .. iter_value_var .. " = (" .. results_var .. ".size() > 2) ? " .. results_var .. "[2] : LuaValue(std::monostate{});\n"
+	table.insert(parts, "LuaValue " .. iter_func_var .. " = (" .. results_var .. ".size() > 0) ? " .. results_var .. "[0] : LuaValue(std::monostate{});\n")
+	table.insert(parts, "LuaValue " .. iter_state_var .. " = (" .. results_var .. ".size() > 1) ? " .. results_var .. "[1] : LuaValue(std::monostate{});\n")
+	table.insert(parts, "LuaValue " .. iter_value_var .. " = (" .. results_var .. ".size() > 2) ? " .. results_var .. "[2] : LuaValue(std::monostate{});\n")
 	
-	cpp_code = cpp_code .. "LuaValueVector " .. current_vals_var .. ";\n"
-	cpp_code = cpp_code .. current_vals_var .. ".reserve(3);\n"
+	table.insert(parts, "LuaValueVector " .. current_vals_var .. ";\n")
+	table.insert(parts, current_vals_var .. ".reserve(3);\n")
 	
-	cpp_code = cpp_code .. "while (true) {\n"
-	cpp_code = cpp_code .. "    LuaValue args_obj[2] = {" .. iter_state_var .. ", " .. iter_value_var .. "};\n"
+	table.insert(parts, "while (true) {\n")
+	table.insert(parts, "    LuaValue args_obj[2] = {" .. iter_state_var .. ", " .. iter_value_var .. "};\n")
 	
-	cpp_code = cpp_code .. "    call_lua_value(" .. iter_func_var .. ", args_obj, 2, " .. current_vals_var .. ");\n"
+	table.insert(parts, "    call_lua_value(" .. iter_func_var .. ", args_obj, 2, " .. current_vals_var .. ");\n")
 	
-	cpp_code = cpp_code .. "    if (" .. current_vals_var .. ".empty() || (" .. current_vals_var .. "[0]).is_nil()) {\n"
-	cpp_code = cpp_code .. "        break;\n"
-	cpp_code = cpp_code .. "    }\n"
+	table.insert(parts, "    if (" .. current_vals_var .. ".empty() || (" .. current_vals_var .. "[0]).is_nil()) {\n")
+	table.insert(parts, "        break;\n")
+	table.insert(parts, "    }\n")
 	
 	for i, var_cpp_name in ipairs(loop_vars) do
-		cpp_code = cpp_code .. "    LuaValue " .. var_cpp_name .. " = (" .. 
+		table.insert(parts, "    LuaValue " .. var_cpp_name .. " = (" .. 
 				current_vals_var .. ".size() > " .. (i - 1) .. ") ? " .. 
-				current_vals_var .. "[" .. (i - 1) .. "] : LuaValue(std::monostate{});\n"
+				current_vals_var .. "[" .. (i - 1) .. "] : LuaValue(std::monostate{});\n")
 	end
 	
-	cpp_code = cpp_code .. "    " .. iter_value_var .. " = " .. loop_vars[1] .. ";\n"
-	cpp_code = cpp_code .. translate_node(ctx, body_node, depth + 1, { no_braces = true }) .. "\n"
-	cpp_code = cpp_code .. "}}\n"
+	table.insert(parts, "    " .. iter_value_var .. " = " .. loop_vars[1] .. ";\n")
+	table.insert(parts, translate_node(ctx, body_node, depth + 1, { no_braces = true }))
+	table.insert(parts, "\n}}\n")
 	
-	return cpp_code
+	return table.concat(parts)
 end)
 
 --------------------------------------------------------------------------------
@@ -2650,14 +2649,14 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 	
 	if is_main_script then
 		if for_header then
-			return header .. "\n// Main script header\n"
+			return header .. "\n// Main script header\n", ctx
 		else
 			local global_cache_decls, local_cache_decls = emit_cache_declarations(ctx)
 			local buffer_decl = "    LuaValueVector out_result; out_result.reserve(8);\n    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n"
 			local main_function_start = "int main(int argc, char* argv[]) {\n" ..
 										"init_G(argc, argv);\n" .. local_cache_decls .. buffer_decl
 			local main_function_end = "\n    goto luax_main_exit;\nluax_main_exit:\n    luax_cleanup();\n    return 0;\n}"
-			return header .. global_cache_decls .. main_function_start .. generated_code .. main_function_end
+			return header .. global_cache_decls .. main_function_start .. generated_code .. main_function_end, ctx
 		end
 	else
 		local namespace_start = "namespace " .. file_name .. " {\n"
@@ -2670,7 +2669,7 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 			for var_name, _ in pairs(ctx.module_global_vars) do
 				global_var_extern_declarations = global_var_extern_declarations .. "extern LuaValue " .. var_name .. ";\n"
 			end
-			return hpp_header .. global_var_extern_declarations .. namespace_start .. hpp_load_function_declaration .. namespace_end .. "#endif\n"
+			return hpp_header .. global_var_extern_declarations .. namespace_start .. hpp_load_function_declaration .. namespace_end .. "#endif\n", ctx
 		else
 			local cpp_header = "#include \"" .. file_name .. ".hpp\"\n"
 			local global_var_definitions = ""
@@ -2703,8 +2702,39 @@ function CppTranslator:translate_recursive(ast_root, file_name, for_header, curr
 			local global_cache_decls, local_cache_decls = emit_cache_declarations(ctx)
 			local buffer_decl = "    LuaValueVector out_result; out_result.reserve(8);\n    LuaRetBufGuard _ret_buf_guard; LuaValueVector& _func_ret_buf = _ret_buf_guard.buf;\n"
 			local load_function_definition = "LuaValueVector load() {\n" .. local_cache_decls .. buffer_decl .. load_function_body .. "}\n"
-			return header .. cpp_header .. global_cache_decls .. global_var_definitions .. namespace_start .. load_function_definition .. namespace_end
+			return header .. cpp_header .. global_cache_decls .. global_var_definitions .. namespace_start .. load_function_definition .. namespace_end, ctx
 		end
+	end
+end
+
+function CppTranslator:generate_hpp_from_context(ctx, file_name, is_main_script)
+	local header = "#include <iostream>\n#include <vector>\n#include <string>\n#include <map>\n#include <memory>\n#include <variant>\n#include <functional>\n#include <cmath>\n#include <ctime>\n#include <cstdlib>\n#include <limits>\n#include \"lua_object.hpp\"\n\n"
+	
+	for module_name, _ in pairs(ctx.required_modules) do
+		local sanitized_module_name = module_name:gsub("%.", "_")
+		header = header .. "#include \"" .. sanitized_module_name .. ".hpp\"\n"
+	end
+	header = header .. "#include \"math.hpp\"\n"
+	header = header .. "#include \"string.hpp\"\n"
+	header = header .. "#include \"table.hpp\"\n"
+	header = header .. "#include \"os.hpp\"\n"
+	header = header .. "#include \"io.hpp\"\n"
+	header = header .. "#include \"package.hpp\"\n"
+	header = header .. "#include \"utf8.hpp\"\n"
+	header = header .. "#include \"init.hpp\"\n"
+
+	if is_main_script then
+		return header .. "\n// Main script header\n"
+	else
+		local namespace_start = "namespace " .. file_name .. " {\n"
+		local namespace_end = "\n} // namespace " .. file_name .. "\n"
+		local hpp_header = "#ifndef LUAX_" .. string.upper(file_name) .. "_HPP\n#define LUAX_" .. string.upper(file_name) .. "_HPP\n\n#include \"lua_object.hpp\"\n\n"
+		local hpp_load_function_declaration = "LuaValueVector load();\n"
+		local global_var_extern_declarations = ""
+		for var_name, _ in pairs(ctx.module_global_vars) do
+			global_var_extern_declarations = global_var_extern_declarations .. "extern LuaValue " .. var_name .. ";\n"
+		end
+		return hpp_header .. global_var_extern_declarations .. namespace_start .. hpp_load_function_declaration .. namespace_end .. "#endif\n"
 	end
 end
 
