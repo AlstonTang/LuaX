@@ -911,6 +911,28 @@ LuaValue lua_concat(LuaValue&& a, LuaValue&& b) {
 	return lua_concat(static_cast<const LuaValue&>(a), static_cast<const LuaValue&>(b));
 }
 
+LuaValue lua_concat_multiple(const LuaValue* args, size_t n_args) {
+	bool has_object = false;
+	for (size_t i = 0; i < n_args; i++) {
+		if (args[i].index() == INDEX_OBJECT) { has_object = true; break; }
+	}
+	
+	if (!has_object) {
+		std::string res;
+		res.reserve(n_args * 16);
+		for (size_t i = 0; i < n_args; i++) {
+			append_to_string(args[i], res);
+		}
+		return res;
+	}
+	
+	LuaValue cur = args[n_args - 1];
+	for (long long i = n_args - 2; i >= 0; i--) {
+		cur = lua_concat(args[i], cur);
+	}
+	return cur;
+}
+
 // ==========================================
 // Standard Library
 // ==========================================

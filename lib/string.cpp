@@ -359,10 +359,14 @@ void string_format(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 				const auto& val = args[arg_idx++];
 
 				if (spec == 's') {
-					std::string s_val = fast_get_string(val);
-					// Use snprintf only if width/flags are present, else append directly
-					if (sub_fmt == "%s") result.append(s_val);
-					else {
+					if (sub_fmt == "%s") {
+						if (val.index() == INDEX_STRING || val.index() == INDEX_STRING_VIEW) {
+							result.append(val.get<std::string_view>());
+						} else {
+							append_to_string(val, result);
+						}
+					} else {
+						std::string s_val = fast_get_string(val);
 						std::string dyn_fmt = sub_fmt;
 						result.resize(result.size() + s_val.size() + 128); // Over-allocate
 						written = snprintf(&result[result.size() - (s_val.size() + 128)], 128 + s_val.size(),
@@ -506,10 +510,15 @@ void string_gsub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 					}
 					LuaValueVector cb_res;
 					r_func->call(callback_args.data(), callback_args.size(), cb_res);
-					if (!cb_res.empty() && cb_res[0].index() != INDEX_NIL)
-						result.append(fast_get_string(cb_res[0]));
-					else
+					if (!cb_res.empty() && cb_res[0].index() != INDEX_NIL) {
+						if (cb_res[0].index() == INDEX_STRING || cb_res[0].index() == INDEX_STRING_VIEW) {
+							result.append(cb_res[0].get<std::string_view>());
+						} else {
+							append_to_string(cb_res[0], result);
+						}
+					} else {
 						result.append(curr, res - curr);
+					}
 					break;
 				}
 				case INDEX_OBJECT: {
@@ -519,10 +528,15 @@ void string_gsub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 						                  ? std::string(curr, res - curr)
 						                  : std::string(ms.capture[0].init, ms.capture[0].len);
 					auto val = r_obj->get(key);
-					if (val.index() != INDEX_NIL)
-						result.append(fast_get_string(val));
-					else
+					if (val.index() != INDEX_NIL) {
+						if (val.index() == INDEX_STRING || val.index() == INDEX_STRING_VIEW) {
+							result.append(val.get<std::string_view>());
+						} else {
+							append_to_string(val, result);
+						}
+					} else {
 						result.append(curr, res - curr);
+					}
 					break;
 				}
 				default:

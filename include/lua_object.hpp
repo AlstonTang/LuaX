@@ -860,13 +860,17 @@ LuaValue lua_concat(LuaValue&& a, const LuaValue& b);
 LuaValue lua_concat(const LuaValue& a, LuaValue&& b); 
 LuaValue lua_concat(LuaValue&& a, LuaValue&& b);
 
+LuaValue lua_concat_multiple(const LuaValue* args, size_t n_args);
+
 template <typename T1, typename T2, typename T3, typename... Ts>
 LuaValue lua_concat(T1&& a, T2&& b, T3&& c, Ts&&... rest) {
-	// Right-associative: a .. (b .. (c ...))
-	return lua_concat(
-		std::forward<T1>(a), 
-		lua_concat(std::forward<T2>(b), std::forward<T3>(c), std::forward<Ts>(rest)...)
-	);
+	const LuaValue arr[] = { 
+		LuaValue(std::forward<T1>(a)), 
+		LuaValue(std::forward<T2>(b)), 
+		LuaValue(std::forward<T3>(c)), 
+		LuaValue(std::forward<Ts>(rest))... 
+	};
+	return lua_concat_multiple(arr, sizeof...(rest) + 3);
 }
 
 LuaValue as_view(const LuaValue& v);

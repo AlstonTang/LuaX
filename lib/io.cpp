@@ -260,11 +260,21 @@ void LuaFile::write(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 	// args[0] is self. Write args[1]...args[N]
 	for (size_t i = 1; i < n_args; ++i) {
-		std::string s = to_cpp_string(args[i]);
-		if (std::fputs(s.c_str(), file_handle) == EOF) {
-			out.push_back(LuaValue());
-			out.push_back(LuaValue(std::string_view("write failed")));
-			return;
+		const auto& arg = args[i];
+		if (arg.index() == INDEX_STRING || arg.index() == INDEX_STRING_VIEW) {
+			auto sv = arg.get<std::string_view>();
+			if (sv.size() > 0 && std::fwrite(sv.data(), 1, sv.size(), file_handle) != sv.size()) {
+				out.push_back(LuaValue());
+				out.push_back(LuaValue(std::string_view("write failed")));
+				return;
+			}
+		} else {
+			std::string s = to_cpp_string(arg);
+			if (s.size() > 0 && std::fwrite(s.data(), 1, s.size(), file_handle) != s.size()) {
+				out.push_back(LuaValue());
+				out.push_back(LuaValue(std::string_view("write failed")));
+				return;
+			}
 		}
 	}
 	out.push_back(this);
