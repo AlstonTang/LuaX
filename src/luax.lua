@@ -193,7 +193,7 @@ local function generate_cmake(output_path, generated_basenames)
 	local gen_srcs = {}
 	for _, basename in ipairs(generated_basenames) do table.insert(gen_srcs, '"' .. basename .. ".cpp" .. '"') end
 
-	local compile_opts = "-O2"
+	local compile_opts = "-O3 -march=native"
 
 	local cmake_content = {
 		"cmake_minimum_required(VERSION 3.10)",

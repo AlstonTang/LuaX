@@ -20,13 +20,10 @@ const std::string* intern_string_ptr(std::string_view sv);
 void LuaValue::retain() const {
     if (data < NAN_MASK) return;
     uint64_t tag = data & TAG_MASK;
-    if (tag == TAG_STRING) {
+    if (tag >= TAG_STRING && tag <= TAG_CORO) {
         uint64_t ptr_val = data & PAYLOAD_MASK;
-        if (ptr_val & 1ULL) return; // Static string, no retain
+        if (tag == TAG_STRING && (ptr_val & 1ULL)) return; // Static/pooled string, no retain
         auto* ptr = reinterpret_cast<LuaRefCounted*>(ptr_val);
-        if (ptr) ptr->retain();
-    } else if (tag == TAG_OBJECT || tag == TAG_FUNCTION || tag == TAG_CORO) {
-        auto* ptr = reinterpret_cast<LuaRefCounted*>(data & PAYLOAD_MASK);
         if (ptr) ptr->retain();
     }
 }
@@ -34,13 +31,10 @@ void LuaValue::retain() const {
 void LuaValue::release() const {
     if (data < NAN_MASK) return;
     uint64_t tag = data & TAG_MASK;
-    if (tag == TAG_STRING) {
+    if (tag >= TAG_STRING && tag <= TAG_CORO) {
         uint64_t ptr_val = data & PAYLOAD_MASK;
-        if (ptr_val & 1ULL) return; // Static string, no release
+        if (tag == TAG_STRING && (ptr_val & 1ULL)) return; // Static/pooled string, no release
         auto* ptr = reinterpret_cast<LuaRefCounted*>(ptr_val);
-        if (ptr) ptr->release();
-    } else if (tag == TAG_OBJECT || tag == TAG_FUNCTION || tag == TAG_CORO) {
-        auto* ptr = reinterpret_cast<LuaRefCounted*>(data & PAYLOAD_MASK);
         if (ptr) ptr->release();
     }
 }
@@ -272,16 +266,22 @@ LuaValue LuaObject::get_item_internal(const LuaValue& key, int depth) {
 }
 
 LuaValue LuaObject::get_item(const LuaValue& key) {
-	// Fast dispatch happens BEFORE the lock to avoid deadlock and redundant checks
-	switch (key.index()) {
-		case INDEX_INTEGER:     return get_item(key.get<long long>());
-		case INDEX_DOUBLE: {
-			long long i;
-			if (is_integer_key(key.get<double>(), i)) return get_item(i);
-			break;
-		}
-		default:
-			break;
+	uint64_t raw = key.raw_data();
+	uint64_t tag = raw & TAG_MASK;
+	
+	if (tag == TAG_INTEGER) [[likely]] {
+		return get_item(static_cast<long long>(raw & PAYLOAD_MASK));
+	}
+	if (tag == TAG_STRING) [[likely]] {
+		LuaValue* val_ptr = find_prop(key);
+		if (val_ptr && val_ptr->index() != INDEX_NIL) return *val_ptr;
+		if (!metatable) return LuaValue();
+	}
+	if (raw < NAN_MASK) {
+		long long i;
+		double d;
+		std::memcpy(&d, &raw, sizeof(double));
+		if (is_integer_key(d, i)) return get_item(i);
 	}
 	return get_item_internal(key, 0);
 }
@@ -495,6 +495,18 @@ LuaValue LuaObject::get_prop(const LuaValue& key) {
 		auto it = properties->find(key);
 		if (it != properties->end()) return it->second;
 	} else {
+		size_t key_idx = key.index();
+		if (key_idx == INDEX_STRING || key_idx == INDEX_STRING_VIEW) {
+			uint64_t target_raw = key.raw_data();
+			if (key_idx == INDEX_STRING_VIEW || (target_raw & 1ULL) == 0) {
+				const std::string* pooled_ptr = intern_string_ptr(key.get<std::string_view>());
+				target_raw = TAG_STRING | (reinterpret_cast<uint64_t>(pooled_ptr) | 1ULL);
+			}
+			for (auto& p : small_props) {
+				if (p.first.raw_data() == target_raw) return p.second;
+			}
+			return LuaValue();
+		}
 		for (auto& p : small_props) {
 			if (LuaValueEq{}(p.first, key)) return p.second;
 		}
@@ -503,21 +515,16 @@ LuaValue LuaObject::get_prop(const LuaValue& key) {
 }
 
 LuaValue LuaObject::get_prop(std::string_view key) {
+	const std::string* pooled_ptr = intern_string_ptr(key);
+	uint64_t target_raw = TAG_STRING | (reinterpret_cast<uint64_t>(pooled_ptr) | 1ULL);
+
+	for (auto& p : small_props) {
+		if (p.first.raw_data() == target_raw) return p.second;
+	}
+
 	if (properties) {
-		auto it = properties->find(key);
+		auto it = properties->find(std::string_view(*pooled_ptr));
 		if (it != properties->end()) return it->second;
-	} else {
-		for (auto& p : small_props) {
-			const auto& k = p.first;
-			auto idx = k.index();
-			if (idx == INDEX_STRING_VIEW) {
-				auto sv = k.get<std::string_view>();
-				if (sv.data() == key.data() && sv.size() == key.size()) [[likely]] return p.second;
-				if (sv == key) return p.second;
-			} else if (idx == INDEX_STRING) {
-				if (k.get<std::string_view>() == key) [[likely]] return p.second;
-			}
-		}
 	}
 	return LuaValue();
 }
@@ -528,27 +535,36 @@ LuaValue* LuaObject::find_prop(const LuaValue& key) {
 		if (it != properties->end()) return &it->second;
 		return nullptr;
 	}
+	
+	size_t key_idx = key.index();
+	if (key_idx == INDEX_STRING || key_idx == INDEX_STRING_VIEW) {
+		uint64_t target_raw = key.raw_data();
+		if (key_idx == INDEX_STRING_VIEW || (target_raw & 1ULL) == 0) {
+			const std::string* pooled_ptr = intern_string_ptr(key.get<std::string_view>());
+			target_raw = TAG_STRING | (reinterpret_cast<uint64_t>(pooled_ptr) | 1ULL);
+		}
+		for (auto& p : small_props) {
+			if (p.first.raw_data() == target_raw) return &p.second;
+		}
+		return nullptr;
+	}
+
 	for (auto& p : small_props) {
 		if (LuaValueEq{}(p.first, key)) return &p.second;
 	}
 	return nullptr;
 }
 
-// Updated function in lua_object.cpp
 LuaValue* LuaObject::find_prop(std::string_view key) {
-	std::string_view interned_key = intern(key);
+	const std::string* pooled_ptr = intern_string_ptr(key);
+	uint64_t target_raw = TAG_STRING | (reinterpret_cast<uint64_t>(pooled_ptr) | 1ULL);
 
-	// 1. Check small_props with single-instruction pointer comparison
 	for (auto& p : small_props) {
-		const size_t idx = p.first.index();
-		if (idx == INDEX_STRING) [[likely]] {
-			if (p.first.get<std::string_view>().data() == interned_key.data()) return &p.second;
-		}
+		if (p.first.raw_data() == target_raw) return &p.second;
 	}
 
-	// 2. Check Hash Part (Map)
 	if (properties) [[unlikely]] {
-		auto it = properties->find(interned_key); 
+		auto it = properties->find(std::string_view(*pooled_ptr)); 
 		if (it != properties->end()) return &it->second;
 	}
 	return nullptr;
@@ -556,10 +572,14 @@ LuaValue* LuaObject::find_prop(std::string_view key) {
 
 void LuaObject::set_prop(const LuaValue& key, const LuaValue& value) {
 	LuaValue interned_key = key;
-	if (key.index() == INDEX_STRING) {
-		interned_key = intern(key.get<std::string_view>());
-	} else if (key.index() == INDEX_STRING_VIEW) {
-		interned_key = intern(key.get<std::string_view>());
+	size_t key_idx = key.index();
+	uint64_t target_raw = key.raw_data();
+	if (key_idx == INDEX_STRING || key_idx == INDEX_STRING_VIEW) {
+		if (key_idx == INDEX_STRING_VIEW || (target_raw & 1ULL) == 0) {
+			const std::string* pooled_ptr = intern_string_ptr(key.get<std::string_view>());
+			target_raw = TAG_STRING | (reinterpret_cast<uint64_t>(pooled_ptr) | 1ULL);
+		}
+		interned_key = LuaValue::from_raw(target_raw);
 	}
 
 	if (properties) {
@@ -571,9 +591,8 @@ void LuaObject::set_prop(const LuaValue& key, const LuaValue& value) {
 		return;
 	}
 
-	LuaValueEq eq;
 	for (auto it = small_props.begin(); it != small_props.end(); ++it) {
-		if (eq(it->first, interned_key)) {
+		if (it->first.raw_data() == target_raw) {
 			if (value.index() == INDEX_NIL) {
 				small_props.erase(it);
 			} else {
@@ -598,22 +617,23 @@ void LuaObject::set_prop(const LuaValue& key, const LuaValue& value) {
 }
 
 void LuaObject::set_prop(std::string_view key, const LuaValue& value) {
-	std::string_view interned = intern(key);
+	const std::string* pooled_ptr = intern_string_ptr(key);
+	uint64_t target_raw = TAG_STRING | (reinterpret_cast<uint64_t>(pooled_ptr) | 1ULL);
+	LuaValue key_val = LuaValue::from_raw(target_raw);
 
 	if (properties) {
 		if (value.index() == INDEX_NIL) {
-			properties->erase(LuaValue(interned));
+			properties->erase(key_val);
 		} else {
-			auto it = properties->find(interned);
+			auto it = properties->find(std::string_view(*pooled_ptr));
 			if (it != properties->end()) it->second = value;
-			else properties->emplace(LuaValue(interned), value);
+			else properties->emplace(key_val, value);
 		}
 		return;
 	}
 
-	LuaValueEq eq;
 	for (auto it = small_props.begin(); it != small_props.end(); ++it) {
-		if (eq(it->first, interned)) {
+		if (it->first.raw_data() == target_raw) {
 			if (value.index() == INDEX_NIL) {
 				small_props.erase(it);
 			} else {
@@ -624,7 +644,6 @@ void LuaObject::set_prop(std::string_view key, const LuaValue& value) {
 	}
 
 	if (value.index() != INDEX_NIL) {
-		LuaValue key_val = interned;
 		if (small_props.size() >= SMALL_TABLE_THRESHOLD) {
 			properties = std::make_unique<LuaObject::PropMap>();
 			for (auto& p : small_props) (*properties)[p.first] = p.second;
@@ -941,15 +960,38 @@ LuaValue lua_concat(const LuaValue& a, const LuaValue& b) {
 }
 
 LuaValue lua_concat(LuaValue&& a, const LuaValue& b) {
+	if (a.index() == INDEX_STRING && (a.raw_data() & 1ULL) == 0) {
+		auto* ls = reinterpret_cast<LuaString*>(a.raw_data() & PAYLOAD_MASK);
+		if (ls && ls->get_ref_count() == 1) {
+			append_to_string(b, ls->str);
+			return std::move(a);
+		}
+	}
 	return lua_concat(static_cast<const LuaValue&>(a), b);
 }
 
 LuaValue lua_concat(const LuaValue& a, LuaValue&& b) {
+	if (b.index() == INDEX_STRING && (b.raw_data() & 1ULL) == 0) {
+		auto* ls = reinterpret_cast<LuaString*>(b.raw_data() & PAYLOAD_MASK);
+		if (ls && ls->get_ref_count() == 1) {
+			std::string prefix;
+			append_to_string(a, prefix);
+			ls->str.insert(0, prefix);
+			return std::move(b);
+		}
+	}
 	return lua_concat(a, static_cast<const LuaValue&>(b));
 }
  
 LuaValue lua_concat(LuaValue&& a, LuaValue&& b) {
-	return lua_concat(static_cast<const LuaValue&>(a), static_cast<const LuaValue&>(b));
+	if (a.index() == INDEX_STRING && (a.raw_data() & 1ULL) == 0) {
+		auto* ls = reinterpret_cast<LuaString*>(a.raw_data() & PAYLOAD_MASK);
+		if (ls && ls->get_ref_count() == 1) {
+			append_to_string(b, ls->str);
+			return std::move(a);
+		}
+	}
+	return lua_concat(static_cast<const LuaValue&>(a), std::move(b));
 }
 
 LuaValue lua_concat_multiple(const LuaValue* args, size_t n_args) {
@@ -1178,7 +1220,7 @@ void lua_next(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		size_t arr_size = table->array_part.size();
 		for (size_t i = 0; i < arr_size; ++i) {
 			if (table->array_part[i].index() != INDEX_NIL) {
-				out.assign({(double)(i + 1), table->array_part[i]});
+				out.assign({(long long)(i + 1), table->array_part[i]});
 				return;
 			}
 		}
@@ -1187,7 +1229,7 @@ void lua_next(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		if (k_int >= 1 && k_int <= (long long)arr_size) {
 			for (size_t i = (size_t)k_int; i < arr_size; ++i) {
 				if (table->array_part[i].index() != INDEX_NIL) {
-					out.assign({(double)(i + 1), table->array_part[i]});
+					out.assign({(long long)(i + 1), table->array_part[i]});
 					return;
 				}
 			}
@@ -1245,13 +1287,13 @@ void lua_pairs(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 void ipairs_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	out.clear();
 	auto table = args[0].get<LuaObject*>();
-	long long next_idx = static_cast<long long>(args[1].get<double>()) + 1;
+	long long next_idx = args[1].get<long long>() + 1;
 
 	size_t arr_size = table->array_part.size();
 	if (next_idx >= 1 && next_idx <= (long long)arr_size) {
 		const auto& val = table->array_part[next_idx - 1];
 		if (val.index() != INDEX_NIL) {
-			out.push_back(static_cast<double>(next_idx));
+			out.push_back(next_idx);
 			out.push_back(val);
 			return;
 		}
@@ -1277,7 +1319,7 @@ void lua_ipairs(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	static const auto ipairs_iter = LUA_C_FUNC(ipairs_iterator);
 	out.push_back(ipairs_iter);
 	out.push_back(args[0]);
-	out.push_back(0.0);
+	out.push_back(0LL);
 }
 
 void lua_tonumber(const LuaValue* args, size_t n_args, LuaValueVector& out) {

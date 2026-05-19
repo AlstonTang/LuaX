@@ -257,8 +257,8 @@ void get_captures(const LuaPattern::MatchState& ms, LuaValueVector& out) {
 // string.byte
 void string_byte(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (n_args == 0) [[unlikely]] return;
-	long long i = (n_args >= 2) ? static_cast<long long>(get_double(args[1])) : 1;
-	long long j = (n_args >= 3) ? static_cast<long long>(get_double(args[2])) : i;
+	long long i = (n_args >= 2) ? get_integer(args[1]) : 1;
+	long long j = (n_args >= 3) ? get_integer(args[2]) : i;
 
     lua_string_byte(args[0], i, j, out);
 }
@@ -679,8 +679,8 @@ void string_reverse(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 void string_sub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (n_args < 2) [[unlikely]] return;
-	long long i = (n_args >= 2) ? static_cast<long long>(get_double(args[1])) : 1;
-	long long j = (n_args >= 3) ? static_cast<long long>(get_double(args[2])) : -1;
+	long long i = (n_args >= 2) ? get_integer(args[1]) : 1;
+	long long j = (n_args >= 3) ? get_integer(args[2]) : -1;
 
     out.assign({lua_string_sub(args[0], i, j)});
 }
@@ -727,7 +727,7 @@ void lua_string_byte(const LuaValue& str, long long i, long long j, LuaValueVect
     size_t count = static_cast<size_t>(j - i + 1);
     out.resize(count);
     for (size_t k = 0; k < count; ++k) {
-        out[k] = static_cast<double>(static_cast<unsigned char>(s[i + k - 1]));
+        out[k] = static_cast<long long>(static_cast<unsigned char>(s[i + k - 1]));
     }
 }
 

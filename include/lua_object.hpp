@@ -20,20 +20,28 @@
 class LuaObject;
 
 class LuaRefCounted {
-    mutable std::atomic<int> ref_count{0};
+    mutable int ref_count{0};
 public:
     virtual ~LuaRefCounted() = default;
-    void retain() const { ref_count.fetch_add(1, std::memory_order_relaxed); }
+    void retain() const { ++ref_count; }
     void release() const {
-        if (ref_count.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        if (--ref_count == 0) {
             delete this;
         }
     }
+    int get_ref_count() const { return ref_count; }
 };
 
 struct LuaString : public LuaRefCounted {
     std::string str;
     LuaString(std::string_view s) : str(s) {}
+
+    void* operator new(std::size_t size) {
+        return LuaObjectPool::allocate(size);
+    }
+    void operator delete(void* ptr, std::size_t size) noexcept {
+        LuaObjectPool::deallocate(ptr, size);
+    }
 };
 
 // Virtual Base Class for all callable entities (Functions, Closures, C++ built-ins)
@@ -110,6 +118,13 @@ inline LuaCallable* make_specialized_callable(FVar&& v, FSpec&& s) {
 // LuaObject Definition
 class LuaObject : public LuaRefCounted {
 public:
+    void* operator new(std::size_t size) {
+        return LuaObjectPool::allocate(size);
+    }
+    void operator delete(void* ptr, std::size_t size) noexcept {
+        LuaObjectPool::deallocate(ptr, size);
+    }
+
 	struct MetamethodRef {
 		const LuaValue* index;
 		const LuaValue* newindex;
@@ -194,12 +209,11 @@ public:
 	// Metamethod and property cache
 	LuaValue cached_index;
 	LuaValue cached_newindex;
-	std::atomic<bool> metamethods_initialized{false}; 
+	bool metamethods_initialized{false}; 
 	
 	// Inside class LuaObject:
 	inline MetamethodRef get_cached_metamethods() {
-		// Acquire-Release ensures thread safety for the initialization check
-		if (!metamethods_initialized.load(std::memory_order_acquire)) {
+		if (!metamethods_initialized) {
 			ensure_metamethods();
 		}
 		return { &cached_index, &cached_newindex };
@@ -280,6 +294,26 @@ inline double get_double(const LuaValue& value) {
 			std::string s(sv);
 			char* end;
 			double result = std::strtod(s.c_str(), &end);
+			if (end != s.c_str()) return result;
+		}
+	}
+	throw std::runtime_error("Type error: expected number.");
+}
+
+inline long long get_integer(const LuaValue& value) {
+	uint64_t raw = value.raw_data();
+	if ((raw & TAG_MASK) == TAG_INTEGER) [[likely]] {
+		return static_cast<long long>(raw & PAYLOAD_MASK);
+	}
+	size_t idx = value.index();
+	if (idx == INDEX_INTEGER) return value.get<long long>();
+	if (idx == INDEX_DOUBLE) return static_cast<long long>(value.get<double>());
+	if (idx == INDEX_STRING) {
+		std::string_view sv = value.get<std::string_view>();
+		if (!sv.empty()) {
+			std::string s(sv);
+			char* end;
+			long long result = std::strtoll(s.c_str(), &end, 10);
 			if (end != s.c_str()) return result;
 		}
 	}
@@ -499,65 +533,45 @@ inline bool is_lua_truthy(const LuaValue& val) {
 // Core call dispatch — fully inline for cross-TU inlining of fast paths
 inline void call_lua_value(const LuaValue& callable, const LuaValue* args, size_t n_args,
 						   LuaValueVector& out_result) {
-	// 1. Reset the return buffer
 	out_result.clear();
 
-	// 2. Dispatch based on the Type Index
-	switch (callable.index()) {
-		
-		// INDEX 7: LuaCallable* (Transpiled Lua Functions)
-		case INDEX_FUNCTION: [[likely]] {
-			const auto& func_ptr = callable.get<LuaCallable*>();
-			// In a multithreaded engine, always verify the pointer isn't null
+	uint64_t raw = callable.raw_data();
+	if (raw >= TAG_FUNCTION) [[likely]] {
+		if ((raw & TAG_MASK) == TAG_FUNCTION) {
+			auto* func_ptr = reinterpret_cast<LuaCallable*>(raw & PAYLOAD_MASK);
 			if (func_ptr) [[likely]] {
 				func_ptr->call(args, n_args, out_result);
-				return;
 			}
-			break;
-		}
-
-		// INDEX 9: LuaCFunction (Native Library Functions)
-		case INDEX_CFUNCTION: [[likely]] {
-			const auto& cfunc = callable.get<LuaCFunction>();
-			// Cast the raw pointer to the typed function and execute
-			((LuaCFunctionTyped)(cfunc.ptr))(args, n_args, out_result);
 			return;
 		}
+		if ((raw & TAG_MASK) == TAG_CFUNC) {
+			auto ptr = reinterpret_cast<LuaCFunctionPtr>(raw & PAYLOAD_MASK);
+			((LuaCFunctionTyped)ptr)(args, n_args, out_result);
+			return;
+		}
+	}
 
-		// INDEX 6: LuaObject* (Tables with __call)
-		case INDEX_OBJECT: [[unlikely]] {
-			const auto& obj = callable.get<LuaObject*>();
-			if (obj && obj->metatable) {
-				LuaValue call_handler = obj->metatable->get_item("__call");
-				if (is_lua_truthy(call_handler)) {
-					// Optimization: Use a fast stack array for most calls, avoiding TLS and heap overhead.
-					if (n_args <= 7) [[likely]] {
-						LuaValue stack_args[8];
-						stack_args[0] = callable;
-						for (size_t i = 0; i < n_args; ++i) stack_args[i + 1] = args[i];
-						call_lua_value(call_handler, stack_args, n_args + 1, out_result);
-					} else {
-						LuaValueVector heap_args;
-						heap_args.reserve(n_args + 1);
-						heap_args.push_back(callable); 
-						for (size_t i = 0; i < n_args; ++i) heap_args.push_back(args[i]);
-						call_lua_value(call_handler, heap_args.data(), heap_args.size(), out_result);
-					}
-					return;
+	size_t idx = callable.index();
+	if (idx == INDEX_OBJECT) [[unlikely]] {
+		const auto& obj = callable.get<LuaObject*>();
+		if (obj && obj->metatable) {
+			LuaValue call_handler = obj->metatable->get_item("__call");
+			if (is_lua_truthy(call_handler)) {
+				if (n_args <= 7) [[likely]] {
+					LuaValue stack_args[8];
+					stack_args[0] = callable;
+					for (size_t i = 0; i < n_args; ++i) stack_args[i + 1] = args[i];
+					call_lua_value(call_handler, stack_args, n_args + 1, out_result);
+				} else {
+					LuaValueVector heap_args;
+					heap_args.reserve(n_args + 1);
+					heap_args.push_back(callable); 
+					for (size_t i = 0; i < n_args; ++i) heap_args.push_back(args[i]);
+					call_lua_value(call_handler, heap_args.data(), heap_args.size(), out_result);
 				}
+				return;
 			}
-			break; 
 		}
-
-		// INDEX 8: LuaCoroutine*
-		case INDEX_COROUTINE: [[unlikely]] {
-			// Usually handled via coroutine.resume, but if you want 
-			// direct calling to work like resume, add logic here.
-			break;
-		}
-
-		default: [[unlikely]]
-			break;
 	}
 
 	// If we reach here, the value isn't a function, a C function, or a table with __call.
@@ -1072,12 +1086,12 @@ inline long long lua_get_length_int(const LuaValue& val) {
 }
 
 inline LuaValue lua_get_member(const LuaValue& base, const LuaValue& key) {
-	// 1. TABLE ACCESS (The 99% case)
-	if (base.index() == INDEX_OBJECT) [[likely]] {
-		return base.get<LuaObject*>()->get_item(key);
+	uint64_t raw = base.raw_data();
+	if ((raw & TAG_MASK) == TAG_OBJECT) [[likely]] {
+		return reinterpret_cast<LuaObject*>(raw & PAYLOAD_MASK)->get_item(key);
 	}
 
-	if (base.index() == INDEX_STRING) [[unlikely]] {
+	if ((raw & TAG_MASK) == TAG_STRING) [[unlikely]] {
 		static LuaObject* string_lib_obj = _G->get_item("string").get<LuaObject*>();
 		return string_lib_obj->get_item(key);
 	}
@@ -1087,11 +1101,12 @@ inline LuaValue lua_get_member(const LuaValue& base, const LuaValue& key) {
 }
 
 inline LuaValue lua_get_member(const LuaValue& base, std::string_view key) {
-	if (base.index() == INDEX_OBJECT) [[likely]] {
-		return base.get<LuaObject*>()->get_item(key);
+	uint64_t raw = base.raw_data();
+	if ((raw & TAG_MASK) == TAG_OBJECT) [[likely]] {
+		return reinterpret_cast<LuaObject*>(raw & PAYLOAD_MASK)->get_item(key);
 	}
 
-	if (base.index() == INDEX_STRING) [[unlikely]] {
+	if ((raw & TAG_MASK) == TAG_STRING) [[unlikely]] {
 		static LuaObject* string_lib_obj = _G->get_item("string").get<LuaObject*>();
 		return string_lib_obj->get_item(key);
 	}
@@ -1108,8 +1123,9 @@ inline LuaValue lua_get_member(LuaObject* base, std::string_view key) {
 }
 
 inline LuaValue lua_get_member(const LuaValue& base, long long key) {
-	if (base.index() == INDEX_OBJECT) [[likely]] {
-		return base.get<LuaObject*>()->get_item(key);
+	uint64_t raw = base.raw_data();
+	if ((raw & TAG_MASK) == TAG_OBJECT) [[likely]] {
+		return reinterpret_cast<LuaObject*>(raw & PAYLOAD_MASK)->get_item(key);
 	}
 	return LuaValue();
 }

@@ -45,8 +45,9 @@ function Formatter.format_cpp_code(code)
 			local escape_next = false
 			local stmt_start = 1
 			
+			local trimmed_bytes = { byte(trimmed, 1, trimmed_len) }
 			for i = 1, trimmed_len do
-				local b = byte(trimmed, i)
+				local b = trimmed_bytes[i]
 				
 				if escape_next then
 					escape_next = false
@@ -80,11 +81,14 @@ function Formatter.format_cpp_code(code)
 				local stmt_trimmed = stmt:match("^%s*(.-)%s*$")
 				local stmt_len = #stmt_trimmed
 				
+				-- Pre-unpack statement bytes to avoid calling byte() inside loops
+				local stmt_bytes = { byte(stmt_trimmed, 1, stmt_len) }
+				
 				-- Adjust indent level based on braces
 				-- Count closing braces at the start to dedent before printing
 				local leading_close_braces = 0
 				for i = 1, stmt_len do
-					local b = byte(stmt_trimmed, i)
+					local b = stmt_bytes[i]
 					if b == BYTE_RBRACE then
 						leading_close_braces = leading_close_braces + 1
 					elseif b ~= BYTE_SPACE and b ~= BYTE_TAB then
@@ -106,7 +110,7 @@ function Formatter.format_cpp_code(code)
 				local esc = false
 				
 				for i = 1, stmt_len do
-					local b = byte(stmt_trimmed, i)
+					local b = stmt_bytes[i]
 					
 					if esc then
 						esc = false
