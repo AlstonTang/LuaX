@@ -1675,10 +1675,12 @@ local function translate_function_body(ctx, node, depth)
 	var_lambda = var_lambda .. "\n}"
 	
 	local spec_lambda = nil
-	local body_children = body_node[5] or empty_table
-	local is_simple_return = (#body_children == 1 and body_children[1][1] == "return_statement")
-	if arity <= 3 and not has_vararg and is_simple_return then
-		ctx:restore_scope(saved_scope)
+	if arity <= 3 and not has_vararg then
+		local spec_saved_scope = {}
+		for k, v in pairs(saved_scope) do
+			spec_saved_scope[k] = v
+		end
+		ctx:restore_scope(spec_saved_scope)
 		ctx:capture_start()
 		
 		if node[1] == "method_declaration" or node.is_method then
@@ -1696,6 +1698,7 @@ local function translate_function_body(ctx, node, depth)
 		
 		ctx.uses_ret_buf = false
 		ctx.specialized_return_mode = true
+		ctx.current_return_stmt = "return LuaValue();"
 		
 		local spec_body_code = translate_node(ctx, body_node, depth + 1, { no_braces = true })
 		local spec_body_stmts = ctx:capture_end()

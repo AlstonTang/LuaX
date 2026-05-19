@@ -11,6 +11,8 @@
 #include "coroutine.hpp" // Ensure full definition of LuaCoroutine is available
 #include <unordered_set>
 
+const std::string* intern_string_ptr(std::string_view sv);
+
 // ==========================================
 // LuaValue Implementations
 // ==========================================
@@ -18,7 +20,12 @@
 void LuaValue::retain() const {
     if (data < NAN_MASK) return;
     uint64_t tag = data & TAG_MASK;
-    if (tag == TAG_STRING || tag == TAG_OBJECT || tag == TAG_FUNCTION || tag == TAG_CORO) {
+    if (tag == TAG_STRING) {
+        uint64_t ptr_val = data & PAYLOAD_MASK;
+        if (ptr_val & 1ULL) return; // Static string, no retain
+        auto* ptr = reinterpret_cast<LuaRefCounted*>(ptr_val);
+        if (ptr) ptr->retain();
+    } else if (tag == TAG_OBJECT || tag == TAG_FUNCTION || tag == TAG_CORO) {
         auto* ptr = reinterpret_cast<LuaRefCounted*>(data & PAYLOAD_MASK);
         if (ptr) ptr->retain();
     }
@@ -27,7 +34,12 @@ void LuaValue::retain() const {
 void LuaValue::release() const {
     if (data < NAN_MASK) return;
     uint64_t tag = data & TAG_MASK;
-    if (tag == TAG_STRING || tag == TAG_OBJECT || tag == TAG_FUNCTION || tag == TAG_CORO) {
+    if (tag == TAG_STRING) {
+        uint64_t ptr_val = data & PAYLOAD_MASK;
+        if (ptr_val & 1ULL) return; // Static string, no release
+        auto* ptr = reinterpret_cast<LuaRefCounted*>(ptr_val);
+        if (ptr) ptr->release();
+    } else if (tag == TAG_OBJECT || tag == TAG_FUNCTION || tag == TAG_CORO) {
         auto* ptr = reinterpret_cast<LuaRefCounted*>(data & PAYLOAD_MASK);
         if (ptr) ptr->release();
     }
@@ -44,9 +56,8 @@ LuaValue::LuaValue(const std::string& s) {
 }
 
 LuaValue::LuaValue(std::string_view sv) {
-    auto* ls = new LuaString(sv);
-    data = TAG_STRING | (reinterpret_cast<uint64_t>(ls) & PAYLOAD_MASK);
-    ls->retain();
+    const std::string* pooled = intern_string_ptr(sv);
+    data = TAG_STRING | (reinterpret_cast<uint64_t>(pooled) | 1ULL);
 }
 
 bool LuaValue::operator==(const LuaValue& other) const {
@@ -96,37 +107,51 @@ static std::unordered_set<std::string, TransparentStringHash, TransparentStringE
 	return pool;
 }
 
-// Updated function in lua_object.cpp
-std::string_view LuaObject::intern(std::string_view sv) {
-	if (sv.empty()) return "";
+#include <mutex>
+
+static std::mutex& get_string_pool_mutex() {
+	static std::mutex mtx;
+	return mtx;
+}
+
+const std::string* intern_string_ptr(std::string_view sv) {
+	if (sv.empty()) {
+		static const std::string empty;
+		return &empty;
+	}
 	
 	constexpr size_t CACHE_SIZE = 64; 
-	struct CacheEntry { std::string_view key; std::string_view val; };
+	struct CacheEntry { std::string_view key; const std::string* val; };
 	thread_local CacheEntry cache[CACHE_SIZE] = {};
 	
 	size_t h = std::hash<std::string_view>{}(sv);
 	size_t idx = h % CACHE_SIZE;
 	
-	// 1. Ultra-fast MRU check
 	if (cache[idx].key.data() == sv.data() && cache[idx].key.size() == sv.size()) [[likely]] 
 		return cache[idx].val;
 	if (cache[idx].key == sv) [[likely]] return cache[idx].val;
 
-	auto& pool = get_string_pool();
-	
-	// 2. Transparent lookup (avoids std::string allocation)
-	auto it_pool = pool.find(sv);
-	if (it_pool != pool.end()) {
-		std::string_view pooled_view = *it_pool;
-		cache[idx] = {pooled_view, pooled_view};
-		return pooled_view;
+	const std::string* pooled_ptr = nullptr;
+	{
+		std::lock_guard<std::mutex> lock(get_string_pool_mutex());
+		auto& pool = get_string_pool();
+		auto it = pool.find(sv);
+		if (it != pool.end()) {
+			pooled_ptr = &(*it);
+		} else {
+			auto [inserted_it, success] = pool.insert(std::string(sv));
+			pooled_ptr = &(*inserted_it);
+		}
 	}
 	
-	// 3. Slow path: Only allocate string when it's genuinely new
-	auto [inserted_it, success] = pool.insert(std::string(sv));
-	std::string_view pooled_view = *inserted_it;
-	cache[idx] = {pooled_view, pooled_view};
-	return pooled_view;
+	cache[idx] = {std::string_view(*pooled_ptr), pooled_ptr};
+	return pooled_ptr;
+}
+
+// Updated function in lua_object.cpp
+std::string_view LuaObject::intern(std::string_view sv) {
+	const std::string* ptr = intern_string_ptr(sv);
+	return std::string_view(*ptr);
 }
 
 // ==========================================
@@ -250,23 +275,44 @@ LuaValue LuaObject::get_item(const LuaValue& key) {
 	// Fast dispatch happens BEFORE the lock to avoid deadlock and redundant checks
 	switch (key.index()) {
 		case INDEX_INTEGER:     return get_item(key.get<long long>());
-		case INDEX_STRING_VIEW: return get_item(key.get<std::string_view>());
-		case INDEX_STRING:      return get_item(std::string_view(key.get<std::string_view>()));
 		case INDEX_DOUBLE: {
 			long long i;
 			if (is_integer_key(key.get<double>(), i)) return get_item(i);
 			break;
 		}
+		default:
+			break;
 	}
 	return get_item_internal(key, 0);
 }
 
 LuaValue LuaObject::get_item(long long idx) {
-	return get_item_internal(idx, 0);
+	// a. Check Array Part directly
+	if (idx >= 1 && idx <= (long long)array_part.size()) {
+		const LuaValue& res = array_part[idx - 1];
+		if (res.index() != INDEX_NIL) return res;
+	}
+
+	// b. Check Hash Part directly
+	LuaValue key(idx);
+	LuaValue* val_ptr = find_prop(key);
+	if (val_ptr && val_ptr->index() != INDEX_NIL) return *val_ptr;
+
+	// c. If no metatable exists, stop
+	if (!metatable) return LuaValue();
+
+	return get_item_internal(key, 0);
 }
 
 LuaValue LuaObject::get_item(std::string_view key) {
-	// We convert to LuaValue once and pass it down
+	// a. Check Hash Part directly using find_prop
+	LuaValue* val_ptr = find_prop(key);
+	if (val_ptr && val_ptr->index() != INDEX_NIL) return *val_ptr;
+
+	// b. If no metatable exists, we can stop immediately
+	if (!metatable) return LuaValue();
+
+	// c. Fall back to metatable check via get_item_internal (rare)
 	return get_item_internal(LuaValue(key), 0);
 }
 
@@ -490,23 +536,19 @@ LuaValue* LuaObject::find_prop(const LuaValue& key) {
 
 // Updated function in lua_object.cpp
 LuaValue* LuaObject::find_prop(std::string_view key) {
-	// 1. Check small_props with pointer-first logic
+	std::string_view interned_key = intern(key);
+
+	// 1. Check small_props with single-instruction pointer comparison
 	for (auto& p : small_props) {
 		const size_t idx = p.first.index();
-		if (idx == INDEX_STRING_VIEW) [[likely]] {
-			auto sv = p.first.get<std::string_view>();
-			// If pointers match, it's the same interned string
-			if (sv.data() == key.data()) return &p.second;
-		} else if (idx == INDEX_STRING) {
-			if (p.first.get<std::string_view>().data() == key.data()) return &p.second;
+		if (idx == INDEX_STRING) [[likely]] {
+			if (p.first.get<std::string_view>().data() == interned_key.data()) return &p.second;
 		}
 	}
 
 	// 2. Check Hash Part (Map)
 	if (properties) [[unlikely]] {
-		// Because LuaValueHash/Eq are transparent, this uses the string_view 
-		// without creating a std::string or LuaValue temporary.
-		auto it = properties->find(key); 
+		auto it = properties->find(interned_key); 
 		if (it != properties->end()) return &it->second;
 	}
 	return nullptr;
@@ -853,20 +895,19 @@ bool lua_equals(const LuaValue& a, const LuaValue& b) {
 			auto s2 = b.get<std::string_view>();
 			return (s1.data() == s2.data() && s1.size() == s2.size()) || (s1 == s2);
 		}
-		case INDEX_STRING:  return a.get<std::string_view>() == b.get<std::string_view>();
+		case INDEX_STRING: {
+			uint64_t a_ptr = a.raw_data() & PAYLOAD_MASK;
+			uint64_t b_ptr = b.raw_data() & PAYLOAD_MASK;
+			if (a_ptr == b_ptr) return true;
+			return a.get<std::string_view>() == b.get<std::string_view>();
+		}
 		case INDEX_OBJECT:  return a.get<LuaObject*>() == b.get<LuaObject*>();
 		case INDEX_CFUNCTION: return a.get<LuaCFunction>().ptr == b.get<LuaCFunction>().ptr;
 		default:            return a == b;
 	}
 }
 
-// Helper to create a non-owning view of a string to avoid copy
-LuaValue as_view(const LuaValue& v) {
-	if (v.index() == INDEX_STRING) {
-		return LuaValue(std::string_view(v.get<std::string_view>()));
-	}
-	return v; // Copy of non-string is cheap (number, bool) or necessary (table shared_ptr)
-}
+// Helper to create a non-owning view of a string to avoid copy has been inlined in header
 
 LuaValue lua_concat(const LuaValue& a, const LuaValue& b) {
 	if (a.index() == INDEX_OBJECT) {

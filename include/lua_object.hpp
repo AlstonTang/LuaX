@@ -493,18 +493,7 @@ inline bool is_lua_truthy(bool val) { return val; }
 inline bool is_lua_truthy(long long val) { return val != -1; } // -1 is sentinel for nil in raw byte ops
 inline bool is_lua_truthy(double val) { return true; } // Numbers are always truthy in Lua (except sentinel)
 inline bool is_lua_truthy(const LuaValue& val) {
-	const size_t idx = val.index();
-	
-	// Check for Nil (most common falsy)
-	if (idx == INDEX_NIL) [[unlikely]] return false;
-	
-	// Check for Boolean
-	if (idx == INDEX_BOOLEAN) [[unlikely]] {
-		return val.get<bool>();
-	}
-	
-	// Numbers, Strings, Tables, Functions are always truthy
-	return true;
+	return (val.raw_data() & 0xFFFEFFFFFFFFFFFFULL) != TAG_NIL;
 }
 
 // Core call dispatch — fully inline for cross-TU inlining of fast paths
@@ -873,7 +862,12 @@ LuaValue lua_concat(T1&& a, T2&& b, T3&& c, Ts&&... rest) {
 	return lua_concat_multiple(arr, sizeof...(rest) + 3);
 }
 
-LuaValue as_view(const LuaValue& v);
+inline LuaValue as_view(const LuaValue& v) {
+	if ((v.raw_data() & TAG_MASK) == TAG_STRING) {
+		return LuaValue(std::string_view(v.get<std::string_view>()));
+	}
+	return v; 
+}
 
 extern LuaObject* _G;
 
@@ -1166,7 +1160,12 @@ void luax_flush_thread_pool();
 
 template <> inline std::string_view LuaValue::get<std::string_view>() const {
     if ((data & TAG_MASK) == TAG_STRING) {
-        return reinterpret_cast<LuaString*>(data & PAYLOAD_MASK)->str;
+        uint64_t ptr_val = data & PAYLOAD_MASK;
+        if (ptr_val & 1ULL) {
+            return *reinterpret_cast<const std::string*>(ptr_val & ~1ULL);
+        } else {
+            return reinterpret_cast<LuaString*>(ptr_val)->str;
+        }
     }
     return "";
 }
