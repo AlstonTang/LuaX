@@ -19,19 +19,6 @@
 // Forward declaration
 class LuaObject;
 
-class LuaRefCounted {
-    mutable int ref_count{0};
-public:
-    virtual ~LuaRefCounted() = default;
-    void retain() const { ++ref_count; }
-    void release() const {
-        if (--ref_count == 0) {
-            delete this;
-        }
-    }
-    int get_ref_count() const { return ref_count; }
-};
-
 struct LuaString : public LuaRefCounted {
     std::string str;
     LuaString(std::string_view s) : str(s) {}
@@ -188,12 +175,11 @@ public:
 			set_item(key, value);
 		}
 	}
-
-	LuaValue get_item(const LuaValue& key);
-	LuaValue get_item(std::string_view key);
-	LuaValue get_item(long long key);
-	LuaValue get_item(const std::string& key) { return get_item(std::string_view(key)); }
-	LuaValue get_item(const char* key) { return get_item(std::string_view(key)); }
+	inline LuaValue get_item(const LuaValue& key);
+	inline LuaValue get_item(std::string_view key);
+	inline LuaValue get_item(long long key);
+	inline LuaValue get_item(const std::string& key) { return get_item(std::string_view(key)); }
+	inline LuaValue get_item(const char* key) { return get_item(std::string_view(key)); }
 
 	void set_item(const LuaValue& key, const LuaValue& value);
 	void set_item(std::string_view key, const LuaValue& value);
@@ -660,8 +646,8 @@ LuaValue operator<<(const LuaValue& a, const LuaValue& b);
 LuaValue operator>>(const LuaValue& a, const LuaValue& b);
 
 // Comparison Helpers
-bool lua_equals(const LuaValue& a, const LuaValue& b);
-bool lua_not_equals(const LuaValue& a, const LuaValue& b);
+inline bool lua_equals(const LuaValue& a, const LuaValue& b);
+inline bool lua_not_equals(const LuaValue& a, const LuaValue& b) { return !lua_equals(a, b); }
 bool lua_less_than(const LuaValue& a, const LuaValue& b);
 bool lua_greater_than(const LuaValue& a, const LuaValue& b);
 bool lua_less_equals(const LuaValue& a, const LuaValue& b);
@@ -1199,6 +1185,113 @@ template <> inline LuaCoroutine* LuaValue::get<LuaCoroutine*>() const {
 }
 template <> inline LuaCFunction LuaValue::get<LuaCFunction>() const {
     return LuaCFunction{reinterpret_cast<LuaCFunctionPtr>(data & PAYLOAD_MASK)};
+}
+
+inline bool lua_equals(const LuaValue& a, const LuaValue& b) {
+	uint64_t ra = a.raw_data();
+	uint64_t rb = b.raw_data();
+	if (ra == rb) return true;
+
+	size_t lidx = a.index();
+	size_t ridx = b.index();
+
+	if (lidx != ridx) {
+		// Handle cross-type number equality (1 == 1.0)
+		if (lidx == INDEX_DOUBLE && ridx == INDEX_INTEGER)
+			return a.get<double>() == static_cast<double>(b.get<long long>());
+		if (lidx == INDEX_INTEGER && ridx == INDEX_DOUBLE)
+			return static_cast<double>(a.get<long long>()) == b.get<double>();
+		
+		// Handle String vs StringView
+		if ((lidx == INDEX_STRING || lidx == INDEX_STRING_VIEW) &&
+			(ridx == INDEX_STRING || ridx == INDEX_STRING_VIEW)) {
+			std::string_view sa = a.get<std::string_view>();
+			std::string_view sb = b.get<std::string_view>();
+			return sa == sb;
+		}
+		return false;
+	}
+
+	// Same types
+	switch (lidx) {
+		case INDEX_NIL:     return true;
+		case INDEX_BOOLEAN: return a.get<bool>() == b.get<bool>();
+		case INDEX_DOUBLE:  return a.get<double>() == b.get<double>();
+		case INDEX_INTEGER: return a.get<long long>() == b.get<long long>();
+		case INDEX_STRING_VIEW: {
+			auto s1 = a.get<std::string_view>();
+			auto s2 = b.get<std::string_view>();
+			return (s1.data() == s2.data() && s1.size() == s2.size()) || (s1 == s2);
+		}
+		case INDEX_STRING: {
+			uint64_t a_ptr = a.raw_data() & PAYLOAD_MASK;
+			uint64_t b_ptr = b.raw_data() & PAYLOAD_MASK;
+			if (a_ptr == b_ptr) return true;
+			return a.get<std::string_view>() == b.get<std::string_view>();
+		}
+		case INDEX_OBJECT:  return a.get<LuaObject*>() == b.get<LuaObject*>();
+		case INDEX_CFUNCTION: return a.get<LuaCFunction>().ptr == b.get<LuaCFunction>().ptr;
+		default:            return false;
+	}
+}
+
+inline bool LuaValue::operator==(const LuaValue& other) const {
+	return lua_equals(*this, other);
+}
+
+// Inline fast paths for get_item
+inline LuaValue LuaObject::get_item(const LuaValue& key) {
+	uint64_t raw = key.raw_data();
+	uint64_t tag = raw & TAG_MASK;
+
+	// Fast path: integer key -> array access
+	if (tag == TAG_INTEGER) [[likely]] {
+		return get_item(key.get<long long>());
+	}
+	// Fast path: interned string key (pooled bit set) -> direct raw comparison in small_props
+	if (tag == TAG_STRING && (raw & 1ULL)) [[likely]] {
+		if (!properties) [[likely]] {
+			for (auto& p : small_props) {
+				if (p.first.raw_data() == raw) return p.second;
+			}
+			if (!metatable) return LuaValue();
+		} else {
+			auto it = properties->find(key);
+			if (it != properties->end()) return it->second;
+			if (!metatable) return LuaValue();
+		}
+	}
+	return get_item_internal(key, 0);
+}
+
+inline LuaValue LuaObject::get_item(std::string_view key) {
+	// Check Hash Part directly using find_prop
+	LuaValue* val_ptr = find_prop(key);
+	if (val_ptr && val_ptr->index() != INDEX_NIL) return *val_ptr;
+
+	// If no metatable exists, we can stop immediately
+	if (!metatable) return LuaValue();
+
+	// Fall back to metatable check via get_item_internal (rare)
+	return get_item_internal(LuaValue(key), 0);
+}
+
+inline LuaValue LuaObject::get_item(long long idx) {
+	// Check Array Part directly
+	if (idx >= 1 && idx <= (long long)array_part.size()) {
+		const LuaValue& res = array_part[idx - 1];
+		if (res.index() != INDEX_NIL) return res;
+	}
+
+	// Check Hash Part directly
+	LuaValue key(idx);
+	LuaValue* val_ptr = find_prop(key);
+	if (val_ptr && val_ptr->index() != INDEX_NIL) return *val_ptr;
+
+	// If no metatable exists, stop
+	if (!metatable) return LuaValue();
+
+	return get_item_internal(key, 0);
 }
 
 #endif // LUA_OBJECT_HPP

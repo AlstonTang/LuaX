@@ -17,28 +17,6 @@ const std::string* intern_string_ptr(std::string_view sv);
 // LuaValue Implementations
 // ==========================================
 
-void LuaValue::retain() const {
-    if (data < NAN_MASK) return;
-    uint64_t tag = data & TAG_MASK;
-    if (tag >= TAG_STRING && tag <= TAG_CORO) {
-        uint64_t ptr_val = data & PAYLOAD_MASK;
-        if (tag == TAG_STRING && (ptr_val & 1ULL)) return; // Static/pooled string, no retain
-        auto* ptr = reinterpret_cast<LuaRefCounted*>(ptr_val);
-        if (ptr) ptr->retain();
-    }
-}
-
-void LuaValue::release() const {
-    if (data < NAN_MASK) return;
-    uint64_t tag = data & TAG_MASK;
-    if (tag >= TAG_STRING && tag <= TAG_CORO) {
-        uint64_t ptr_val = data & PAYLOAD_MASK;
-        if (tag == TAG_STRING && (ptr_val & 1ULL)) return; // Static/pooled string, no release
-        auto* ptr = reinterpret_cast<LuaRefCounted*>(ptr_val);
-        if (ptr) ptr->release();
-    }
-}
-
 LuaValue::LuaValue(LuaObject* obj) : data(TAG_OBJECT | (reinterpret_cast<uint64_t>(obj) & PAYLOAD_MASK)) { retain(); }
 LuaValue::LuaValue(LuaCallable* func) : data(TAG_FUNCTION | (reinterpret_cast<uint64_t>(func) & PAYLOAD_MASK)) { retain(); }
 LuaValue::LuaValue(LuaCoroutine* coro) : data(TAG_CORO | (reinterpret_cast<uint64_t>(coro) & PAYLOAD_MASK)) { retain(); }
@@ -52,10 +30,6 @@ LuaValue::LuaValue(const std::string& s) {
 LuaValue::LuaValue(std::string_view sv) {
     const std::string* pooled = intern_string_ptr(sv);
     data = TAG_STRING | (reinterpret_cast<uint64_t>(pooled) | 1ULL);
-}
-
-bool LuaValue::operator==(const LuaValue& other) const {
-    return lua_equals(*this, other);
 }
 
 size_t LuaValueHash::operator()(const LuaValue& v) const {
@@ -263,57 +237,6 @@ LuaValue LuaObject::get_item_internal(const LuaValue& key, int depth) {
 	}
 
 	return LuaValue();
-}
-
-LuaValue LuaObject::get_item(const LuaValue& key) {
-	uint64_t raw = key.raw_data();
-	uint64_t tag = raw & TAG_MASK;
-	
-	if (tag == TAG_INTEGER) [[likely]] {
-		return get_item(static_cast<long long>(raw & PAYLOAD_MASK));
-	}
-	if (tag == TAG_STRING) [[likely]] {
-		LuaValue* val_ptr = find_prop(key);
-		if (val_ptr && val_ptr->index() != INDEX_NIL) return *val_ptr;
-		if (!metatable) return LuaValue();
-	}
-	if (raw < NAN_MASK) {
-		long long i;
-		double d;
-		std::memcpy(&d, &raw, sizeof(double));
-		if (is_integer_key(d, i)) return get_item(i);
-	}
-	return get_item_internal(key, 0);
-}
-
-LuaValue LuaObject::get_item(long long idx) {
-	// a. Check Array Part directly
-	if (idx >= 1 && idx <= (long long)array_part.size()) {
-		const LuaValue& res = array_part[idx - 1];
-		if (res.index() != INDEX_NIL) return res;
-	}
-
-	// b. Check Hash Part directly
-	LuaValue key(idx);
-	LuaValue* val_ptr = find_prop(key);
-	if (val_ptr && val_ptr->index() != INDEX_NIL) return *val_ptr;
-
-	// c. If no metatable exists, stop
-	if (!metatable) return LuaValue();
-
-	return get_item_internal(key, 0);
-}
-
-LuaValue LuaObject::get_item(std::string_view key) {
-	// a. Check Hash Part directly using find_prop
-	LuaValue* val_ptr = find_prop(key);
-	if (val_ptr && val_ptr->index() != INDEX_NIL) return *val_ptr;
-
-	// b. If no metatable exists, we can stop immediately
-	if (!metatable) return LuaValue();
-
-	// c. Fall back to metatable check via get_item_internal (rare)
-	return get_item_internal(LuaValue(key), 0);
 }
 
 void LuaObject::set_item(const LuaValue& key, const LuaValue& value) {
@@ -879,52 +802,6 @@ bool lua_less_equals(const LuaValue& a, const LuaValue& b) {
 
 bool lua_greater_than(const LuaValue& a, const LuaValue& b) { return lua_less_than(b, a); }
 bool lua_greater_equals(const LuaValue& a, const LuaValue& b) { return lua_less_equals(b, a); }
-bool lua_not_equals(const LuaValue& a, const LuaValue& b) { return !lua_equals(a, b); }
-
-// Updated function in lua_object.cpp
-bool lua_equals(const LuaValue& a, const LuaValue& b) {
-	size_t lidx = a.index();
-	size_t ridx = b.index();
-
-	if (lidx != ridx) {
-		// Handle cross-type number equality (1 == 1.0)
-		if (lidx == INDEX_DOUBLE && ridx == INDEX_INTEGER)
-			return a.get<double>() == static_cast<double>(b.get<long long>());
-		if (lidx == INDEX_INTEGER && ridx == INDEX_DOUBLE)
-			return static_cast<double>(a.get<long long>()) == b.get<double>();
-		
-		// Handle String vs StringView
-		if ((lidx == INDEX_STRING || lidx == INDEX_STRING_VIEW) &&
-			(ridx == INDEX_STRING || ridx == INDEX_STRING_VIEW)) {
-			std::string_view sa = (lidx == INDEX_STRING) ? std::string_view(a.get<std::string_view>()) : a.get<std::string_view>();
-			std::string_view sb = (ridx == INDEX_STRING) ? std::string_view(b.get<std::string_view>()) : b.get<std::string_view>();
-			return sa == sb;
-		}
-		return false;
-	}
-
-	// Same types: Single switch is much faster than multiple holds_alternative
-	switch (lidx) {
-		case INDEX_NIL:     return true;
-		case INDEX_BOOLEAN: return a.get<bool>() == b.get<bool>();
-		case INDEX_DOUBLE:  return a.get<double>() == b.get<double>();
-		case INDEX_INTEGER: return a.get<long long>() == b.get<long long>();
-		case INDEX_STRING_VIEW: {
-			auto s1 = a.get<std::string_view>();
-			auto s2 = b.get<std::string_view>();
-			return (s1.data() == s2.data() && s1.size() == s2.size()) || (s1 == s2);
-		}
-		case INDEX_STRING: {
-			uint64_t a_ptr = a.raw_data() & PAYLOAD_MASK;
-			uint64_t b_ptr = b.raw_data() & PAYLOAD_MASK;
-			if (a_ptr == b_ptr) return true;
-			return a.get<std::string_view>() == b.get<std::string_view>();
-		}
-		case INDEX_OBJECT:  return a.get<LuaObject*>() == b.get<LuaObject*>();
-		case INDEX_CFUNCTION: return a.get<LuaCFunction>().ptr == b.get<LuaCFunction>().ptr;
-		default:            return a == b;
-	}
-}
 
 // Helper to create a non-owning view of a string to avoid copy has been inlined in header
 

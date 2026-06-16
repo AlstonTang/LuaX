@@ -53,11 +53,43 @@ enum LuaTag : uint64_t {
     TAG_CFUNC    = 0xFFFFULL << 48
 };
 
+class LuaRefCounted {
+    mutable int ref_count{0};
+public:
+    virtual ~LuaRefCounted() = default;
+    void retain() const { ++ref_count; }
+    void release() const {
+        if (--ref_count == 0) {
+            delete this;
+        }
+    }
+    int get_ref_count() const { return ref_count; }
+};
+
 class LuaValue {
     uint64_t data;
 
-    void retain() const;
-    void release() const;
+    inline void retain() const {
+        if (data < NAN_MASK) return;
+        uint64_t tag = data & TAG_MASK;
+        if (tag >= TAG_STRING && tag <= TAG_CORO) {
+            uint64_t ptr_val = data & PAYLOAD_MASK;
+            if (tag == TAG_STRING && (ptr_val & 1ULL)) return; // Static/pooled string, no retain
+            auto* ptr = reinterpret_cast<LuaRefCounted*>(ptr_val);
+            if (ptr) ptr->retain();
+        }
+    }
+
+    inline void release() const {
+        if (data < NAN_MASK) return;
+        uint64_t tag = data & TAG_MASK;
+        if (tag >= TAG_STRING && tag <= TAG_CORO) {
+            uint64_t ptr_val = data & PAYLOAD_MASK;
+            if (tag == TAG_STRING && (ptr_val & 1ULL)) return; // Static/pooled string, no release
+            auto* ptr = reinterpret_cast<LuaRefCounted*>(ptr_val);
+            if (ptr) ptr->release();
+        }
+    }
 
 public:
     // Constructors
@@ -116,18 +148,17 @@ public:
 
     size_t index() const {
         if (data < NAN_MASK) return INDEX_DOUBLE;
-        uint64_t tag = data & TAG_MASK;
-        switch (tag) {
-            case TAG_NIL:      return INDEX_NIL;
-            case TAG_BOOLEAN:  return INDEX_BOOLEAN;
-            case TAG_INTEGER:  return INDEX_INTEGER;
-            case TAG_STRING:   return INDEX_STRING;
-            case TAG_OBJECT:   return INDEX_OBJECT;
-            case TAG_FUNCTION: return INDEX_FUNCTION;
-            case TAG_CORO:     return INDEX_COROUTINE;
-            case TAG_CFUNC:    return INDEX_CFUNCTION;
-            default:           return INDEX_DOUBLE;
-        }
+        static constexpr uint8_t tag_to_index[8] = {
+            INDEX_NIL,        // 0xFFF8
+            INDEX_BOOLEAN,    // 0xFFF9
+            INDEX_INTEGER,    // 0xFFFA
+            INDEX_STRING,     // 0xFFFB
+            INDEX_OBJECT,     // 0xFFFC
+            INDEX_FUNCTION,   // 0xFFFD
+            INDEX_COROUTINE,  // 0xFFFE
+            INDEX_CFUNCTION   // 0xFFFF
+        };
+        return tag_to_index[(data >> 48) - 0xFFF8];
     }
 
     bool is_nil() const { return (data & TAG_MASK) == TAG_NIL; }

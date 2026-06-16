@@ -3,6 +3,10 @@
 LuaX is a transpiler that converts Lua 5.4 source code into C++20, allowing you to compile Lua scripts into standalone native executables. It bridges the gap between Lua's dynamic flexibility and C++'s performance and portability.
 * It is also an experiment in vibe-coding. The vast majority of the code is written *solely* by AI.
 
+## Milestones
+- M1: Self-compilation achieves identical, if not faster, performance running natively than interpreted (see [profile.md](./profile.md))
+	- Note that the advantages aren't currently significant, but we plan to close the performance gap further.
+
 ## Features
 
 *   **Lua 5.4 Support**: Supports a wide range of Lua 5.4 syntax and semantics.
@@ -16,6 +20,7 @@ LuaX is a transpiler that converts Lua 5.4 source code into C++20, allowing you 
 	*   `coroutine`: **Thread-based implementation** (Parallelism removed for now, but will be readded later once LuaX is more stable)
 	*   `package`: Basic module loading support.
 *   **C++ Integration**: Generates readable C++ code that uses a custom runtime library (`LuaValue`, `LuaObject`) to emulate Lua's dynamic typing.
+	*	Because the emitted code is C++, it can be much easier to integrate your own custom libraries into this version of Lua.
 *   **Standalone Executables**: Compiles your Lua scripts directly into native binaries.
 
 ## Prerequisites
