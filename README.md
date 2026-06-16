@@ -78,7 +78,7 @@ LuaX works by traversing the Lua AST (Abstract Syntax Tree) and generating equiv
 *   **`debug` Library**: Not implemented.
 *   **Dynamic Loading**: `load`, `loadfile`, and `dofile` are not supported because the C++ code is compiled ahead-of-time. Use `require` for static dependencies.
 *   **Garbage Collection**: The runtime uses C++ smart pointers (`std::shared_ptr`) for memory management, which differs from Lua's garbage collector (e.g., reference counting vs. mark-and-sweep). Cycle detection is not currently implemented.
-*   **Speed**: Partially faster depending on what you are trying to do, though the performance gap is closing in.
+*   **Speed**: Mostly faster depending on what you are trying to do, but there may be some edge cases where the transpiler/runtime just don't handle it well.
 
 ### Build System Philosophy
 
