@@ -4,6 +4,6 @@
 #include "lua_object.hpp"
 #include <memory>
 
-std::shared_ptr<LuaObject> create_package_library();
+LuaObject* create_package_library();
 
 #endif // PACKAGE_HPP

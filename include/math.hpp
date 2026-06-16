@@ -4,6 +4,6 @@
 #include "lua_object.hpp"
 #include <memory>
 
-std::shared_ptr<LuaObject> create_math_library();
+LuaObject* create_math_library();
 
 #endif // MATH_HPP

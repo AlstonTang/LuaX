@@ -11,12 +11,22 @@
 void package_searchpath(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string name = to_cpp_string(args[0]);
 	std::string path = to_cpp_string(args[1]);
-	std::string sep = n_args >= 3 && std::holds_alternative<std::string>(args[2])
-		                  ? std::get<std::string>(args[2])
-		                  : ".";
-	std::string rep = n_args >= 4 && std::holds_alternative<std::string>(args[3])
-		                  ? std::get<std::string>(args[3])
-		                  : "/";
+	std::string sep = ".";
+	if (n_args >= 3) {
+		switch (args[2].index()) {
+			case INDEX_STRING: sep = args[2].get<std::string_view>(); break;
+			case INDEX_STRING_VIEW: sep = std::string(args[2].get<std::string_view>()); break;
+			default: break;
+		}
+	}
+	std::string rep = "/";
+	if (n_args >= 4) {
+		switch (args[3].index()) {
+			case INDEX_STRING: rep = args[3].get<std::string_view>(); break;
+			case INDEX_STRING_VIEW: rep = std::string(args[3].get<std::string_view>()); break;
+			default: break;
+		}
+	}
 
 	// Replace dots in name with replacement string
 	std::string filename = name;
@@ -55,7 +65,7 @@ void package_searchpath(const LuaValue* args, size_t n_args, LuaValueVector& out
 		                [](const std::string& a, const std::string& b) {
 			                return a + "\t" + b + "\n";
 		                });
-	out.assign({std::monostate{}, error_msg});
+	out.assign({LuaValue(), error_msg});
 	return; // Return nil, error message would be second return value in Lua
 }
 
@@ -65,15 +75,15 @@ void package_loadlib(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 // Global tables for package.loaded and package.preload
-std::shared_ptr<LuaObject> package_loaded_table = std::make_shared<LuaObject>();
-std::shared_ptr<LuaObject> package_preload_table = std::make_shared<LuaObject>();
-std::shared_ptr<LuaObject> package_searchers_table = std::make_shared<LuaObject>();
+LuaObject* package_loaded_table = new LuaObject();
+LuaObject* package_preload_table = new LuaObject();
+LuaObject* package_searchers_table = new LuaObject();
 
-std::shared_ptr<LuaObject> create_package_library() {
-	static std::shared_ptr<LuaObject> package_lib;
+LuaObject* create_package_library() {
+	static LuaObject* package_lib;
 	if (package_lib) return package_lib;
 
-	package_lib = std::make_shared<LuaObject>();
+	package_lib = new LuaObject();
 	package_lib->set("config", std::string("/\n;\n?\n!\n-\n"));
 #if defined(__linux__)
 	package_lib->set("cpath", std::string("/usr/local/lib/lua/5.4/?.so;/usr/lib/x86_64-linux-gnu/lua/5.4/?.so;/usr/lib/lua/5.4/?.so;/usr/local/lib/lua/5.4/loadall.so;./?.so"));

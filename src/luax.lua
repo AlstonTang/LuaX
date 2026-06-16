@@ -109,22 +109,20 @@ local function translate_file(lua_file_path, output_file_name, is_main_entry, sh
 
 	local ast = translator.translate(lua_code, lua_file_path)
 
-	local cpp_code, hpp_code
+	-- Single pass: generate cpp code and collect context for hpp
+	print("Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+	local cpp_code, ctx
 	if is_main_entry then
-		print("Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
-		cpp_code = translate_object:translate_recursive(ast, output_file_name, false, nil, true)
-		print("Done Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
-		print("Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
-		hpp_code = translate_object:translate_recursive(ast, output_file_name, true, nil, true)
-		print("Done Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		cpp_code, ctx = translate_object:translate_recursive(ast, output_file_name, false, nil, true)
 	else
-		print("Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
-		cpp_code = translate_object:translate_recursive(ast, output_file_name, false, output_file_name, false)
-		print("Done Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
-		print("Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
-		hpp_code = translate_object:translate_recursive(ast, output_file_name, true, output_file_name, false)
-		print("Done Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+		cpp_code, ctx = translate_object:translate_recursive(ast, output_file_name, false, output_file_name, false)
 	end
+	print("Done Generating C++ code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+
+	-- Generate hpp from already-collected context (no second AST traversal)
+	print("Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
+	local hpp_code = translate_object:generate_hpp_from_context(ctx, output_file_name, is_main_entry)
+	print("Done Generating hpp code for " .. lua_file_path .. " at " .. os.clock() .. "...")
 
 	local cpp_output_path = BUILD_DIR .. "/" .. output_file_name .. ".cpp"
 	local hpp_output_path = BUILD_DIR .. "/" .. output_file_name .. ".hpp"
@@ -195,7 +193,7 @@ local function generate_cmake(output_path, generated_basenames)
 	local gen_srcs = {}
 	for _, basename in ipairs(generated_basenames) do table.insert(gen_srcs, '"' .. basename .. ".cpp" .. '"') end
 
-	local compile_opts = "-O2"
+	local compile_opts = "-O3 -march=native"
 
 	local cmake_content = {
 		"cmake_minimum_required(VERSION 3.10)",

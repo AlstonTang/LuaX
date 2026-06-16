@@ -7,7 +7,8 @@ thread_local LuaCoroutine* current_coroutine = nullptr;
 // if the coroutine is garbage-collected while suspended.
 struct CoroutineTerminated : public std::exception {};
 
-LuaCoroutine::LuaCoroutine(const std::shared_ptr<LuaCallable>& f) : func(f) {
+LuaCoroutine::LuaCoroutine(LuaCallable* f) : func(f) {
+	if (func) func->retain();
 	// Start the persistent worker thread
 	worker = std::thread(&LuaCoroutine::run, this);
 }
@@ -24,6 +25,7 @@ LuaCoroutine::~LuaCoroutine() {
 	if (worker.joinable()) {
 		worker.join();
 	}
+	if (func) func->release();
 }
 
 void LuaCoroutine::run() {
@@ -102,21 +104,28 @@ void LuaCoroutine::run() {
 	// ==========================================
 	// CRITICAL LIFETIME FIX FOR NESTED COROUTINES
 	// ==========================================
-	std::shared_ptr<LuaCallable> local_func;
+	LuaCallable* local_func;
 	{
 		std::lock_guard<std::mutex> lock(mtx);
 		args.clear();
 		results.clear();
-		local_func = std::move(func); // Take ownership of the function
+		local_func = func; // Take ownership of the function
+		func = nullptr;
 	}
 	
 	// Destroy the function environment (which contains nested coroutines) 
 	// ON THE THREAD THAT CREATED THEM. This prevents cross-thread frees 
 	// from triggering "unaligned tcache chunk" crashes.
-	local_func.reset();
+	if (local_func) local_func->release();
 
 	// Safely flush the pool now that all LuaValues on this thread are dead
 	luax_flush_thread_pool();
+
+	{
+		std::lock_guard<std::mutex> lock(mtx);
+		status = Status::DEAD;
+		cv.notify_all();
+	}
 }
 
 void LuaCoroutine::resume(const LuaValue* resume_args, size_t n_resume_args, LuaValueVector& out) {
@@ -190,18 +199,29 @@ void LuaCoroutine::yield(const LuaValue* yield_args, size_t n_args, LuaValueVect
 // --- Bindings ---
 
 void coroutine_create(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCallable>>(args[0])) {
-		out.push_back(LuaValue(std::make_shared<LuaCoroutine>(std::get<std::shared_ptr<LuaCallable>>(args[0]))));
-		return;
+	if (n_args > 0) {
+		switch (args[0].index()) {
+			case INDEX_FUNCTION:
+				out.push_back(LuaValue(new LuaCoroutine(args[0].get<LuaCallable*>())));
+				return;
+			default:
+				break;
+		}
 	}
 	throw std::runtime_error("function expected");
 }
 
 void coroutine_resume(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) {
-		auto co = std::get<std::shared_ptr<LuaCoroutine>>(args[0]);
-		co->resume(n_args > 1 ? args + 1 : nullptr, n_args > 1 ? n_args - 1 : 0, out);
-		return;
+	if (n_args > 0) {
+		switch (args[0].index()) {
+			case INDEX_COROUTINE: {
+				auto co = args[0].get<LuaCoroutine*>();
+				co->resume(n_args > 1 ? args + 1 : nullptr, n_args > 1 ? n_args - 1 : 0, out);
+				return;
+			}
+			default:
+				break;
+		}
 	}
 	throw std::runtime_error("thread expected");
 }
@@ -211,39 +231,51 @@ void coroutine_yield(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 }
 
 void coroutine_status(const LuaValue* args, size_t n_args, LuaValueVector& out) {
-	if (n_args > 0 && std::holds_alternative<std::shared_ptr<LuaCoroutine>>(args[0])) {
-		auto co = std::get<std::shared_ptr<LuaCoroutine>>(args[0]);
-		const char* s = (co->status == LuaCoroutine::Status::DEAD) ? "dead" : "suspended";
-		out.push_back(LuaValue(std::string_view(s)));
-		return;
+	if (n_args > 0) {
+		switch (args[0].index()) {
+			case INDEX_COROUTINE: {
+				auto co = args[0].get<LuaCoroutine*>();
+				const char* s = (co->status == LuaCoroutine::Status::DEAD) ? "dead" : "suspended";
+				out.push_back(LuaValue(std::string_view(s)));
+				return;
+			}
+			default:
+				break;
+		}
 	}
 	out.push_back(LuaValue(std::string_view("invalid")));
 }
 
 void coroutine_running(const LuaValue*, size_t, LuaValueVector& out) {
-	out.assign({ std::monostate{}, (current_coroutine == nullptr) });
+	out.assign({ LuaValue(), (current_coroutine == nullptr) });
 }
 
 void coroutine_wrap(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValueVector res;
 	coroutine_create(args, n_args, res);
-	auto co = std::get<std::shared_ptr<LuaCoroutine>>(res[0]);
-
-	out.push_back(LuaValue(make_lua_callable([co](const LuaValue* a, size_t n, LuaValueVector& o) {
+	LuaValue co_val = res[0];
+	out.push_back(LuaValue(make_lua_callable([co_val](const LuaValue* a, size_t n, LuaValueVector& o) {
+		auto co = co_val.get<LuaCoroutine*>();
 		LuaValueVector w_out;
 		co->resume(a, n, w_out);
 		if (w_out.empty()) return;
 		
-		if (std::holds_alternative<bool>(w_out[0]) && !std::get<bool>(w_out[0])) {
-			throw std::runtime_error(w_out.size() > 1 ? to_cpp_string(w_out[1]) : "unknown error");
+		switch (w_out[0].index()) {
+			case INDEX_BOOLEAN:
+				if (!w_out[0].get<bool>()) {
+					throw std::runtime_error(w_out.size() > 1 ? to_cpp_string(w_out[1]) : "unknown error");
+				}
+				break;
+			default:
+				break;
 		}
 		w_out.erase(w_out.begin());
 		o = std::move(w_out);
 	})));
 }
 
-std::shared_ptr<LuaObject> create_coroutine_library() {
-	auto lib = std::make_shared<LuaObject>();
+LuaObject* create_coroutine_library() {
+	auto lib = new LuaObject();
 	lib->set("create", LUA_C_FUNC(coroutine_create));
 	lib->set("resume", LUA_C_FUNC(coroutine_resume));
 	lib->set("yield", LUA_C_FUNC(coroutine_yield));

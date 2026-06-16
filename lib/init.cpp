@@ -20,10 +20,17 @@
 void lua_setmetatable(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (n_args < 2) [[unlikely]] throw std::runtime_error("bad argument #2 to 'setmetatable' (nil or table expected)");
 	if (auto obj = get_object(args[0])) {
-		if (std::holds_alternative<std::monostate>(args[1])) {
-			obj->set_metatable(nullptr);
-		} else if (auto mt = get_object(args[1])) {
-			obj->set_metatable(mt);
+		switch (args[1].index()) {
+			case INDEX_NIL:
+				obj->set_metatable(nullptr);
+				break;
+			case INDEX_OBJECT: {
+				auto mt = args[1].get<LuaObject*>();
+				obj->set_metatable(mt);
+				break;
+			}
+			default:
+				throw std::runtime_error("bad argument #2 to 'setmetatable' (nil or table expected)");
 		}
 		out.assign({args[0]});
 		return;
@@ -39,7 +46,7 @@ void lua_getmetatable(const LuaValue* args, size_t n_args, LuaValueVector& out) 
 			return;
 		}
 	}
-	out.assign({std::monostate{}});
+	out.assign({LuaValue()});
 }
 
 void lua_type(const LuaValue* args, size_t n_args, LuaValueVector& out) {
@@ -75,11 +82,11 @@ void lua_print(const LuaValue* args, size_t n_args, LuaValueVector& out) {
         std::cout << to_cpp_string(args[i]) << (i == n_args - 1 ? "" : "\t");
     }
     std::cout << std::endl;
-    out.assign({std::monostate{}});
+    out.assign({LuaValue()});
 }
 
-static std::shared_ptr<LuaObject> create_initial_global() {
-	auto globals = std::make_shared<LuaObject>();
+static LuaObject* create_initial_global() {
+	auto* globals = new LuaObject();
 	
 	globals->set("assert", LUA_C_FUNC(lua_assert));
 	globals->set("collectgarbage", LUA_C_FUNC(lua_collectgarbage));
@@ -120,10 +127,10 @@ static std::shared_ptr<LuaObject> create_initial_global() {
 	return globals;
 }
 
-std::shared_ptr<LuaObject> _G = create_initial_global();
+LuaObject* _G = create_initial_global();
 
 void init_G(int argc, char* argv[]) {
-	auto arg = std::make_shared<LuaObject>();
+	auto* arg = new LuaObject();
 	for (int i = 0; i < argc; i++) {
 		arg->set_item((double)(i), std::string(argv[i]));
 	}

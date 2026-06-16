@@ -194,51 +194,41 @@ namespace LuaPattern {
 // --- Helper Functions ---
 
 inline std::string_view get_sv(const LuaValue& v) {
-	if (const auto* s = std::get_if<std::string>(&v)) return *s;
-	if (const auto* sv = std::get_if<std::string_view>(&v)) return *sv;
-	return "";
+	switch (v.index()) {
+		case INDEX_STRING:
+			return v.get<std::string_view>();
+		case INDEX_STRING_VIEW:
+			return v.get<std::string_view>();
+		default:
+			return "";
+	}
 }
 
 std::string fast_get_string(const LuaValue& v) {
-	return std::visit([](auto&& arg) -> std::string {
-		using T = std::decay_t<decltype(arg)>;
-		if constexpr (std::is_same_v<T, std::string>) return arg;
-		if constexpr (std::is_same_v<T, std::string_view>) return std::string(arg);
-		if constexpr (std::is_same_v<T, double> || std::is_same_v<T, long long>) {
-			char buf[32];
-			auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), arg);
-			return std::string(buf, ptr - buf);
-		}
-		return "";
-	}, v);
+    size_t idx = v.index();
+    if (idx == INDEX_STRING || idx == INDEX_STRING_VIEW) return std::string(v.get<std::string_view>());
+    if (idx == INDEX_DOUBLE || idx == INDEX_INTEGER) {
+        char buf[32];
+        auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), v.get<double>());
+        return std::string(buf, ptr - buf);
+    }
+    return "";
 }
 
 std::string get_string(const LuaValue& v) {
-	return std::visit([](auto&& arg) -> std::string {
-		using T = std::decay_t<decltype(arg)>;
-
-		if constexpr (std::is_same_v<T, std::string>) {
-			return arg; // Copy the existing string
-		}
-		else if constexpr (std::is_same_v<T, std::string_view>) {
-			return std::string(arg);
-		}
-		else if constexpr (std::is_same_v<T, double>) {
-			char buf[32];
-			// std::to_chars is significantly faster than snprintf
-			auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), arg, std::chars_format::general, 14);
-			return std::string(buf, ptr - buf);
-		}
-		else if constexpr (std::is_same_v<T, long long>) {
-			char buf[24];
-			// std::to_chars is significantly faster than std::to_string
-			auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), arg);
-			return std::string(buf, ptr - buf);
-		}
-		else {
-			return "";
-		}
-	}, v);
+    size_t idx = v.index();
+    if (idx == INDEX_STRING || idx == INDEX_STRING_VIEW) return std::string(v.get<std::string_view>());
+    if (idx == INDEX_DOUBLE) {
+        char buf[32];
+        auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), v.get<double>(), std::chars_format::general, 14);
+        return std::string(buf, ptr - buf);
+    }
+    if (idx == INDEX_INTEGER) {
+        char buf[24];
+        auto [ptr, ec] = std::to_chars(buf, buf + sizeof(buf), v.get<long long>());
+        return std::string(buf, ptr - buf);
+    }
+    return "";
 }
 
 // No longer needed, using LuaObject::get_single_char instead
@@ -267,8 +257,8 @@ void get_captures(const LuaPattern::MatchState& ms, LuaValueVector& out) {
 // string.byte
 void string_byte(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (n_args == 0) [[unlikely]] return;
-	long long i = (n_args >= 2) ? static_cast<long long>(get_double(args[1])) : 1;
-	long long j = (n_args >= 3) ? static_cast<long long>(get_double(args[2])) : i;
+	long long i = (n_args >= 2) ? get_integer(args[1]) : 1;
+	long long j = (n_args >= 3) ? get_integer(args[2]) : i;
 
     lua_string_byte(args[0], i, j, out);
 }
@@ -295,12 +285,7 @@ void string_find(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string_view s = get_sv(args[0]);
 	std::string_view p = get_sv(args[1]);
 	long long init = (n_args >= 3) ? static_cast<long long>(get_double(args[2])) : 1;
-	bool plain = (n_args >= 4)
-		             ? std::visit([](auto&& arg) {
-			             if constexpr (std::is_same_v<std::decay_t<decltype(arg)>, bool>) return arg;
-			             return false;
-		             }, args[3])
-		             : false;
+	bool plain = (n_args >= 4) ? (args[3].index() == INDEX_BOOLEAN ? args[3].get<bool>() : false) : false;
 
 	long long len = s.length();
 	if (init < 0) init += len + 1;
@@ -308,7 +293,7 @@ void string_find(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	out.clear();
 
 	if (init > len + 1) {
-		out.push_back(std::monostate{});
+		out.push_back(LuaValue());
 		return;
 	}
 
@@ -347,7 +332,7 @@ void string_find(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		}
 		while (s_ptr++ < s_end && !anchor);
 	}
-	out.push_back(std::monostate{});
+	out.push_back(LuaValue());
 }
 
 // string.format
@@ -374,10 +359,14 @@ void string_format(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 				const auto& val = args[arg_idx++];
 
 				if (spec == 's') {
-					std::string s_val = fast_get_string(val);
-					// Use snprintf only if width/flags are present, else append directly
-					if (sub_fmt == "%s") result.append(s_val);
-					else {
+					if (sub_fmt == "%s") {
+						if (val.index() == INDEX_STRING || val.index() == INDEX_STRING_VIEW) {
+							result.append(val.get<std::string_view>());
+						} else {
+							append_to_string(val, result);
+						}
+					} else {
+						std::string s_val = fast_get_string(val);
 						std::string dyn_fmt = sub_fmt;
 						result.resize(result.size() + s_val.size() + 128); // Over-allocate
 						written = snprintf(&result[result.size() - (s_val.size() + 128)], 128 + s_val.size(),
@@ -408,10 +397,10 @@ void string_format(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 void string_gmatch(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (n_args < 2) [[unlikely]] return;
 	// We must copy the strings into shared_ptrs because the iterator might outlive the call
-	auto s_ptr = std::make_shared<std::string>(get_sv(args[0]));
-	auto p_ptr = std::make_shared<std::string>(get_sv(args[1]));
-	auto last_match_ptr = std::make_shared<size_t>(0);
-	auto done_ptr = std::make_shared<bool>(false);
+	auto s_ptr = new std::string(get_sv(args[0]));
+	auto p_ptr = new std::string(get_sv(args[1]));
+	auto last_match_ptr = new size_t(0);
+	auto done_ptr = new bool(false);
 
 	auto iter = [s_ptr, p_ptr, last_match_ptr, done_ptr](const LuaValue*, size_t, LuaValueVector& iter_out) {
 		if (*done_ptr) return;
@@ -460,7 +449,7 @@ void string_gmatch(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		*done_ptr = true;
 	};
 
-	out.assign({make_lua_callable(std::move(iter)), std::monostate{}, std::monostate{}});
+	out.assign({make_lua_callable(std::move(iter)), LuaValue(), LuaValue()});
 }
 
 // string.gsub
@@ -500,12 +489,58 @@ void string_gsub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 			// Handle replacement logic
 			std::string_view r_text;
 			bool is_string_repl = false;
-			if (const auto* s = std::get_if<std::string>(&repl)) {
-				r_text = *s;
-				is_string_repl = true;
-			} else if (const auto* sv = std::get_if<std::string_view>(&repl)) {
-				r_text = *sv;
-				is_string_repl = true;
+
+			switch (repl.index()) {
+				case INDEX_STRING:
+					r_text = repl.get<std::string_view>();
+					is_string_repl = true;
+					break;
+				case INDEX_STRING_VIEW:
+					r_text = repl.get<std::string_view>();
+					is_string_repl = true;
+					break;
+				case INDEX_FUNCTION: {
+					auto* r_func = repl.get<LuaCallable*>();
+					// Function replacement
+					callback_args.clear();
+					if (ms.level == 0) callback_args.push_back(std::string(curr, res - curr));
+					else {
+						for (int i = 0; i < ms.level; ++i)
+							callback_args.push_back(std::string(ms.capture[i].init, ms.capture[i].len));
+					}
+					LuaValueVector cb_res;
+					r_func->call(callback_args.data(), callback_args.size(), cb_res);
+					if (!cb_res.empty() && cb_res[0].index() != INDEX_NIL) {
+						if (cb_res[0].index() == INDEX_STRING || cb_res[0].index() == INDEX_STRING_VIEW) {
+							result.append(cb_res[0].get<std::string_view>());
+						} else {
+							append_to_string(cb_res[0], result);
+						}
+					} else {
+						result.append(curr, res - curr);
+					}
+					break;
+				}
+				case INDEX_OBJECT: {
+					auto* r_obj = repl.get<LuaObject*>();
+					// Table replacement
+					std::string key = (ms.level == 0)
+						                  ? std::string(curr, res - curr)
+						                  : std::string(ms.capture[0].init, ms.capture[0].len);
+					auto val = r_obj->get(key);
+					if (val.index() != INDEX_NIL) {
+						if (val.index() == INDEX_STRING || val.index() == INDEX_STRING_VIEW) {
+							result.append(val.get<std::string_view>());
+						} else {
+							append_to_string(val, result);
+						}
+					} else {
+						result.append(curr, res - curr);
+					}
+					break;
+				}
+				default:
+					break;
 			}
 
 			if (is_string_repl) {
@@ -531,32 +566,6 @@ void string_gsub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 						result += r_text[i];
 					}
 				}
-			}
-			else if (auto* r_func = std::get_if<std::shared_ptr<LuaCallable>>(&repl)) {
-				// Function replacement
-				callback_args.clear();
-				if (ms.level == 0) callback_args.push_back(std::string(curr, res - curr));
-				else {
-					for (int i = 0; i < ms.level; ++i)
-						callback_args.push_back(std::string(ms.capture[i].init, ms.capture[i].len));
-				}
-				LuaValueVector cb_res;
-				(*r_func)->call(callback_args.data(), callback_args.size(), cb_res);
-				if (!cb_res.empty() && !std::holds_alternative<std::monostate>(cb_res[0]))
-					result.append(fast_get_string(cb_res[0]));
-				else
-					result.append(curr, res - curr);
-			}
-			else if (auto* r_obj = std::get_if<std::shared_ptr<LuaObject>>(&repl)) {
-				// Table replacement
-				std::string key = (ms.level == 0)
-					                  ? std::string(curr, res - curr)
-					                  : std::string(ms.capture[0].init, ms.capture[0].len);
-				auto val = (*r_obj)->get(key);
-				if (!std::holds_alternative<std::monostate>(val))
-					result.append(fast_get_string(val));
-				else
-					result.append(curr, res - curr);
 			}
 
 			last_match_end = res;
@@ -596,7 +605,7 @@ void string_match(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 	out.clear();
 	if (init > (long long)s.length() + 1) {
-		out.push_back(std::monostate{});
+		out.push_back(LuaValue());
 		return;
 	}
 
@@ -627,7 +636,7 @@ void string_match(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	}
 	while (s_ptr++ < s_end && !anchor);
 
-	out.push_back(std::monostate{});
+	out.push_back(LuaValue());
 }
 
 // string.pack (Stub)
@@ -670,8 +679,8 @@ void string_reverse(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 
 void string_sub(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	if (n_args < 2) [[unlikely]] return;
-	long long i = (n_args >= 2) ? static_cast<long long>(get_double(args[1])) : 1;
-	long long j = (n_args >= 3) ? static_cast<long long>(get_double(args[2])) : -1;
+	long long i = (n_args >= 2) ? get_integer(args[1]) : 1;
+	long long j = (n_args >= 3) ? get_integer(args[2]) : -1;
 
     out.assign({lua_string_sub(args[0], i, j)});
 }
@@ -718,7 +727,7 @@ void lua_string_byte(const LuaValue& str, long long i, long long j, LuaValueVect
     size_t count = static_cast<size_t>(j - i + 1);
     out.resize(count);
     for (size_t k = 0; k < count; ++k) {
-        out[k] = static_cast<double>(static_cast<unsigned char>(s[i + k - 1]));
+        out[k] = static_cast<long long>(static_cast<unsigned char>(s[i + k - 1]));
     }
 }
 
@@ -736,11 +745,11 @@ LuaValue lua_string_sub(const LuaValue& str, long long i, long long j) {
 
 // --- Library Creation ---
 
-std::shared_ptr<LuaObject> create_string_library() {
-	static std::shared_ptr<LuaObject> lib;
+LuaObject* create_string_library() {
+	static LuaObject* lib;
 	if (lib) return lib;
 
-	lib = std::make_shared<LuaObject>();
+	lib = new LuaObject();
 	lib->set("byte", LUA_C_FUNC(string_byte));
 	lib->set("char", LUA_C_FUNC(string_char));
 	lib->set("dump", LUA_C_FUNC(string_dump));

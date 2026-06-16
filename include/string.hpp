@@ -6,7 +6,7 @@
 #include <memory>
 
 // Creates the 'string' library table
-std::shared_ptr<LuaObject> create_string_library();
+LuaObject* create_string_library();
 
 // String library functions - exposed for direct use
 void string_byte(const LuaValue* args, size_t n_args, LuaValueVector& out);

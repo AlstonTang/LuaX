@@ -85,17 +85,20 @@ void utf8_char(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	std::string result_str;
 	for (size_t i = 0; i < n_args; ++i) {
 		LuaValue cp_val = args[i];
-		if (std::holds_alternative<std::monostate>(cp_val)) {
-			break;
-		}
-		if (std::holds_alternative<double>(cp_val)) {
-			int codepoint = static_cast<int>(std::get<double>(cp_val));
-			result_str += encode_utf8(codepoint);
-		}
-		else {
-			throw std::runtime_error("bad argument #" + std::to_string(i + 1) + " to 'char' (number expected)");
+		switch (cp_val.index()) {
+			case INDEX_NIL:
+				goto end_loop; // break the loop
+			case INDEX_DOUBLE:
+				result_str += encode_utf8(static_cast<int>(cp_val.get<double>()));
+				break;
+			case INDEX_INTEGER:
+				result_str += encode_utf8(static_cast<int>(cp_val.get<long long>()));
+				break;
+			default:
+				throw std::runtime_error("bad argument #" + std::to_string(i + 1) + " to 'char' (number expected)");
 		}
 	}
+end_loop:
 	out.assign({result_str});
 	return;
 }
@@ -109,17 +112,32 @@ void utf8_charpattern(const LuaValue* args, size_t n_args, LuaValueVector& out) 
 // utf8.codepoint (string to integer codepoint(s))
 void utf8_codepoint(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue s_val = args[0];
-	if (!std::holds_alternative<std::string>(s_val)) {
-		throw std::runtime_error("bad argument #1 to 'codepoint' (string expected)");
+	std::string s;
+	switch (s_val.index()) {
+		case INDEX_STRING: s = std::string(s_val.get<std::string_view>()); break;
+		case INDEX_STRING_VIEW: s = std::string(s_val.get<std::string_view>()); break;
+		default:
+			throw std::runtime_error("bad argument #1 to 'codepoint' (string expected)");
 	}
-	std::string s = std::get<std::string>(s_val);
 
-	LuaValue i_val = (n_args >= 2) ? args[1] : LuaValue(1.0);
-	double i_double = std::holds_alternative<double>(i_val) ? std::get<double>(i_val) : 1.0;
+	double i_double = 1.0;
+	if (n_args >= 2) {
+		switch (args[1].index()) {
+			case INDEX_DOUBLE: i_double = args[1].get<double>(); break;
+			case INDEX_INTEGER: i_double = static_cast<double>(args[1].get<long long>()); break;
+			default: break;
+		}
+	}
 	int i = static_cast<int>(i_double);
 
-	LuaValue j_val = (n_args >= 3) ? args[2] : LuaValue(i_double);
-	double j_double = std::holds_alternative<double>(j_val) ? std::get<double>(j_val) : i_double;
+	double j_double = i_double;
+	if (n_args >= 3) {
+		switch (args[2].index()) {
+			case INDEX_DOUBLE: j_double = args[2].get<double>(); break;
+			case INDEX_INTEGER: j_double = static_cast<double>(args[2].get<long long>()); break;
+			default: break;
+		}
+	}
 	int j = static_cast<int>(j_double);
 	size_t current_byte_offset = 0;
 
@@ -160,20 +178,25 @@ void utf8_codepoint(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 // utf8.codes (iterator for codepoints)
 void utf8_codes_iterator(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue s_val = args[0];
-	if (!std::holds_alternative<std::string>(s_val)) {
-		out.assign({std::monostate{}});
-		return;
+	std::string s;
+	switch (s_val.index()) {
+		case INDEX_STRING: s = std::string(s_val.get<std::string_view>()); break;
+		case INDEX_STRING_VIEW: s = std::string(s_val.get<std::string_view>()); break;
+		default:
+			out.assign({LuaValue()});
+			return;
 	}
-	std::string s = std::get<std::string>(s_val);
 
 	LuaValue offset_val = args[1];
 	size_t offset = 0;
-	if (std::holds_alternative<double>(offset_val)) {
-		offset = static_cast<size_t>(std::get<double>(offset_val));
+	switch (offset_val.index()) {
+		case INDEX_DOUBLE: offset = static_cast<size_t>(offset_val.get<double>()); break;
+		case INDEX_INTEGER: offset = static_cast<size_t>(offset_val.get<long long>()); break;
+		default: break;
 	}
 
 	if (offset >= s.length()) {
-		out.assign({std::monostate{}});
+		out.assign({LuaValue()});
 		return;
 	}
 
@@ -185,14 +208,14 @@ void utf8_codes_iterator(const LuaValue* args, size_t n_args, LuaValueVector& ou
 		return;
 	}
 	else {
-		out.assign({std::monostate{}});
+		out.assign({LuaValue()});
 		return;
 	}
 }
 
 void utf8_codes(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue s_val = args[0];
-	if (!std::holds_alternative<std::string>(s_val)) {
+	if (s_val.index() != INDEX_STRING && s_val.index() != INDEX_STRING_VIEW) {
 		throw std::runtime_error("bad argument #1 to 'codes' (string expected)");
 	}
 	out.assign({LUA_C_FUNC(utf8_codes_iterator), s_val, LuaValue(0.0)});
@@ -202,10 +225,13 @@ void utf8_codes(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 // utf8.len (length of UTF-8 string)
 void utf8_len(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue s_val = args[0];
-	if (!std::holds_alternative<std::string>(s_val)) {
-		throw std::runtime_error("bad argument #1 to 'len' (string expected)");
+	std::string s;
+	switch (s_val.index()) {
+		case INDEX_STRING: s = std::string(s_val.get<std::string_view>()); break;
+		case INDEX_STRING_VIEW: s = std::string(s_val.get<std::string_view>()); break;
+		default:
+			throw std::runtime_error("bad argument #1 to 'len' (string expected)");
 	}
-	std::string s = std::get<std::string>(s_val);
 
 	size_t len = 0;
 	size_t offset = 0;
@@ -224,24 +250,35 @@ void utf8_len(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 // utf8.offset (byte offset of n-th character)
 void utf8_offset(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 	LuaValue s_val = args[0];
-	if (!std::holds_alternative<std::string>(s_val)) {
-		throw std::runtime_error("bad argument #1 to 'offset' (string expected)");
+	std::string s;
+	switch (s_val.index()) {
+		case INDEX_STRING: s = std::string(s_val.get<std::string_view>()); break;
+		case INDEX_STRING_VIEW: s = std::string(s_val.get<std::string_view>()); break;
+		default:
+			throw std::runtime_error("bad argument #1 to 'offset' (string expected)");
 	}
-	std::string s = std::get<std::string>(s_val);
 
-	LuaValue n_val = (n_args >= 2) ? args[1] : LuaValue(std::monostate{});
-	if (!std::holds_alternative<double>(n_val)) {
-		throw std::runtime_error("bad argument #2 to 'offset' (number expected)");
+	LuaValue n_val = (n_args >= 2) ? args[1] : LuaValue();
+	int n = 0;
+	switch (n_val.index()) {
+		case INDEX_DOUBLE: n = static_cast<int>(n_val.get<double>()); break;
+		case INDEX_INTEGER: n = static_cast<int>(n_val.get<long long>()); break;
+		default:
+			throw std::runtime_error("bad argument #2 to 'offset' (number expected)");
 	}
-	int n = static_cast<int>(std::get<double>(n_val));
 
 	// Optional third argument: pos (starting position in bytes)
-	LuaValue pos_val = (n_args >= 3) ? args[2] : LuaValue(std::monostate{});
+	LuaValue pos_val = (n_args >= 3) ? args[2] : LuaValue();
 	size_t byte_offset = 0;
-	if (std::holds_alternative<double>(pos_val)) {
-		byte_offset = static_cast<size_t>(std::get<double>(pos_val)) - 1; // Convert to 0-based
+	switch (pos_val.index()) {
+		case INDEX_DOUBLE: byte_offset = static_cast<size_t>(pos_val.get<double>()) - 1; break;
+		case INDEX_INTEGER: byte_offset = static_cast<size_t>(pos_val.get<long long>()) - 1; break;
+		default: break;
+	}
+
+	if (pos_val.index() != INDEX_NIL) {
 		if (byte_offset >= s.length()) {
-			out.assign({std::monostate{}});
+			out.assign({LuaValue()});
 			return; // pos is out of bounds
 		}
 		// Adjust byte_offset to be the start of a UTF-8 character
@@ -300,15 +337,15 @@ void utf8_offset(const LuaValue* args, size_t n_args, LuaValueVector& out) {
 		}
 	}
 
-	out.assign({std::monostate{}});
+	out.assign({LuaValue()});
 	return; // nil for out of bounds
 }
 
-std::shared_ptr<LuaObject> create_utf8_library() {
-	static std::shared_ptr<LuaObject> utf8_lib;
+LuaObject* create_utf8_library() {
+	static LuaObject* utf8_lib;
 	if (utf8_lib) return utf8_lib;
 
-	utf8_lib = std::make_shared<LuaObject>();
+	utf8_lib = new LuaObject();
 	utf8_lib->set("char", LUA_C_FUNC(utf8_char));
 	utf8_lib->set("charpattern", std::string("[%z\x01-\x7F\xC2-\xF4][\x80-\xBF]*"));
 	utf8_lib->set("codes", LUA_C_FUNC(utf8_codes));

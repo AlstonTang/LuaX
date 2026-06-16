@@ -94,16 +94,7 @@ function Tokenizer.tokenize(parser)
 	local code = parser.code
 	local tokens = parser[1]
 	local len = #code
-	local sub_cache = {}
-	local function cached_sub(s, i, j)
-		if i == j then return s:sub(i, i) end
-		local key = (i * 1000000) + j -- Efficient integer key
-		local res = sub_cache[key]
-		if res then return res end
-		res = s:sub(i, j)
-		sub_cache[key] = res
-		return res
-	end
+
 	
 	local current_pos = parser.position
 	while current_pos <= len do
@@ -141,7 +132,7 @@ function Tokenizer.tokenize(parser)
 							break
 						end
 					end
-					local hex_val_str = cached_sub(code, hex_start_pos, current_pos - 1)
+					local hex_val_str = sub(code, hex_start_pos, current_pos - 1)
 					if #hex_val_str == 0 then
 						error("Malformed hexadecimal number")
 					end
@@ -165,7 +156,7 @@ function Tokenizer.tokenize(parser)
 						break
 					end
 				end
-				local val = cached_sub(code, start_pos, current_pos - 1)
+				local val = sub(code, start_pos, current_pos - 1)
 				if is_float then
 					table.insert(tokens, { "number", val })
 				else
@@ -185,7 +176,7 @@ function Tokenizer.tokenize(parser)
 					break
 				end
 			end
-			local value = cached_sub(code, start_pos, current_pos - 1)
+			local value = sub(code, start_pos, current_pos - 1)
 			if value == "local" then table.insert(tokens, KW_LOCAL)
 			elseif value == "function" then table.insert(tokens, KW_FUNCTION)
 			elseif value == "return" then table.insert(tokens, KW_RETURN)

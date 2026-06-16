@@ -4,6 +4,6 @@
 #include "lua_object.hpp"
 #include <memory>
 
-std::shared_ptr<LuaObject> create_debug_library();
+LuaObject* create_debug_library();
 
 #endif // DEBUG_HPP
